@@ -28,7 +28,15 @@ class CommandManager:
         chat_type: str = "all",
         plugin=None,
     ):
-        command = Command(
+        if name in self.commands:
+            owner = self.commands[name].plugin
+            owner_name = owner.name if owner else "نامشخص"
+            print(
+                f"⚠️ کامند '{name}' قبلاً توسط پلاگین '{owner_name}' ثبت شده "
+                f"بود و حالا بازنویسی می‌شه."
+            )
+
+        self.commands[name] = Command(
             name=name,
             handler=handler,
             permission=permission,
@@ -36,11 +44,8 @@ class CommandManager:
             plugin=plugin,
         )
 
-        self.commands[name] = command
-
     def get_command(self, name: str):
         return self.commands.get(name)
-
 
     def remove_command(self, name: str):
         self.commands.pop(name, None)
@@ -66,7 +71,8 @@ class CommandManager:
             if not text or not text.startswith(self.prefix):
                 return
 
-            parts = text[len(self.prefix):].split()
+            body = text[len(self.prefix):]
+            parts = body.split(maxsplit=1)
             if not parts:
                 return
 
@@ -87,6 +93,12 @@ class CommandManager:
 
                 if not await is_chat_admin(client, chat, sender_id):
                     return
+
+            # آرگومان‌های بعد از نام کامند رو هم به‌صورت متن خام هم لیست
+            # روی خود event می‌ذاریم تا هندلرها مجبور نباشن دستی prefix/نام
+            # کامند رو از متن جدا کنن.
+            event.args_text = parts[1].strip() if len(parts) > 1 else ""
+            event.args = event.args_text.split() if event.args_text else []
 
             try:
                 await command.handler(event)

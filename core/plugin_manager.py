@@ -115,10 +115,7 @@ class PluginManager:
         if plugin.enabled:
             return True
         try:
-            result = plugin.on_enable()
-            if inspect.isawaitable(result):
-                await result
-            plugin.enabled = True
+            await plugin.enable()
             print(f"✅ پلاگین '{name}' فعال شد.")
             return True
         except Exception as e:
@@ -133,12 +130,7 @@ class PluginManager:
         if not plugin.enabled:
             return True
         try:
-            result = plugin.on_disable()
-            if inspect.isawaitable(result):
-                await result
-            await plugin.cleanup()
-            self.command_manager.remove_plugin_commands(plugin)
-            plugin.enabled = False
+            await plugin.disable()
             print(f"🛑 پلاگین '{name}' غیرفعال شد.")
             return True
         except Exception as e:

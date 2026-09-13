@@ -1,30 +1,44 @@
-async def filter_command(plugin, event):
-    text = event.raw_text.strip()
+from splusthon import events
 
-    word = text[len("!فیلتر "):].strip()
+from core.decorators import command, on_event
 
+
+@command(name="فیلتر", permission="admin", chat_type="group")
+async def add_word(self, event):
+    word = event.args_text
     if not word:
+        await event.reply("مثال: !فیلتر کلمه")
         return
 
-    group_id = event.chat_id
-
-    await plugin.word_filter.add(group_id, word)
-
+    await self.words.add(event.chat_id, word)
     await event.reply(f"کلمه «{word}» به لیست فیلتر این گروه اضافه شد.")
 
 
-async def filter_message(plugin, event):
-    group_id = event.chat_id
+@command(name="حذففیلتر", permission="admin", chat_type="group")
+async def remove_word(self, event):
+    word = event.args_text
+    if not word:
+        await event.reply("مثال: !حذففیلتر کلمه")
+        return
 
-    if await plugin.word_filter.contains(group_id, event.raw_text):
+    await self.words.remove(event.chat_id, word)
+    await event.reply(f"کلمه «{word}» از لیست فیلتر این گروه حذف شد.")
+
+
+@command(name="ب", permission="admin", chat_type="group")
+async def list_words(self, event):
+    words = await self.words.get_all(event.chat_id)
+    if not words:
+        await event.reply("لیست فیلتر این گروه خالیه.")
+        return
+
+    await event.reply("کلمات فیلترشده:\n" + "\n".join(sorted(words)))
+
+
+@on_event(events.NewMessage(incoming=True))
+async def on_message(self, event):
+    if not event.is_group:
+        return
+
+    if await self.words.contains(event.chat_id, event.raw_text or ""):
         await event.delete()
-
-
-async def filter_list_command(plugin, event):
-    
-    group_id = event.chat_id
-
-
-    a=await plugin.word_filter.get_all(group_id)
-    
-    await event.reply(str(a))
