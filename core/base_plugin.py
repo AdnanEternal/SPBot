@@ -1,4 +1,7 @@
 import inspect
+from typing import Any, Callable, Optional
+
+from splusthon import SoroushClient
 
 from config import config
 from core.command_manager import CommandManager
@@ -31,35 +34,35 @@ class BasePlugin:
        هندلرهای پویا/شرطی داری که از قبل به شکل متد کلاس قابل تعریف نیستن.
     """
 
-    name = None
-    version = "1.0.0"
+    name: Optional[str] = None
+    version: str = "1.0.0"
 
     def __init__(
         self,
-        client,
+        client: SoroushClient,
         command_manager: CommandManager,
         db: DatabaseManager,
-    ):
+    ) -> None:
         self.client = client
         self.command_manager = command_manager
         self.db = db
-        self.enabled = False
+        self.enabled: bool = False
         self.config = config
-        self._event_handlers = []
+        self._event_handlers: list[tuple[Callable, Any]] = []
 
-    def listen(self, event_type):
+    def listen(self, event_type: Any) -> Callable[[Callable], Callable]:
         """
         دکوریتور برای ثبت دستیِ هندلر رویداد (مثلاً داخل on_enable).
         """
 
-        def decorator(func):
+        def decorator(func: Callable) -> Callable:
             self.client.add_event_handler(func, event_type)
             self._event_handlers.append((func, event_type))
             return func
 
         return decorator
 
-    def _register_decorated(self):
+    def _register_decorated(self) -> None:
         """
         متدهایی که با @command یا @on_event علامت خوردن رو پیدا می‌کنه و
         خودش ثبتشون می‌کنه.
@@ -72,6 +75,7 @@ class BasePlugin:
                     handler=member,
                     permission=command_info["permission"],
                     chat_type=command_info["chat_type"],
+                    description=command_info.get("description", ""),
                     plugin=self,
                 )
 
@@ -80,7 +84,7 @@ class BasePlugin:
                 self.client.add_event_handler(member, event_type)
                 self._event_handlers.append((member, event_type))
 
-    async def enable(self):
+    async def enable(self) -> None:
         """
         توسط PluginManager صدا زده می‌شه. خودت لازم نیست مستقیم صداش بزنی.
         """
@@ -90,7 +94,7 @@ class BasePlugin:
             await result
         self.enabled = True
 
-    async def disable(self):
+    async def disable(self) -> None:
         """
         توسط PluginManager صدا زده می‌شه. خودت لازم نیست مستقیم صداش بزنی.
         """
@@ -100,7 +104,7 @@ class BasePlugin:
         await self.cleanup()
         self.enabled = False
 
-    async def cleanup(self):
+    async def cleanup(self) -> None:
         """
         همه‌ی هندلرهای رویداد (چه دکوریتوری چه دستی) و همه‌ی کامندهای
         ثبت‌شده‌ی این پلاگین رو پاک می‌کنه.
@@ -110,18 +114,18 @@ class BasePlugin:
         self._event_handlers.clear()
         self.command_manager.remove_plugin_commands(self)
 
-    async def on_load(self):
+    async def on_load(self) -> None:
         """
         فقط یک‌بار موقع discover_plugins صدا زده می‌شه.
         جای مناسب برای CREATE TABLE IF NOT EXISTS.
         """
         pass
 
-    async def on_enable(self):
+    async def on_enable(self) -> None:
         pass
 
-    async def on_disable(self):
+    async def on_disable(self) -> None:
         pass
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Plugin {self.name} v{self.version}>"

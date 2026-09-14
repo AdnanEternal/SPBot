@@ -8,35 +8,51 @@ command_manager یا روی client) توسط BasePlugin._register_decorated مو
 add_command نیست.
 """
 
+from typing import Any, Callable, TypeVar
 
-def command(name: str, permission: str = "everyone", chat_type: str = "all"):
+F = TypeVar("F", bound=Callable[..., Any])
+
+
+def command(
+    name: str,
+    permission: str = "everyone",
+    chat_type: str = "all",
+    description: str = "",
+) -> Callable[[F], F]:
     """
     متد رو به‌عنوان هندلر یک کامند علامت‌گذاری می‌کنه.
 
     مثال:
         class MyPlugin(BasePlugin):
-            @command(name="پینگ")
+            @command(name="پینگ", description="سلامت ربات رو چک می‌کنه.")
             async def ping(self, event):
                 await event.reply("pong")
 
     داخل event.args_text متن بعد از نام کامند (خام) و داخل event.args
     همون متن split‌شده به لیست در دسترسه.
+
+    description اختیاریه و برای خود کامند هیچ اثری نداره؛ فقط از طریق
+    command_manager.get_all_commands() در دسترس بقیه‌ی پلاگین‌هاست (مثلاً
+    یه پلاگین «راهنما» که می‌خواد لیست همه‌ی کامندها رو با توضیح نشون بده).
     """
 
-    def decorator(func):
+    def decorator(func: F) -> F:
         func._command_info = {
             "name": name,
             "permission": permission,
             "chat_type": chat_type,
+            "description": description,
         }
         return func
 
     return decorator
 
 
-def on_event(event_type):
+def on_event(event_type: Any) -> Callable[[F], F]:
     """
     متد رو به‌عنوان هندلر یک event (مثل events.NewMessage) علامت‌گذاری می‌کنه.
+    event_type نوعش رو Any گذاشتم چون به builder داخلی splusthon بستگی
+    داره (events.NewMessage(...)، events.CallbackQuery(...) و ...).
 
     مثال:
         class MyPlugin(BasePlugin):
@@ -45,7 +61,7 @@ def on_event(event_type):
                 ...
     """
 
-    def decorator(func):
+    def decorator(func: F) -> F:
         func._event_type = event_type
         return func
 
