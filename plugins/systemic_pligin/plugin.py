@@ -19,6 +19,6 @@ class SystemPlugin(BasePlugin):
     """
 
     name = "System"
-    version = "1.0.0"
+    version = "1.1.0"
 
     show_help = handlers.show_help

@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     name="فیلتر",
     permission="admin",
     chat_type="group",
-    description="یک کلمه رو به لیست فیلتر این گروه اضافه می‌کنه.",
+    description="➕یک کلمه رو به لیست فیلتر این گروه اضافه می‌کنه.",
 )
 async def add_word(self: "ContentFilterPlugin", event: events.NewMessage.Event) -> None:
     word = event.args_text
@@ -30,7 +30,7 @@ async def add_word(self: "ContentFilterPlugin", event: events.NewMessage.Event) 
     name="حذف فیلتر",
     permission="admin",
     chat_type="group",
-    description="یک کلمه رو از لیست فیلتر این گروه حذف می‌کنه.",
+    description="➖یک کلمه رو از لیست فیلتر این گروه حذف می‌کنه.",
 )
 async def remove_word(self: "ContentFilterPlugin", event: events.NewMessage.Event) -> None:
     word = event.args_text
@@ -46,7 +46,7 @@ async def remove_word(self: "ContentFilterPlugin", event: events.NewMessage.Even
     name="لیست فیلتر کلمات",
     permission="admin",
     chat_type="group",
-    description="لیست کلمات فیلترشده‌ی این گروه رو نشون می‌ده.",
+    description="📋لیست کلمات فیلترشده‌ی این گروه رو نشون می‌ده.",
 )
 async def list_words(self: "ContentFilterPlugin", event: events.NewMessage.Event) -> None:
     words = await self.words.get_all(event.chat_id)

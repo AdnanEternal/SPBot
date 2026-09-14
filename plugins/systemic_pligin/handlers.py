@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     name="راهنما",
     permission="everyone",
     chat_type="all",
-    description="لیست همه‌ی کامندهای ربات رو نشون می‌ده.",
+    description="❓لیست همه‌ی کامندهای ربات رو نشون می‌ده.",
 )
 async def show_help(self: "SystemPlugin", event: events.NewMessage.Event) -> None:
     # get_all_commands() یه متد عمومی روی command_manager (زیرساخت core)ه؛
@@ -25,8 +25,8 @@ async def show_help(self: "SystemPlugin", event: events.NewMessage.Event) -> Non
         return
 
     lines = [
-        f"!{cmd.name} — {cmd.description or 'بدون توضیح'}"
+        f"`!{cmd.name}`:\n{cmd.description or 'بدون توضیح'}\n"
         for cmd in commands
     ]
 
-    await event.reply("لیست کامندها:\n" + "\n".join(lines))
+    await event.reply("📖لیست کامندها:\n" + "\n".join(lines))
