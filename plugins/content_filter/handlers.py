@@ -43,7 +43,7 @@ async def remove_word(self: "ContentFilterPlugin", event: events.NewMessage.Even
 
 
 @command(
-    name="ب",
+    name="لیست فیلتر",
     permission="admin",
     chat_type="group",
     description="لیست کلمات فیلترشده‌ی این گروه رو نشون می‌ده.",
