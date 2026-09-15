@@ -37,9 +37,14 @@ async def remove_word(self: "ContentFilterPlugin", event: events.NewMessage.Even
     if not word:
         await event.reply("مثال: !حذف فیلتر کلمه")
         return
+    removed = await self.words.remove(event.chat_id, word)
 
-    await self.words.remove(event.chat_id, word)
-    await event.reply(f"کلمه «{word}» از لیست فیلتر این گروه حذف شد.")
+    if removed:
+        response_text = f"کلمه «{word}» از لیست فیلتر حذف شد."
+    else:
+        response_text = f"کلمه «{word}» در لیست فیلتر وجود نداشت."
+
+    await event.reply(response_text)
 
 
 @command(

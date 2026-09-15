@@ -32,7 +32,8 @@ class WordFilterStore:
 
     async def remove(self, group_id: int, word: str):
         word = word.lower().strip()
-        await self.db.delete(self.TABLE, {"group_id": group_id, "word": word})
+        cursor = await self.db.delete(self.TABLE, {"group_id": group_id, "word": word})
+        return cursor.rowcount > 0
 
     async def contains(self, group_id: int, text: str) -> bool:
         words = await self.get_all(group_id)
