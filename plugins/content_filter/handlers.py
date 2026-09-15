@@ -70,7 +70,8 @@ async def on_message(self: "ContentFilterPlugin", event: events.NewMessage.Event
         # رخ داد. اگه violation_manager نصب/فعال نباشه، این خط کاملاً
         # بی‌اثره و خطایی نمی‌ده.
         await self.event_bus.emit(
-            "violation",
+            event_name="violation",
+            event=event,
             group_id=event.chat_id,
             user_id=event.sender_id,
             reason="استفاده از کلمه‌ی فیلترشده",

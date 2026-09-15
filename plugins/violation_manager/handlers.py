@@ -170,6 +170,7 @@ async def on_reply_shortcut(self: "ViolationManagerPlugin", event: events.NewMes
 @on_bus_event("violation")
 async def on_violation(
     self: "ViolationManagerPlugin",
+    event,
     group_id: int,
     user_id: int,
     reason: str,
@@ -184,8 +185,14 @@ async def on_violation(
     """
     await self.violations.add(group_id, user_id, reason)
     count = await self.violations.get_count(group_id, user_id)
-
     settings = await self.settings.get(group_id)
+
+    await event.reply(
+        f"""
+        ⚠️{event.sender.username or event.sender.first_name} مرتکب تخلف شد\nتعداد تخلفات: {count} تخلف!\nسقف مجاز تخلف:{settings["max_violations"]}
+        """
+    )
+
     if count < settings["max_violations"]:
         return
 
