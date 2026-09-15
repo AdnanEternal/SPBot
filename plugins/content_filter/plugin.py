@@ -17,10 +17,10 @@ class ContentFilterPlugin(BasePlugin):
     """
 
     name = "Content Filter"
-    version = "2.3.0"
+    version = "2.4.0"
 
-    def __init__(self, client, command_manager, db):
-        super().__init__(client, command_manager, db)
+    def __init__(self, client, command_manager, db, event_bus):
+        super().__init__(client, command_manager, db, event_bus)
         self.words = WordFilterStore(self.db)
 
     async def on_load(self):

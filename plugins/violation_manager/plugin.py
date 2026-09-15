@@ -1,24 +1,38 @@
 from . import handlers
-from .store import ViolationStore
+from .store import GroupSettingsStore, ViolationStore
+
 from core.base_plugin import BasePlugin
 
 
 class ViolationManagerPlugin(BasePlugin):
+    """
+    ثبت تخلف کاربران به‌ازای هر گروه، تنظیمات سقف تخلف/نوع مجازات هر
+    گروه، و اجرای خودِ مجازات (میوت یا بن).
+
+    پلاگین‌های دیگه (مثل content_filter) یه تخلف رو با emit کردن رویداد
+    "violation" رو event_bus گزارش می‌کنن؛ این پلاگین هیچ وابستگی
+    مستقیمی بهشون نداره — اگه content_filter نصب نباشه، این پلاگین بدون
+    مشکل کار می‌کنه، فقط دیگه تخلفی از اون مسیر گزارش نمی‌شه.
+    """
 
     name = "Violation Manager"
-    version = "0.9.0"
+    version = "1.0.0"
 
-    def __init__(self, client, command_manager, db):
-        super().__init__(client, command_manager, db)
+    def __init__(self, client, command_manager, db, event_bus):
+        super().__init__(client, command_manager, db, event_bus)
         self.violations = ViolationStore(self.db)
+        self.settings = GroupSettingsStore(self.db)
+
     async def on_load(self):
         await self.violations.create_table()
-
-    async def on_enable(self):
-        pass
-
-    async def on_disable(self):
-        pass
-
+        await self.settings.create_table()
 
     list_violators = handlers.list_violators
+    set_max_violations = handlers.set_max_violations
+    set_punishment_mute = handlers.set_punishment_mute
+    set_punishment_ban = handlers.set_punishment_ban
+    my_record = handlers.my_record
+    mute_command = handlers.mute_command
+    unmute_command = handlers.unmute_command
+    on_reply_shortcut = handlers.on_reply_shortcut
+    on_violation = handlers.on_violation

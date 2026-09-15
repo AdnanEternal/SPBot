@@ -1,21 +1,26 @@
 import importlib
 import inspect
 from pathlib import Path
+from typing import Optional, Type, ValuesView
+
+from splusthon import SoroushClient
 
 from core.base_plugin import BasePlugin
 from core.command_manager import CommandManager
 from core.database_manager import DatabaseManager
+from core.event_bus import EventBus
 
 
 class PluginManager:
-    def __init__(self, client):
+    def __init__(self, client: SoroushClient) -> None:
         self.client = client
         self.command_manager = CommandManager()
         self.command_manager.register_dispatcher(client)
         self.db = DatabaseManager()
-        self.plugins = {}
+        self.event_bus = EventBus()
+        self.plugins: dict[str, BasePlugin] = {}
 
-    def discover_plugins(self, plugins_dir="plugins"):
+    def discover_plugins(self, plugins_dir: str = "plugins") -> None:
         plugins_path = Path(plugins_dir)
 
         if not plugins_path.exists():
@@ -46,6 +51,7 @@ class PluginManager:
                     client=self.client,
                     command_manager=self.command_manager,
                     db=self.db,
+                    event_bus=self.event_bus,
                 )
 
                 plugin_name = plugin_instance.name or plugin_folder.name
@@ -61,7 +67,7 @@ class PluginManager:
             except Exception as e:
                 print(f"❌ خطا در ساخت پلاگین '{plugin_folder.name}': {e}")
 
-    def _find_plugin_class(self, plugin_folder: Path):
+    def _find_plugin_class(self, plugin_folder: Path) -> Optional[Type[BasePlugin]]:
         package_name = f"plugins.{plugin_folder.name}"
         plugin_module_name = f"{package_name}.plugin"
 
@@ -88,7 +94,7 @@ class PluginManager:
 
         return plugin_classes[0]
 
-    async def load_all_plugins(self, plugins_dir="plugins"):
+    async def load_all_plugins(self, plugins_dir: str = "plugins") -> None:
         await self.db.connect()
 
         self.discover_plugins(plugins_dir)
@@ -101,13 +107,13 @@ class PluginManager:
 
         print(f"📦 تعداد پلاگین‌های بارگذاری‌شده: {len(self.plugins)}")
 
-    def get_plugin(self, name):
+    def get_plugin(self, name: str) -> Optional[BasePlugin]:
         return self.plugins.get(name)
 
-    def get_all_plugins(self):
+    def get_all_plugins(self) -> ValuesView[BasePlugin]:
         return self.plugins.values()
 
-    async def enable_plugin(self, name):
+    async def enable_plugin(self, name: str) -> bool:
         plugin = self.get_plugin(name)
         if plugin is None:
             print(f"⚠️ پلاگین '{name}' پیدا نشد.")
@@ -122,7 +128,7 @@ class PluginManager:
             print(f"❌ خطا در فعال‌سازی پلاگین '{name}': {e}")
             return False
 
-    async def disable_plugin(self, name):
+    async def disable_plugin(self, name: str) -> bool:
         plugin = self.get_plugin(name)
         if plugin is None:
             print(f"⚠️ پلاگین '{name}' پیدا نشد.")
@@ -137,10 +143,10 @@ class PluginManager:
             print(f"❌ خطا در غیرفعال‌سازی پلاگین '{name}': {e}")
             return False
 
-    async def enable_all_plugins(self):
+    async def enable_all_plugins(self) -> None:
         for name in self.plugins:
             await self.enable_plugin(name)
 
-    async def disable_all_plugins(self):
+    async def disable_all_plugins(self) -> None:
         for name in list(self.plugins.keys()):
             await self.disable_plugin(name)

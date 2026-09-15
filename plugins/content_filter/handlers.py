@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     name="فیلتر",
     permission="admin",
     chat_type="group",
-    description="➕یک کلمه رو به لیست فیلتر این گروه اضافه می‌کنه.",
+    description="یک کلمه رو به لیست فیلتر این گروه اضافه می‌کنه.",
 )
 async def add_word(self: "ContentFilterPlugin", event: events.NewMessage.Event) -> None:
     word = event.args_text
@@ -30,28 +30,23 @@ async def add_word(self: "ContentFilterPlugin", event: events.NewMessage.Event) 
     name="حذف فیلتر",
     permission="admin",
     chat_type="group",
-    description="➖یک کلمه رو از لیست فیلتر این گروه حذف می‌کنه.",
+    description="یک کلمه رو از لیست فیلتر این گروه حذف می‌کنه.",
 )
 async def remove_word(self: "ContentFilterPlugin", event: events.NewMessage.Event) -> None:
     word = event.args_text
     if not word:
         await event.reply("مثال: !حذف فیلتر کلمه")
         return
-    removed = await self.words.remove(event.chat_id, word)
 
-    if removed:
-        response_text = f"کلمه «{word}» از لیست فیلتر حذف شد."
-    else:
-        response_text = f"کلمه «{word}» در لیست فیلتر وجود نداشت."
-
-    await event.reply(response_text)
+    await self.words.remove(event.chat_id, word)
+    await event.reply(f"کلمه «{word}» از لیست فیلتر این گروه حذف شد.")
 
 
 @command(
-    name="لیست فیلتر کلمات",
+    name="ب",
     permission="admin",
     chat_type="group",
-    description="📋لیست کلمات فیلترشده‌ی این گروه رو نشون می‌ده.",
+    description="لیست کلمات فیلترشده‌ی این گروه رو نشون می‌ده.",
 )
 async def list_words(self: "ContentFilterPlugin", event: events.NewMessage.Event) -> None:
     words = await self.words.get_all(event.chat_id)
@@ -69,3 +64,14 @@ async def on_message(self: "ContentFilterPlugin", event: events.NewMessage.Event
 
     if await self.words.contains(event.chat_id, event.raw_text or ""):
         await event.delete()
+
+        # به‌جای اینکه مستقیماً بریم سراغ violation_manager (که یعنی
+        # بهش وابسته بشیم)، فقط رو event_bus اعلام می‌کنیم که یه تخلف
+        # رخ داد. اگه violation_manager نصب/فعال نباشه، این خط کاملاً
+        # بی‌اثره و خطایی نمی‌ده.
+        await self.event_bus.emit(
+            "violation",
+            group_id=event.chat_id,
+            user_id=event.sender_id,
+            reason="استفاده از کلمه‌ی فیلترشده",
+        )
