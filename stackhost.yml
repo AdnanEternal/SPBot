@@ -11,7 +11,7 @@ runtime:
   image: "python:3.11-slim" # e.g., python:3.11-slim or node:22
 
 commands:
-  package: string # apt packages, space-separated (must be approved)
+  package: "" # apt packages, space-separated (must be approved)
   build:
     - "pip install -r requirements.txt"
   start: "python main.py" # e.g., "python3 bot.py"
