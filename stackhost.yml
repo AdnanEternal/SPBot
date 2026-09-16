@@ -1,0 +1,23 @@
+# StackHost configuration file
+
+# Version: 2.0.0
+
+user:
+  name: "AdnanEternal"
+  github: "AdnanEternal"
+
+runtime:
+  # Supported runtimes: python, node, go, rust, ruby, java, php, dotnet, elixir, perl, swift
+  image: "python:3.11-slim" # e.g., python:3.11-slim or node:22
+
+commands:
+  package: string # apt packages, space-separated (must be approved)
+  build:
+    - "pip install -r requirements.txt"
+  start: "python main.py" # e.g., "python3 bot.py"
+
+repository:
+  branch: "main"
+  auto_deploy: false
+
+env:
