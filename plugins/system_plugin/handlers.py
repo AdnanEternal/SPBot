@@ -42,8 +42,8 @@ async def show_help(self: "SystemPlugin", event: events.NewMessage.Event) -> Non
 
 @command(
     name="گیتهاب چک",
-    permission="everyone",
-    chat_type="all",
+    permission="admin",
+    chat_type="group",
     description="🔗 اتصال ربات به مخزن GitHub را بررسی می‌کند.",
 )
 async def github_check(
@@ -63,7 +63,7 @@ async def github_check(
 
 @command(
     name="دیتابیس بکاپ",
-    permission="everyone",
+    permission="admin",
     chat_type="all",
     description="💾 یک نسخه از دیتابیس را در GitHub ذخیره می‌کند.",
 )
@@ -85,3 +85,35 @@ async def database_backup(
         return
 
     await event.reply("✅ بکاپ دیتابیس با موفقیت در GitHub ذخیره شد.")
+
+
+
+@command(
+    name="دیتابیس بازیابی",
+    permission="everyone",
+    chat_type="all",
+    description="♻️ دیتابیس را از آخرین بکاپ GitHub بازیابی می‌کند.",
+)
+async def database_restore(
+    self: "SystemPlugin",
+    event: events.NewMessage.Event,
+) -> None:
+    try:
+        github = GitHubManager()
+
+        backup = DatabaseBackupManager(
+            db=self.db,
+            github=github,
+        )
+
+        await backup.restore_backup()
+
+    except Exception as e:
+        await event.reply(
+            f"❌ بازیابی دیتابیس ناموفق بود.\n`{e}`"
+        )
+        return
+
+    await event.reply(
+        "✅ دیتابیس با موفقیت از آخرین بکاپ GitHub بازیابی شد."
+    )

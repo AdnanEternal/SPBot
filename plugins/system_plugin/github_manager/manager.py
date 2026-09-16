@@ -34,6 +34,7 @@ class GitHubManager:
                     return True
 
                 text = await response.text()
+
                 raise RuntimeError(
                     f"GitHub connection failed: "
                     f"{response.status} - {text}"
@@ -56,7 +57,6 @@ class GitHubManager:
         async with aiohttp.ClientSession(headers=self.headers) as session:
             sha = None
 
-            # ببینیم فایل از قبل وجود دارد یا نه
             async with session.get(
                 url,
                 params={"ref": self.branch},
@@ -68,6 +68,7 @@ class GitHubManager:
 
                 elif response.status != 404:
                     text = await response.text()
+
                     raise RuntimeError(
                         f"Failed to check remote file: "
                         f"{response.status} - {text}"
@@ -82,10 +83,65 @@ class GitHubManager:
             if sha:
                 payload["sha"] = sha
 
-            async with session.put(url, json=payload) as response:
+            async with session.put(
+                url,
+                json=payload,
+            ) as response:
+
                 if response.status not in (200, 201):
                     text = await response.text()
+
                     raise RuntimeError(
                         f"GitHub upload failed: "
                         f"{response.status} - {text}"
                     )
+
+    async def download_file(
+        self,
+        remote_path: str,
+        local_path: str,
+    ) -> None:
+        url = (
+            f"{self.BASE_URL}/repos/"
+            f"{self.repository}/contents/{remote_path}"
+        )
+
+        async with aiohttp.ClientSession(headers=self.headers) as session:
+            async with session.get(
+                url,
+                params={"ref": self.branch},
+            ) as response:
+
+                if response.status != 200:
+                    text = await response.text()
+
+                    raise RuntimeError(
+                        f"GitHub download failed: "
+                        f"{response.status} - {text}"
+                    )
+
+                data = await response.json()
+
+        if data.get("encoding") != "base64":
+            raise RuntimeError(
+                "GitHub returned an unsupported file encoding"
+            )
+
+        content = data.get("content")
+
+        if not content:
+            raise RuntimeError(
+                "GitHub returned an empty file"
+            )
+
+        content = content.replace("\n", "")
+
+        try:
+            decoded = base64.b64decode(content)
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to decode GitHub file: {e}"
+            ) from e
+
+        with open(local_path, "wb") as file:
+            file.write(decoded)
