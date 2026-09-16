@@ -92,6 +92,7 @@ async def _flag(self: "SpamFilterPlugin", event: events.NewMessage.Event, reason
 
     await self.event_bus.emit(
         "violation",
+        event=event,
         group_id=event.chat_id,
         user_id=event.sender_id,
         reason=f"اسپم: {reason}",
@@ -112,6 +113,7 @@ async def _flag_flood(self: "SpamFilterPlugin", event: events.NewMessage.Event, 
 
     await self.event_bus.emit(
         "violation",
+        event=event,
         group_id=event.chat_id,
         user_id=event.sender_id,
         reason=f"اسپم: ارسال بیش از حد پیام در {window_seconds} ثانیه (فلاد)",
