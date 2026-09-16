@@ -193,7 +193,7 @@ async def on_violation(
         """
     )
 
-    if count < settings["max_violations"]:
+    if count <= settings["max_violations"]:
         return
 
     if settings["punishment_type"] == "ban":
