@@ -4,8 +4,8 @@ from splusthon import events
 
 from core.decorators import command
 
-from .github_manager.manager import GitHubManager
 from .backup.backup import DatabaseBackupManager
+from .github_manager.manager import GitHubManager
 
 if TYPE_CHECKING:
     from .plugin import SystemPlugin

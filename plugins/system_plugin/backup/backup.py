@@ -4,7 +4,7 @@ import tempfile
 
 from config import config
 from core.database_manager import DatabaseManager
-from system_plugin.github_manager.manager import GitHubManager
+from ..github_manager.manager import GitHubManager
 
 
 class DatabaseBackupManager:
