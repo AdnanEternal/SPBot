@@ -25,6 +25,44 @@ class GitHubManager:
             "X-GitHub-Api-Version": "2022-11-28",
         }
 
+
+    async def download_directory(
+        self,
+        remote_path: str,
+        local_path: str,
+    ) -> None:
+        from pathlib import Path
+
+        local_dir = Path(local_path)
+        local_dir.mkdir(parents=True, exist_ok=True)
+
+        entries = await self.list_directory(remote_path)
+
+        for entry in entries:
+            name = entry.get("name")
+            entry_type = entry.get("type")
+
+            if not name:
+                continue
+
+            child_remote_path = (
+                f"{remote_path.rstrip('/')}/{name}"
+            )
+
+            child_local_path = local_dir / name
+
+            if entry_type == "dir":
+                await self.download_directory(
+                    child_remote_path,
+                    str(child_local_path),
+                )
+
+            elif entry_type == "file":
+                await self.download_file(
+                    remote_path=child_remote_path,
+                    local_path=str(child_local_path),
+                )
+
     async def check_connection(self) -> bool:
         url = f"{self.BASE_URL}/repos/{self.repository}"
 

@@ -292,3 +292,94 @@ async def list_plugins(
         "📦 پلاگین‌های نصب‌شده:\n\n" +
         "\n".join(lines)
     )
+
+
+
+@command(
+    name="پلاگین دریافت",
+    permission="owner",
+    chat_type="all",
+    description="📥 یک پلاگین را از GitHub دریافت و در runtime فعال می‌کند.",
+)
+async def plugin_install(
+    self: "SystemPlugin",
+    event: events.NewMessage.Event,
+) -> None:
+    if not event.args:
+        await event.reply(
+            "❌ شناسه‌ی پلاگین را وارد کن.\n"
+            "مثال:\n"
+            "`!پلاگین دریافت message_manager`"
+        )
+        return
+
+    plugin_id = event.args[0]
+
+    try:
+        github = GitHubManager()
+
+        updater = PluginUpdateManager(
+            plugin_manager=self.plugin_manager,
+            github=github,
+        )
+
+        plugin = await updater.install(
+            plugin_id
+        )
+
+    except Exception as e:
+        await event.reply(
+            f"❌ دریافت پلاگین ناموفق بود.\n`{e}`"
+        )
+        return
+
+    await event.reply(
+        f"✅ پلاگین «{plugin.name}» "
+        f"v{plugin.version} "
+        f"در runtime نصب و فعال شد."
+    )
+
+
+@command(
+    name="پلاگین آپدیت",
+    permission="owner",
+    chat_type="all",
+    description="🔄 یک پلاگین را در runtime به‌روزرسانی می‌کند.",
+)
+async def plugin_update(
+    self: "SystemPlugin",
+    event: events.NewMessage.Event,
+) -> None:
+    if not event.args:
+        await event.reply(
+            "❌ شناسه‌ی پلاگین را وارد کن.\n"
+            "مثال:\n"
+            "`!پلاگین آپدیت violation_manager`"
+        )
+        return
+
+    plugin_id = event.args[0]
+
+    try:
+        github = GitHubManager()
+
+        updater = PluginUpdateManager(
+            plugin_manager=self.plugin_manager,
+            github=github,
+        )
+
+        plugin = await updater.update(
+            plugin_id
+        )
+
+    except Exception as e:
+        await event.reply(
+            f"❌ بروزرسانی پلاگین ناموفق بود.\n`{e}`"
+        )
+        return
+
+    await event.reply(
+        f"✅ پلاگین «{plugin.name}» "
+        f"به v{plugin.version} "
+        f"در runtime بروزرسانی شد."
+    )

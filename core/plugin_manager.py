@@ -2,6 +2,7 @@ import importlib
 import inspect
 from pathlib import Path
 from typing import Optional, Type, ValuesView
+import sys
 
 from splusthon import SoroushClient
 
@@ -113,6 +114,154 @@ class PluginManager:
 
     def get_all_plugins(self) -> ValuesView[BasePlugin]:
         return self.plugins.values()
+
+
+    @staticmethod
+    def _get_plugin_id(plugin: BasePlugin) -> str:
+        module_name = plugin.__class__.__module__
+        parts = module_name.split(".")
+
+        if (
+            len(parts) >= 3
+            and parts[0] == "plugins"
+        ):
+            return parts[1]
+
+        raise ValueError(
+            f"نتوانستم شناسه‌ی پلاگین "
+            f"'{plugin.name}' را پیدا کنم."
+        )
+
+    def _remove_plugin_modules(
+        self,
+        plugin_id: str,
+    ) -> None:
+        package_name = f"plugins.{plugin_id}"
+
+        modules_to_remove = [
+            module_name
+            for module_name in sys.modules
+            if (
+                module_name == package_name
+                or module_name.startswith(package_name + ".")
+            )
+        ]
+
+        for module_name in modules_to_remove:
+            del sys.modules[module_name]
+
+        importlib.invalidate_caches()
+
+    def get_plugin_by_id(
+        self,
+        plugin_id: str,
+    ) -> Optional[BasePlugin]:
+        for plugin in self.plugins.values():
+            try:
+                current_id = self._get_plugin_id(plugin)
+            except ValueError:
+                continue
+
+            if current_id == plugin_id:
+                return plugin
+
+        return None
+
+    async def unload_plugin(
+        self,
+        plugin_id: str,
+    ) -> bool:
+        plugin = self.get_plugin_by_id(plugin_id)
+
+        if plugin is None:
+            return False
+
+        try:
+            if plugin.enabled:
+                await plugin.disable()
+            else:
+                await plugin.cleanup()
+        finally:
+            self.plugins.pop(plugin.name, None)
+            self._remove_plugin_modules(plugin_id)
+
+        return True
+
+    async def load_plugin(
+        self,
+        plugin_id: str,
+        plugins_dir: str = "plugins",
+        enable: bool = True,
+    ) -> BasePlugin:
+        plugin_folder = Path(plugins_dir) / plugin_id
+
+        if not plugin_folder.is_dir():
+            raise FileNotFoundError(
+                f"پوشه‌ی پلاگین '{plugin_id}' پیدا نشد."
+            )
+
+        plugin_file = plugin_folder / "plugin.py"
+
+        if not plugin_file.exists():
+            raise FileNotFoundError(
+                f"فایل plugin.py برای '{plugin_id}' پیدا نشد."
+            )
+
+        importlib.invalidate_caches()
+
+        plugin_class = self._find_plugin_class(plugin_folder)
+
+        if plugin_class is None:
+            raise RuntimeError(
+                f"کلاس پلاگین '{plugin_id}' پیدا نشد."
+            )
+
+        plugin_instance = plugin_class(
+            client=self.client,
+            command_manager=self.command_manager,
+            db=self.db,
+            event_bus=self.event_bus,
+        )
+
+        plugin_instance.plugin_manager = self
+
+        plugin_name = (
+            plugin_instance.name
+            or plugin_id
+        )
+
+        if plugin_name in self.plugins:
+            raise RuntimeError(
+                f"پلاگین '{plugin_name}' قبلاً نصب شده است."
+            )
+
+        self.plugins[plugin_name] = plugin_instance
+
+        try:
+            await plugin_instance.on_load()
+
+            if enable:
+                await plugin_instance.enable()
+
+        except Exception:
+            try:
+                await plugin_instance.cleanup()
+            except Exception:
+                pass
+
+            self.plugins.pop(plugin_name, None)
+            self._remove_plugin_modules(plugin_id)
+
+            raise
+
+        print(
+            f"✅ پلاگین '{plugin_name}' "
+            f"v{plugin_instance.version} "
+            f"در runtime بارگذاری شد."
+        )
+
+        return plugin_instance
+
 
     async def enable_plugin(self, name: str) -> bool:
         plugin = self.get_plugin(name)

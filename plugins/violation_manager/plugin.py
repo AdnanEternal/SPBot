@@ -16,7 +16,7 @@ class ViolationManagerPlugin(BasePlugin):
     """
 
     name = "Violation Manager"
-    version = "1.0.0"
+    version = "1.1.0"
 
     def __init__(self, client, command_manager, db, event_bus):
         super().__init__(client, command_manager, db, event_bus)
@@ -36,4 +36,4 @@ class ViolationManagerPlugin(BasePlugin):
     unmute_command = handlers.unmute_command
     on_reply_shortcut = handlers.on_reply_shortcut
     on_violation = handlers.on_violation
-    
+    clear_record = handlers.clear_record
