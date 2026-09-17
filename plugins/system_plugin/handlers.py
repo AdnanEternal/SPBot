@@ -107,8 +107,8 @@ async def show_help(
 
 @command(
     name="گیتهاب چک",
-    permission="admin",
-    chat_type="group",
+    permission="owner",
+    chat_type="all",
     description="🔗 اتصال ربات به مخزن GitHub را بررسی می‌کند.",
 )
 async def github_check(
@@ -128,7 +128,7 @@ async def github_check(
 
 @command(
     name="دیتابیس بکاپ",
-    permission="admin",
+    permission="owner",
     chat_type="all",
     description="💾 یک نسخه از دیتابیس را در GitHub ذخیره می‌کند.",
 )
@@ -155,7 +155,7 @@ async def database_backup(
 
 @command(
     name="دیتابیس بازیابی",
-    permission="everyone",
+    permission="owner",
     chat_type="all",
     description="♻️ دیتابیس را از آخرین بکاپ GitHub بازیابی می‌کند.",
 )
@@ -193,7 +193,7 @@ async def database_restore(
 
 @command(
     name="لیست پلاگین ها",
-    permission="everyone",
+    permission="owner",
     chat_type="all",
     description="📦 لیست پلاگین‌های نصب‌شده و نسخه‌ی آن‌ها را نشان می‌دهد.",
 )
@@ -208,7 +208,7 @@ async def list_plugins(
         return
 
     lines = [
-        f"🔹 {plugin.name} — v{plugin.version}"
+        f"🔹 **{plugin.name}** — version: {plugin.version}"
         for plugin in sorted(plugins, key=lambda p: p.name.lower())
     ]
 
