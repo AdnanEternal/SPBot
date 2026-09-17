@@ -42,12 +42,17 @@ async def show_help(
     if is_owner_user:
         allowed_permissions = {"everyone", "admin", "owner"}
 
+    elif event.is_private:
+        allowed_permissions = {"everyone", "admin"}
+
+    elif is_admin_user:
+        allowed_permissions = {"everyone", "admin"}
+
     elif is_admin_user:
         allowed_permissions = {"everyone", "admin"}
 
     else:
-        # در PV هم admin نمایش داده می‌شود.
-        allowed_permissions = {"everyone", "admin"}
+        allowed_permissions = {"everyone"}
 
     commands = [
         cmd
