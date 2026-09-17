@@ -1,11 +1,23 @@
+import random
+
 from typing import TYPE_CHECKING
 
 from splusthon import events
 
-from core.decorators import command
+from core.decorators import command, on_event
 
 if TYPE_CHECKING:
     from .plugin import MessageManagerPlugin
+
+MEOW_RESPONSES = [
+    "😺",
+    "اخجون گربه!",
+    "حالت خوبه؟ نکنه گربه گازت گرفته داری گربه میشی؟ 🐈",
+    "میووو 😸",
+    "یکی اینجا گربه شد؟ 🐈",
+    "میو؟ 🤨",
+    "گربه شناسایی شد! 🚨🐈",
+]
 
 
 @command(
@@ -57,3 +69,14 @@ async def clear_messages(
     )
 
     await event.delete()
+
+
+@on_event(events.NewMessage(incoming=True))
+async def meow_trigger(
+    self: "MessageManagerPlugin",
+    event: events.NewMessage.Event,
+) -> None:
+    if (event.raw_text or "").strip() != "میو":
+        return
+
+    await event.reply(random.choice(MEOW_RESPONSES))
