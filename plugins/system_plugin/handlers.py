@@ -7,6 +7,7 @@ from core.permissions import is_chat_admin, is_owner
 
 from .backup.backup import DatabaseBackupManager
 from .github_manager.manager import GitHubManager
+from .plugin_updater import PluginUpdateManager
 
 if TYPE_CHECKING:
     from .plugin import SystemPlugin
@@ -108,6 +109,76 @@ async def show_help(
         )
 
     await event.reply(text)
+
+
+
+
+
+
+
+
+
+@command(
+    name="پلاگین آپدیت چک",
+    permission="owner",
+    chat_type="all",
+    description="🔄 وجود پلاگین جدید یا نسخه‌ی جدید پلاگین‌ها را بررسی می‌کند.",
+)
+async def plugin_update_check(
+    self: "SystemPlugin",
+    event: events.NewMessage.Event,
+) -> None:
+    try:
+        github = GitHubManager()
+
+        updater = PluginUpdateManager(
+            plugin_manager=self.plugin_manager,
+            github=github,
+        )
+
+        result = await updater.check()
+
+    except Exception as e:
+        await event.reply(
+            f"❌ بررسی پلاگین‌ها ناموفق بود.\n`{e}`"
+        )
+        return
+
+    lines = []
+
+    if result.new_plugins:
+        lines.append("📦 پلاگین‌های جدید:")
+
+        for plugin in result.new_plugins:
+            lines.append(
+                f"🔹 {plugin.name} — v{plugin.version}"
+            )
+
+    if result.updates:
+        if lines:
+            lines.append("")
+
+        lines.append("🔄 بروزرسانی‌های موجود:")
+
+        for plugin, local_version in result.updates:
+            lines.append(
+                f"🔹 {plugin.name} — "
+                f"v{local_version} → v{plugin.version}"
+            )
+
+    if not lines:
+        await event.reply(
+            "✅ هیچ پلاگین جدید یا بروزرسانی‌ای پیدا نشد."
+        )
+        return
+
+    await event.reply(
+        "\n".join(lines)
+    )
+
+
+
+
 
 
 @command(

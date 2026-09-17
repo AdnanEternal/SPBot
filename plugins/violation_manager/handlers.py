@@ -17,6 +17,69 @@ if TYPE_CHECKING:
 DEFAULT_MUTE_HOURS = 1
 
 
+
+
+@command(
+    name="حذف سابقه",
+    permission="admin",
+    chat_type="group",
+    description="سابقه تخلفات یک کاربر را پاک می‌کند.",
+)
+async def clear_record(
+    self: "ViolationManagerPlugin",
+    event: events.NewMessage.Event,
+) -> None:
+    # اولویت با ریپلای است.
+    reply = await event.get_reply_message()
+
+    if reply is not None:
+        target_id = reply.sender_id
+
+    else:
+        # اگر ریپلای نبود، یوزرنیم را از پارامتر می‌گیریم.
+        username = (event.args_text or "").strip()
+
+        if not username:
+            await event.reply(
+                "مثال:\n"
+                "روی پیام کاربر ریپلای کن و !حذف سابقه بزن.\n"
+                "یا:\n"
+                "!حذف سابقه @username"
+            )
+            return
+
+        try:
+            entity = await self.client.get_entity(username)
+            target_id = entity.id
+        except Exception:
+            await event.reply(
+                f"❌ نتونستم کاربر `{username}` رو پیدا کنم."
+            )
+            return
+
+    count = await self.violations.get_count(
+        event.chat_id,
+        target_id,
+    )
+
+    if count == 0:
+        await event.reply(
+            f"ℹ️ برای کاربر `{target_id}` هیچ سابقه‌ای ثبت نشده."
+        )
+        return
+
+    await self.violations.reset(
+        event.chat_id,
+        target_id,
+    )
+
+    await event.reply(
+        f"✅ سابقه‌ی {count} تخلف کاربر `{target_id}` پاک شد."
+    )
+
+
+
+
 @command(
     name="لیست متخلفان",
     permission="admin",
