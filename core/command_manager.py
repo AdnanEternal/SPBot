@@ -3,7 +3,7 @@ from typing import Any, Awaitable, Callable, Iterable, Optional
 
 from splusthon import SoroushClient, events
 
-from core.permissions import is_chat_admin
+from core.permissions import is_chat_admin, is_owner
 
 EventHandler = Callable[[Any], Awaitable[Any]]
 
@@ -118,13 +118,16 @@ class CommandManager:
             if command.chat_type == "private" and not event.is_private:
                 return
 
+            sender_id = event.sender_id
+
             if command.permission == "admin":
                 chat = await event.get_chat()
-                sender_id = event.sender_id
 
                 if not await is_chat_admin(client, chat, sender_id):
                     return
-
+            elif command.permission == "owner":
+                if not is_owner(sender_id):
+                    return
             # آرگومان‌های بعد از اسم کامند رو هم به‌صورت متن خام هم لیست
             # روی خود event می‌ذاریم تا هندلرها مجبور نباشن دستی prefix/اسم
             # کامند رو از متن جدا کنن.

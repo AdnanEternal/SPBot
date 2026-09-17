@@ -19,9 +19,10 @@ class SystemPlugin(BasePlugin):
     """
 
     name = "System"
-    version = "2.1.1"
+    version = "2.2.0"
 
     show_help = handlers.show_help
     github_check = handlers.github_check
     database_backup = handlers.database_backup
     database_restore = handlers.database_restore
+    list_plugins = handlers.list_plugins

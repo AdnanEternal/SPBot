@@ -1,5 +1,5 @@
 from splusthon.tl import functions, types
-
+from config import config
 
 async def is_chat_admin(client, chat, sender_id) -> bool:
     """
@@ -41,3 +41,19 @@ async def is_chat_admin(client, chat, sender_id) -> bool:
     except Exception as e:
         print(f"❌ خطا در بررسی دسترسی ادمین: {e}")
         return False
+
+
+
+def is_owner(sender_id: int) -> bool:
+    owner_id = config.get("BOT_OWNERS_ID")
+
+    if not owner_id:
+        return False
+
+    owner_ids = {
+        int(user_id.strip())
+        for user_id in owner_id.split(",")
+        if user_id.strip().isdigit()
+    }
+
+    return sender_id in owner_ids

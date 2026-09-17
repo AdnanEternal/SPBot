@@ -53,6 +53,7 @@ class PluginManager:
                     db=self.db,
                     event_bus=self.event_bus,
                 )
+                plugin_instance.plugin_manager = self
 
                 plugin_name = plugin_instance.name or plugin_folder.name
 

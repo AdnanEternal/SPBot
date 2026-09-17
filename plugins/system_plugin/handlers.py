@@ -117,3 +117,37 @@ async def database_restore(
     await event.reply(
         "✅ دیتابیس با موفقیت از آخرین بکاپ GitHub بازیابی شد."
     )
+
+
+
+
+
+
+
+
+
+@command(
+    name="لیست پلاگین ها",
+    permission="everyone",
+    chat_type="all",
+    description="📦 لیست پلاگین‌های نصب‌شده و نسخه‌ی آن‌ها را نشان می‌دهد.",
+)
+async def list_plugins(
+    self: "SystemPlugin",
+    event: events.NewMessage.Event,
+) -> None:
+    plugins = self.plugin_manager.get_all_plugins()
+
+    if not plugins:
+        await event.reply("📦 هیچ پلاگینی نصب نشده.")
+        return
+
+    lines = [
+        f"🔹 {plugin.name} — v{plugin.version}"
+        for plugin in sorted(plugins, key=lambda p: p.name.lower())
+    ]
+
+    await event.reply(
+        "📦 پلاگین‌های نصب‌شده:\n\n" +
+        "\n".join(lines)
+    )
