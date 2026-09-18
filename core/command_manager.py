@@ -1,9 +1,13 @@
+# core/command_manager.py
+
+import traceback
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Iterable, Optional
 
 from splusthon import SoroushClient, events
 
 from core.permissions import is_chat_admin, is_owner
+
 
 EventHandler = Callable[[Any], Awaitable[Any]]
 
@@ -21,7 +25,7 @@ class Command:
 class CommandManager:
     def __init__(self) -> None:
         self.commands: dict[str, Command] = {}
-        self.prefix: str = "!"
+        self.prefix = "!"
 
     def add_command(
         self,
@@ -35,9 +39,11 @@ class CommandManager:
         if name in self.commands:
             owner = self.commands[name].plugin
             owner_name = owner.name if owner else "نامشخص"
+
             print(
-                f"⚠️ کامند '{name}' قبلاً توسط پلاگین '{owner_name}' ثبت شده "
-                f"بود و حالا بازنویسی می‌شه."
+                f"⚠️ کامند '{name}' قبلاً توسط "
+                f"پلاگین '{owner_name}' ثبت شده بود "
+                f"و حالا بازنویسی می‌شه."
             )
 
         self.commands[name] = Command(
@@ -68,75 +74,114 @@ class CommandManager:
     def get_all_commands(self) -> Iterable[Command]:
         return self.commands.values()
 
-    def _match_command(self, body: str) -> tuple[Optional[str], str]:
-        """
-        اسم کامندها ممکنه خودشون چند کلمه‌ای باشن (مثلاً "حذف فیلتر").
-        قبلاً دیسپچر فقط اولین کلمه‌ی بعد از prefix رو به‌عنوان اسم کامند
-        در نظر می‌گرفت، برای همین کامندهای چندکلمه‌ای اصلاً match نمی‌شدن
-        و مجبور بودی اسمشون رو بدون فاصله بچسبونی (مثل "حذففیلتر").
+    def _match_command(
+        self,
+        body: str,
+    ) -> tuple[Optional[str], str]:
 
-        این متد به‌جای اون، بین همه‌ی اسم‌های واقعاً ثبت‌شده می‌گرده و
-        طولانی‌ترین اسمی که ابتدای body باهاش match می‌شه رو برمی‌گردونه.
-        طولانی‌ترین رو انتخاب می‌کنیم که اگه هم "فیلتر" و هم "فیلتر گروه"
-        ثبت شده باشن، با هم قاطی نشن.
-        """
         best_name: Optional[str] = None
 
         for name in self.commands:
             if body == name or body.startswith(name + " "):
-                if best_name is None or len(name) > len(best_name):
+                if (
+                    best_name is None
+                    or len(name) > len(best_name)
+                ):
                     best_name = name
 
         if best_name is None:
             return None, ""
 
         args_text = body[len(best_name):].strip()
+
         return best_name, args_text
 
-    def register_dispatcher(self, client: SoroushClient) -> None:
+    def register_dispatcher(
+        self,
+        client: SoroushClient,
+    ) -> None:
+
         @client.on(events.NewMessage(incoming=True))
-        async def dispatcher(event: events.NewMessage.Event) -> None:
-            text = event.raw_text
-
-            if not text or not text.startswith(self.prefix):
-                return
-
-            body = text[len(self.prefix):]
-            if not body:
-                return
-
-            command_name, args_text = self._match_command(body)
-            if command_name is None:
-                return
-
-            command = self.get_command(command_name)
-            if command is None:
-                return
-
-            if command.chat_type == "group" and not event.is_group:
-                return
-            if command.chat_type == "private" and not event.is_private:
-                return
-
-            sender_id = event.sender_id
-
-            if command.permission == "admin":
-                chat = await event.get_chat()
-
-                if not await is_chat_admin(client, chat, sender_id):
-                    return
-            elif command.permission == "owner":
-                if not is_owner(sender_id):
-                    return
-            # آرگومان‌های بعد از اسم کامند رو هم به‌صورت متن خام هم لیست
-            # روی خود event می‌ذاریم تا هندلرها مجبور نباشن دستی prefix/اسم
-            # کامند رو از متن جدا کنن.
-            event.args_text = args_text
-            event.args = args_text.split() if args_text else []
+        async def dispatcher(
+            event: events.NewMessage.Event,
+        ) -> None:
 
             try:
+                text = event.raw_text
+
+                if not text or not text.startswith(self.prefix):
+                    return
+
+                body = text[len(self.prefix):]
+
+                if not body:
+                    return
+
+                command_name, args_text = self._match_command(body)
+
+                if command_name is None:
+                    return
+
+                command = self.get_command(command_name)
+
+                if command is None:
+                    return
+
+                if (
+                    command.chat_type == "group"
+                    and not event.is_group
+                ):
+                    return
+
+                if (
+                    command.chat_type == "private"
+                    and not event.is_private
+                ):
+                    return
+
+                sender_id = event.sender_id
+
+                if command.permission == "admin":
+                    chat = await event.get_chat()
+
+                    if not await is_chat_admin(
+                        client,
+                        chat,
+                        sender_id,
+                    ):
+                        return
+
+                elif command.permission == "owner":
+                    if not is_owner(sender_id):
+                        return
+
+                event.args_text = args_text
+                event.args = (
+                    args_text.split()
+                    if args_text
+                    else []
+                )
+
                 await command.handler(event)
-            except Exception as e:
-                print(f"❌ خطا در اجرای دستور '{command_name}': {e}")
+
+            except Exception:
+                command_name_for_log = locals().get(
+                    "command_name",
+                    "نامشخص",
+                )
+
+                print(
+                    f"\n❌ خطای بحرانی در اجرای دستور "
+                    f"'{command_name_for_log}'"
+                )
+
+                traceback.print_exc()
+
+                try:
+                    await event.reply(
+                        "❌ هنگام اجرای این دستور خطایی رخ داد."
+                    )
+                except Exception:
+                    pass
 
         self._dispatcher = dispatcher

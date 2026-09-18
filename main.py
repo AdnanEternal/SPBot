@@ -1,39 +1,98 @@
+# main.py
+
 import asyncio
+import traceback
 
 from config import config
 from core.client import ClientManager
 from core.plugin_manager import PluginManager
 
 
-async def main():
+async def run_bot() -> None:
+    session_string = config.get_required(
+        "SESSION_STRING"
+    )
 
-    session_string = config.get_required("SESSION_STRING")
+    client_manager = ClientManager(
+        session_string=session_string
+    )
 
-    client_manager = ClientManager(session_string=session_string)
-    
-    client = await client_manager.start()
-
-    if not client:
-        print("❌ برنامه به دلیل عدم اتصال خاتمه می‌یابد.")
-        return
-
-    plugin_manager = PluginManager(client)
+    client = None
+    plugin_manager = None
 
     try:
+        client = await client_manager.start()
+
+        if not client:
+            raise RuntimeError(
+                "اتصال به Soroush برقرار نشد."
+            )
+
+        plugin_manager = PluginManager(client)
+
         await plugin_manager.load_all_plugins()
         await plugin_manager.enable_all_plugins()
 
-        print("⏳ ربات در حال انتظار برای رویدادهاست...")
+        print(
+            "✅ ربات با موفقیت اجرا شد."
+        )
+        print(
+            "⏳ ربات در حال انتظار برای رویدادهاست..."
+        )
 
         await client.run_until_disconnected()
 
-    except KeyboardInterrupt:
-        print("\n🛑 دریافت سیگنال قطع...")
-
     finally:
-        await plugin_manager.disable_all_plugins()
-        await plugin_manager.db.close()
-        await client_manager.stop()
+        if plugin_manager is not None:
+            try:
+                await plugin_manager.disable_all_plugins()
+            except Exception:
+                traceback.print_exc()
+
+            try:
+                await plugin_manager.db.close()
+            except Exception:
+                traceback.print_exc()
+
+        if client_manager is not None:
+            try:
+                await client_manager.stop()
+            except Exception:
+                traceback.print_exc()
 
 
-asyncio.run(main())
+def main() -> None:
+    while True:
+        try:
+            asyncio.run(run_bot())
+
+            print(
+                "⚠️ اتصال ربات قطع شد؛ "
+                "تلاش برای اتصال مجدد..."
+            )
+
+        except KeyboardInterrupt:
+            print(
+                "\n🛑 ربات توسط کاربر متوقف شد."
+            )
+            break
+
+        except Exception:
+            print(
+                "\n🔥 برنامه با خطای غیرمنتظره "
+                "متوقف شد."
+            )
+            traceback.print_exc()
+
+            print(
+                "♻️ راه‌اندازی مجدد ربات..."
+            )
+
+        except BaseException:
+            print(
+                "\n🔥 خطای سیستمی دریافت شد."
+            )
+            traceback.print_exc()
+            break
+
+main()
