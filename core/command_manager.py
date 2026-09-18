@@ -100,12 +100,14 @@ class CommandManager:
     def register_dispatcher(
         self,
         client: SoroushClient,
-        ) -> None:
+    ) -> None:
 
         @client.on(events.NewMessage(incoming=True))
         async def dispatcher(
             event: events.NewMessage.Event,
         ) -> None:
+            command_name = "نامشخص"
+            handled = False
 
             try:
                 text = event.raw_text
@@ -118,87 +120,66 @@ class CommandManager:
                 if not body:
                     return
 
-                command_name, args_text = self._match_command(body)
+                matched_name, args_text = self._match_command(body)
 
-                if command_name is None:
+                if matched_name is None:
                     return
 
+                command_name = matched_name
                 command = self.get_command(command_name)
 
                 if command is None:
                     return
 
-                # از اینجا به بعد، event یک کامند واقعی است.
-                # بنابراین در هر شرایطی باید propagation متوقف شود.
+                if command.chat_type == "group" and not event.is_group:
+                    return
+
+                if command.chat_type == "private" and not event.is_private:
+                    return
+
+                sender_id = event.sender_id
+
+                if command.permission == "admin":
+                    chat = await event.get_chat()
+
+                    if not await is_chat_admin(client, chat, sender_id):
+                        return
+
+                elif command.permission == "owner":
+                    if not is_owner(sender_id):
+                        return
+
+                event.args_text = args_text
+                event.args = args_text.split() if args_text else []
+
+                # فقط از این‌جا به بعد کامند واقعاً اجرا می‌شه و
+                # پیام نباید به هندلرهای دیگه (فیلترها و ...) برسه.
+                handled = True
+
                 try:
-                    if (
-                        command.chat_type == "group"
-                        and not event.is_group
-                    ):
-                        return
+                    await command.handler(event)
 
-                    if (
-                        command.chat_type == "private"
-                        and not event.is_private
-                    ):
-                        return
-
-                    sender_id = event.sender_id
-
-                    if command.permission == "admin":
-                        chat = await event.get_chat()
-
-                        if not await is_chat_admin(
-                            client,
-                            chat,
-                            sender_id,
-                        ):
-                            return
-
-                    elif command.permission == "owner":
-                        if not is_owner(sender_id):
-                            return
-
-                    event.args_text = args_text
-                    event.args = (
-                        args_text.split()
-                        if args_text
-                        else []
+                except Exception:
+                    print(
+                        f"\n❌ خطای بحرانی در اجرای دستور "
+                        f"'{command_name}'"
                     )
+                    traceback.print_exc()
 
                     try:
-                        await command.handler(event)
-
-                    except Exception:
-                        print(
-                            f"\n❌ خطای بحرانی در اجرای دستور "
-                            f"'{command_name}'"
+                        await event.reply(
+                            "❌ هنگام اجرای این دستور خطایی رخ داد."
                         )
-                        traceback.print_exc()
-
-                        try:
-                            await event.reply(
-                                "❌ هنگام اجرای این دستور خطایی رخ داد."
-                            )
-                        except Exception:
-                            pass
-
-                finally:
-                    # این event دیگر نباید به هیچ handler دیگری برسد.
-                    raise StopPropagation
+                    except Exception:
+                        pass
 
             except StopPropagation:
                 raise
 
             except Exception:
-                command_name_for_log = locals().get(
-                    "command_name",
-                    "نامشخص",
-                )
-
                 print(
                     f"\n❌ خطای بحرانی در Command Dispatcher "
-                    f"'{command_name_for_log}'"
+                    f"'{command_name}'"
                 )
                 traceback.print_exc()
 
@@ -208,4 +189,9 @@ class CommandManager:
                     )
                 except Exception:
                     pass
+
+            finally:
+                if handled:
+                    raise StopPropagation
+
         self._dispatcher = dispatcher

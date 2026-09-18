@@ -1,6 +1,7 @@
 import re
 from typing import Optional
 
+
 def extract_trigger_text(text: str, trigger: str) -> Optional[str]:
     text = (text or '').strip()
     trigger = (trigger or '').strip()

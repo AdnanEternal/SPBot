@@ -14,8 +14,33 @@ if TYPE_CHECKING:
 
 # اگه مدت میوتِ گروه هنوز تنظیم نشده باشه (نه با !مجازات میوت، نه با
 # مجازات خودکار)، از این مقدار برای !میوت دستی استفاده می‌شه.
-DEFAULT_MUTE_HOURS = 1
 
+
+
+
+DEFAULT_MUTE_HOURS = 1
+async def _display_name(event, user_id: int) -> str:
+    try:
+        sender = await event.get_sender()
+
+        if sender is not None:
+            return (
+                getattr(sender, "username", None)
+                or getattr(sender, "first_name", None)
+                or str(user_id)
+            )
+    except Exception:
+        pass
+
+    return str(user_id)
+
+
+async def _notify(event, text: str) -> None:
+    # پیام اصلی ممکنه پاک شده باشه، برای همین ریپلای نمی‌کنیم.
+    try:
+        await event.respond(text)
+    except Exception as e:
+        print(f"⚠️ نتونستم پیام تخلف رو ارسال کنم: {e}")
 
 
 
@@ -263,7 +288,6 @@ async def on_reply_shortcut(self: "ViolationManagerPlugin", event: events.NewMes
         await moderation.unmute_user(self.client, chat, target_id)
         await event.reply(f"میوتِ کاربر `{target_id}` برداشته شد.")
 
-
 @on_bus_event("violation")
 async def on_violation(
     self: "ViolationManagerPlugin",
@@ -274,72 +298,68 @@ async def on_violation(
 ) -> None:
     """
     دریافت گزارش تخلف از سایر پلاگین‌ها.
-
-    اگر کاربر ادمین باشد:
-    - پیام قبلاً توسط پلاگین مربوطه حذف شده است.
-    - سابقه‌ی تخلف ثبت نمی‌شود.
-    - شمارنده افزایش پیدا نمی‌کند.
-    - مجازات خودکار اعمال نمی‌شود.
-
-    کاربران عادی طبق سیستم معمول ثبت و مجازات می‌شوند.
+    ادمین‌ها فقط اخطار می‌گیرن (بدون ثبت سابقه و مجازات).
     """
+    try:
+        chat = await event.get_chat()
 
-    # بررسی ادمین بودن کاربر
-    chat = await event.get_chat()
+        is_admin = await is_chat_admin(
+            self.client,
+            chat,
+            user_id,
+            raise_on_error=True,
+        )
 
-    if await is_chat_admin(
-        self.client,
-        chat,
-        user_id,
-    ):
-        await event.reply(
-            f"⚠️ {event.sender.username or event.sender.first_name} "
-            f"مرتکب تخلف شد.\n"
-            f"📌 دلیل: {reason}\n"
-    )
+    except Exception as e:
+        # نمی‌دونیم ادمینه یا نه؛ ریسک نمی‌کنیم و مجازات نمی‌دیم.
+        print(f"⚠️ پردازش تخلف متوقف شد: {e}")
         return
 
-    # -----------------------------
-    # کاربر عادی
-    # -----------------------------
+    name = await _display_name(event, user_id)
 
-    await self.violations.add(
-        group_id,
-        user_id,
-        reason,
-    )
+    if is_admin:
+        await _notify(
+            event,
+            f"⚠️ {name} مرتکب تخلف شد.\n"
+            f"📌 دلیل: {reason}",
+        )
+        return
 
-    count = await self.violations.get_count(
-        group_id,
-        user_id,
-    )
+    await self.violations.add(group_id, user_id, reason)
 
+    count = await self.violations.get_count(group_id, user_id)
     settings = await self.settings.get(group_id)
 
-    await event.reply(
-        f"⚠️ {event.sender.username or event.sender.first_name} "
-        f"مرتکب تخلف شد.\n"
+    message = (
+        f"⚠️ {name} مرتکب تخلف شد.\n"
         f"📌 دلیل: {reason}\n"
         f"🔢 تعداد تخلفات: {count}\n"
         f"🚫 سقف مجاز تخلف: {settings['max_violations']}"
     )
 
-    if count <= settings["max_violations"]:
-        return
+    # مجازات قبل از ارسال پیام اعمال می‌شه تا خطای پیام‌رسانی مانعش نشه.
+    if count > settings["max_violations"]:
+        try:
+            if settings["punishment_type"] == "ban":
+                await moderation.ban_user(self.client, chat, user_id)
+                message += "\n🔨 مجازات: کاربر بن شد."
+            else:
+                hours = settings["mute_hours"]
+                await moderation.mute_user(
+                    self.client,
+                    chat,
+                    user_id,
+                    hours,
+                )
+                duration = f"{hours} ساعت" if hours else "دائمی"
+                message += f"\n🔇 مجازات: کاربر میوت شد ({duration})."
+            
 
-    if settings["punishment_type"] == "ban":
-        await moderation.ban_user(
-            self.client,
-            group_id,
-            user_id,
-        )
+        except Exception as e:
+            print(f"❌ اعمال مجازات ناموفق بود: {e}")
+            message += (
+                "\n❗ اعمال مجازات ناموفق بود "
+                "(ربات دسترسی لازم رو داره؟)"
+            )
 
-    elif settings["punishment_type"] == "mute":
-        hours = settings["mute_hours"]
-
-        await moderation.mute_user(
-            self.client,
-            group_id,
-            user_id,
-            hours,
-        )
+    await _notify(event, message)

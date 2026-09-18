@@ -1,10 +1,7 @@
 """
-وضعیت کوتاه‌مدت و درجا (in-memory، نه دیتابیس) که برای تشخیص فلاد و
-پیام تکراری لازمه. عمداً تو دیتابیس ذخیره نمی‌شه چون:
-  - عمرش خیلی کوتاهه (چند ثانیه/دقیقه)
-  - با ری‌استارت ربات از نو شروع بشه هیچ مشکلی نداره
-برای همین جدا از store.py (که برای دیتای ماندگار مثل تنظیماته) نگه
-داری می‌شه.
+وضعیت کوتاه‌مدت و درجا (in-memory، نه دیتابیس) برای تشخیص فلاد و
+پیام تکراری. عمداً تو دیتابیس ذخیره نمی‌شه چون عمرش کوتاهه و با
+ری‌استارت ربات از نو شروع شدنش مشکلی نداره.
 """
 
 import time
@@ -13,15 +10,23 @@ from typing import Optional
 
 
 class SpamTracker:
+    CLEANUP_EVERY = 500   # هر چند پیام یه بار پاک‌سازی انجام بشه
+    STALE_SECONDS = 600   # کاربری که ۱۰ دقیقه پیام نداده از حافظه پاک می‌شه
+
     def __init__(self) -> None:
         self._messages: dict[tuple[int, int], deque] = defaultdict(lambda: deque(maxlen=100))
         self._last_text: dict[tuple[int, int], tuple[str, int]] = {}
+        self._register_calls = 0
 
     def register(self, group_id: int, user_id: int, message_id: int, text: str) -> int:
         """
         پیام رو ثبت می‌کنه و تعداد تکرار پشت‌سرهمِ عین همین متن رو
         برمی‌گردونه (پیام غیرمتنی/خالی هیچ‌وقت «تکراری» حساب نمی‌شه).
         """
+        self._register_calls += 1
+        if self._register_calls % self.CLEANUP_EVERY == 0:
+            self._cleanup()
+
         key = (group_id, user_id)
         self._messages[key].append((time.time(), message_id))
 
@@ -31,24 +36,41 @@ class SpamTracker:
 
         return repeat_count
 
+    def clear_user(self, group_id: int, user_id: int) -> None:
+        key = (group_id, user_id)
+        self._messages.pop(key, None)
+        self._last_text.pop(key, None)
+
+    def _cleanup(self) -> None:
+        cutoff = time.time() - self.STALE_SECONDS
+        stale = [
+            key
+            for key, messages in self._messages.items()
+            if not messages or messages[-1][0] < cutoff
+        ]
+        for key in stale:
+            self._messages.pop(key, None)
+            self._last_text.pop(key, None)
+
     def count_in_window(self, group_id: int, user_id: int, seconds: int) -> int:
         cutoff = time.time() - seconds
-        return sum(1 for ts, _ in self._messages[(group_id, user_id)] if ts >= cutoff)
+        messages = self._messages.get((group_id, user_id), ())
+        return sum(1 for ts, _ in messages if ts >= cutoff)
 
     def ids_in_window(self, group_id: int, user_id: int, seconds: int) -> list[int]:
         cutoff = time.time() - seconds
-        return [mid for ts, mid in self._messages[(group_id, user_id)] if ts >= cutoff]
+        messages = self._messages.get((group_id, user_id), ())
+        return [mid for ts, mid in messages if ts >= cutoff]
 
 
 class AdminCache:
     """
-    is_chat_admin یه API call می‌زنه (نسبتاً گرون)؛ چون تو این پلاگین
-    باید رو *هر* پیام گروه چک بشه که فرستنده ادمین هست یا نه (تا معاف
-    بشه)، نتیجه رو چند دقیقه cache می‌کنیم که رو گروه‌های پرترافیک هر
-    پیام یه API call جدید نزنیم.
+    is_chat_admin یه API call نسبتاً گرون می‌زنه؛ نتیجه رو چند دقیقه
+    cache می‌کنیم که رو گروه‌های پرترافیک هر پیام یه API call نزنیم.
     """
 
     TTL_SECONDS = 300
+    MAX_ENTRIES = 5000
 
     def __init__(self) -> None:
         self._cache: dict[tuple[int, int], tuple[bool, float]] = {}
@@ -64,4 +86,12 @@ class AdminCache:
         return is_admin
 
     def set(self, group_id: int, user_id: int, is_admin: bool) -> None:
+        if len(self._cache) >= self.MAX_ENTRIES:
+            now = time.time()
+            self._cache = {
+                key: value
+                for key, value in self._cache.items()
+                if now - value[1] <= self.TTL_SECONDS
+            }
+
         self._cache[(group_id, user_id)] = (is_admin, time.time())

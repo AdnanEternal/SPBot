@@ -9,6 +9,8 @@ from core.decorators import command, on_event
 if TYPE_CHECKING:
     from .plugin import MessageManagerPlugin
 
+MAX_CLEAR_COUNT = 15000
+
 MEOW_RESPONSES = [
     "😺",
     "اخجون گربه!",
@@ -45,7 +47,12 @@ async def clear_messages(
     if count <= 0:
         await event.reply("❌ تعداد پیام‌ها باید بیشتر از صفر باشد.")
         return
-
+    
+    if count > MAX_CLEAR_COUNT:
+        await event.reply(
+            f"❌ حداکثر تعداد پاکسازی در هر بار {MAX_CLEAR_COUNT} پیام است."
+        )
+        return
     chat = await event.get_chat()
 
     messages = await self.client.get_messages(

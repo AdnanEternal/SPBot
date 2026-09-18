@@ -100,11 +100,11 @@ async def _flag(self: "SpamFilterPlugin", event: events.NewMessage.Event, reason
 
 
 async def _flag_flood(self: "SpamFilterPlugin", event: events.NewMessage.Event, window_seconds: int) -> None:
-    """
-    حالت فلاد فرق داره: چون چندتا پیام پشت‌سرهم مقصرن نه فقط همین یکی،
-    همه‌ی پیام‌های داخل بازه‌ی زمانی رو پاک می‌کنه، نه فقط پیام فعلی.
-    """
     ids = self.tracker.ids_in_window(event.chat_id, event.sender_id, window_seconds)
+
+    # پیام‌های این بازه نباید دوباره شمرده بشن
+    self.tracker.clear_user(event.chat_id, event.sender_id)
+
     try:
         chat = await event.get_chat()
         await self.client.delete_messages(chat, ids)
@@ -119,18 +119,21 @@ async def _flag_flood(self: "SpamFilterPlugin", event: events.NewMessage.Event, 
         reason=f"اسپم: ارسال بیش از حد پیام در {window_seconds} ثانیه (فلاد)",
     )
 
-
 @on_event(events.NewMessage(incoming=True))
 async def on_message(self: "SpamFilterPlugin", event: events.NewMessage.Event) -> None:
-    if not event.is_group:
+    if not event.is_group or event.sender_id is None:
         return
 
-    # ادمین‌ها از چک اسپم معافن؛ نتیجه‌ی is_chat_admin چند دقیقه cache
-    # می‌شه که رو هر پیام مجبور به یه API call جدید نباشیم.
     cached = self.admin_cache.get(event.chat_id, event.sender_id)
     if cached is None:
-        chat = await event.get_chat()
-        cached = await is_chat_admin(self.client, chat, event.sender_id)
+        try:
+            chat = await event.get_chat()
+            cached = await is_chat_admin(
+                self.client, chat, event.sender_id, raise_on_error=True
+            )
+        except Exception:
+            # نتیجه‌ی نامعلوم رو کش نمی‌کنیم و کاربر رو مجازات هم نمی‌کنیم
+            return
         self.admin_cache.set(event.chat_id, event.sender_id, cached)
     if cached:
         return

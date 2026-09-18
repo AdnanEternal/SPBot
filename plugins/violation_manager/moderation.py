@@ -11,7 +11,9 @@ SoroushClient، StringSession، functions.messages.* و ...). اگه اسم یا
 """
 
 from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
+
 
 from splusthon import SoroushClient
 
@@ -42,8 +44,23 @@ async def mute_user(
     user_id: int,
     hours: Optional[int] = None,
 ) -> None:
-    until_date = datetime.utcnow() + timedelta(hours=hours) if hours else None
-    await client.edit_permissions(chat, user_id, until_date=until_date, send_messages=False)
+    until_date = (
+        datetime.now(timezone.utc) + timedelta(hours=hours)
+        if hours
+        else None
+    )
+    await client.edit_permissions(
+        chat, 
+        user_id,
+        until_date=until_date, 
+        send_messages=False,
+        send_gifs=False,
+        send_media=False,
+        send_stickers=False,
+        send_games=False,
+        send_inline=False,
+        send_polls=False
+        )
 
 
 async def unmute_user(client: SoroushClient, chat: Any, user_id: int) -> None:

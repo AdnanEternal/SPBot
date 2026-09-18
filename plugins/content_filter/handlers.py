@@ -103,8 +103,10 @@ async def on_message(
     if matched_word is None:
         return
 
-    # پیام همیشه حذف می‌شود؛ حتی اگر فرستنده ادمین باشد.
-    await event.delete()
+    try:
+        await event.delete()
+    except Exception as e:
+        print(f"⚠️ نتونستم پیام فیلترشده رو پاک کنم: {e}")
 
     # دلیل دقیق تخلف را برای Violation Manager می‌فرستیم.
     await self.event_bus.emit(

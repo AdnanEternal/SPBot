@@ -1,10 +1,21 @@
 from splusthon.tl import functions, types
 from config import config
 
-async def is_chat_admin(client, chat, sender_id) -> bool:
+
+async def is_chat_admin(
+    client,
+    chat,
+    sender_id,
+    *,
+    raise_on_error: bool = False,
+) -> bool:
     """
-    بررسی می‌کند که آیا sender_id در chat داده‌شده ادمین یا مالک است.
-    برای چت خصوصی همیشه False برمی‌گرداند چون مفهوم ادمین نداره.
+    بررسی می‌کند که sender_id در chat ادمین یا مالک است یا نه.
+    برای چت خصوصی همیشه False برمی‌گرداند.
+
+    اگر raise_on_error=True باشد، به‌جای False دادن در صورت خطا،
+    خطا را دوباره raise می‌کند تا فراخوان بتواند «نمی‌دانم» را از
+    «ادمین نیست» تشخیص بدهد.
     """
     try:
         if isinstance(chat, types.Chat):
@@ -33,19 +44,26 @@ async def is_chat_admin(client, chat, sender_id) -> bool:
                     hash=0,
                 )
             )
-            return any(p.user_id == sender_id for p in result.participants)
+            return any(
+                getattr(p, "user_id", None) == sender_id
+                for p in result.participants
+            )
 
         else:
             return False
 
     except Exception as e:
         print(f"❌ خطا در بررسی دسترسی ادمین: {e}")
+        if raise_on_error:
+            raise
         return False
 
 
-
 def is_owner(sender_id: int) -> bool:
-    owner_id = config.get("BOT_OWNERS_ID")
+    if sender_id is None:
+        return False
+
+    owner_id = config.get("BOT_OWNERS_ID", "")
 
     if not owner_id:
         return False
