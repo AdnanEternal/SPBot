@@ -258,8 +258,11 @@ async def on_violation(
         chat,
         user_id,
     ):
-        # پیام قبلاً حذف شده؛ برای ادمین فقط از ثبت تخلف صرف‌نظر می‌کنیم.
-        return
+        await event.reply(
+            f"⚠️ {event.sender.username or event.sender.first_name} "
+            f"مرتکب تخلف شد.\n"
+            f"📌 دلیل: {reason}\n"
+    )
 
     # -----------------------------
     # کاربر عادی
