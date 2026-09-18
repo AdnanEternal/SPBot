@@ -239,31 +239,72 @@ async def on_violation(
     reason: str,
 ) -> None:
     """
-    هر پلاگین دیگه‌ای (مثل content_filter) با
+    دریافت گزارش تخلف از سایر پلاگین‌ها.
 
-        await self.event_bus.emit("violation", group_id=.., user_id=.., reason=..)
+    اگر کاربر ادمین باشد:
+    - پیام قبلاً توسط پلاگین مربوطه حذف شده است.
+    - سابقه‌ی تخلف ثبت نمی‌شود.
+    - شمارنده افزایش پیدا نمی‌کند.
+    - مجازات خودکار اعمال نمی‌شود.
 
-    یه تخلف رو گزارش می‌ده. این پلاگین فقط گوش می‌ده و ثبتش می‌کنه، هیچ
-    وابستگی مستقیمی به content_filter یا هر پلاگین دیگه‌ای نداره.
+    کاربران عادی طبق سیستم معمول ثبت و مجازات می‌شوند.
     """
-    await self.violations.add(group_id, user_id, reason)
-    count = await self.violations.get_count(group_id, user_id)
+
+    # بررسی ادمین بودن کاربر
+    chat = await event.get_chat()
+
+    if await is_chat_admin(
+        self.client,
+        chat,
+        user_id,
+    ):
+        # پیام قبلاً حذف شده؛ برای ادمین فقط از ثبت تخلف صرف‌نظر می‌کنیم.
+        return
+
+    # -----------------------------
+    # کاربر عادی
+    # -----------------------------
+
+    await self.violations.add(
+        group_id,
+        user_id,
+        reason,
+    )
+
+    count = await self.violations.get_count(
+        group_id,
+        user_id,
+    )
+
     settings = await self.settings.get(group_id)
 
     await event.reply(
-        f"""
-        ⚠️{event.sender.username or event.sender.first_name} مرتکب تخلف شد\nتعداد تخلفات: {count} تخلف!\nسقف مجاز تخلف:{settings["max_violations"]}
-        """
+        f"⚠️ {event.sender.username or event.sender.first_name} "
+        f"مرتکب تخلف شد.\n"
+        f"📌 دلیل: {reason}\n"
+        f"🔢 تعداد تخلفات: {count}\n"
+        f"🚫 سقف مجاز تخلف: {settings['max_violations']}"
     )
 
     if count <= settings["max_violations"]:
         return
 
     if settings["punishment_type"] == "ban":
-        await moderation.ban_user(self.client, group_id, user_id)
+        await moderation.ban_user(
+            self.client,
+            group_id,
+            user_id,
+        )
+
     elif settings["punishment_type"] == "mute":
-        hours = settings["mute_hours"] or DEFAULT_MUTE_HOURS
-        await moderation.mute_user(self.client, group_id, user_id, hours)
-    # اگه هنوز نوع مجازات تنظیم نشده (نه !مجازات میوت زده شده نه
-    # !مجازات بن)، فقط تخلف ثبت می‌شه و مجازاتی اعمال نمی‌شه تا ادمین
-    # خودش تصمیم بگیره.
+        hours = (
+            settings["mute_hours"]
+            or DEFAULT_MUTE_HOURS
+        )
+
+        await moderation.mute_user(
+            self.client,
+            group_id,
+            user_id,
+            hours,
+        )
