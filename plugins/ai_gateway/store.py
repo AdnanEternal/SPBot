@@ -122,12 +122,19 @@ class AIModelStore:
 
 class AIGroupSettingsStore:
     TABLE = "ai_group_settings"
+    GLOBAL_GROUP_ID = 0
 
     DEFAULT_SYSTEM_PROMPT = (
-        "تو بوبی هستی؛ یک شخصیت دوستانه، طبیعی و شوخ‌طبع در یک گروه چت. "
-        "مثل یک انسان عادی و متناسب با فضای گفتگو جواب بده. "
-        "لازم نیست در هر پیام توضیح بدهی که هوش مصنوعی هستی. "
-        "به اعضای گروه و اتفاقات قبلی گفتگو توجه کن و از context موجود استفاده کن."
+        "تو «بوبی» هستی؛ یک عضو شوخ، بازیگوش، کمی لجباز و غیرقابل‌پیش‌بینیِ گروه.\n\n"
+        "طبیعی و محاوره‌ای حرف بزن و بیش از حد رسمی نباش. "
+        "لازم نیست همیشه موافق یا مؤدب باشی؛ می‌توانی مخالفت کنی، غر بزنی، "
+        "طعنه بزنی و کل‌کل دوستانه راه بیندازی.\n\n"
+        "در گروه همیشه دقت کن چه کسی چه چیزی گفته، اسم‌ها را قاطی نکن، "
+        "موضوعات مختلف و replyها را از هم تشخیص بده و به تاریخچه‌ی گفتگو توجه کن.\n\n"
+        "پاسخ‌ها معمولاً کوتاه، طبیعی و متناسب با فضا باشند. "
+        "لازم نیست همیشه شوخی کنی و از تکرار شوخی‌ها خودداری کن.\n\n"
+        "شخصیتت را حفظ کن، اما دقت را قربانی شوخی نکن. "
+        "وقتی سؤال جدی است، دقیق جواب بده و وقتی مطمئن نیستی، حدس نزن."
     )
 
     def __init__(self, db: DatabaseManager) -> None:
@@ -140,7 +147,10 @@ class AIGroupSettingsStore:
                 "group_id": "INTEGER PRIMARY KEY",
                 "trigger": "TEXT",
                 "system_prompt": "TEXT",
-                "updated_at": "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP",
+                "updated_at": (
+                    "TEXT NOT NULL "
+                    "DEFAULT CURRENT_TIMESTAMP"
+                ),
             },
         )
 
@@ -153,22 +163,48 @@ class AIGroupSettingsStore:
 
     async def get(self, group_id: int) -> dict[str, Any]:
         await self._ensure(group_id)
+
         row = await self.db.select_one(
             self.TABLE,
             where={"group_id": group_id},
         )
+
         return dict(row)
 
-    async def get_system_prompt(self, group_id: int) -> str:
-        settings = await self.get(group_id)
-        return settings["system_prompt"] or self.DEFAULT_SYSTEM_PROMPT
+    async def get_system_prompt(
+        self,
+        group_id: int,
+    ) -> str:
+        # System Prompt همیشه از ردیف سراسری خوانده می‌شود.
+        await self._ensure(
+            self.GLOBAL_GROUP_ID
+        )
+
+        row = await self.db.select_one(
+            self.TABLE,
+            where={
+                "group_id": self.GLOBAL_GROUP_ID
+            },
+        )
+
+        if not row:
+            return self.DEFAULT_SYSTEM_PROMPT
+
+        return (
+            row["system_prompt"]
+            or self.DEFAULT_SYSTEM_PROMPT
+        )
 
     async def set_system_prompt(
         self,
         group_id: int,
         prompt: str,
     ) -> None:
-        await self._ensure(group_id)
+        # group_id عمداً نادیده گرفته می‌شود.
+        await self._ensure(
+            self.GLOBAL_GROUP_ID
+        )
+
         await self.db.execute(
             f"""
             UPDATE {self.TABLE}
@@ -176,11 +212,20 @@ class AIGroupSettingsStore:
                 updated_at = CURRENT_TIMESTAMP
             WHERE group_id = ?
             """,
-            (prompt, group_id),
+            (
+                prompt,
+                self.GLOBAL_GROUP_ID,
+            ),
         )
 
-    async def reset_system_prompt(self, group_id: int) -> None:
-        await self._ensure(group_id)
+    async def reset_system_prompt(
+        self,
+        group_id: int,
+    ) -> None:
+        await self._ensure(
+            self.GLOBAL_GROUP_ID
+        )
+
         await self.db.execute(
             f"""
             UPDATE {self.TABLE}
@@ -188,15 +233,28 @@ class AIGroupSettingsStore:
                 updated_at = CURRENT_TIMESTAMP
             WHERE group_id = ?
             """,
-            (group_id,),
+            (self.GLOBAL_GROUP_ID,),
         )
 
-    async def get_trigger(self, group_id: int, default: str) -> str:
+    async def get_trigger(
+        self,
+        group_id: int,
+        default: str,
+    ) -> str:
         settings = await self.get(group_id)
-        return (settings["trigger"] or default).strip()
 
-    async def set_trigger(self, group_id: int, trigger: str) -> None:
+        return (
+            settings["trigger"]
+            or default
+        ).strip()
+
+    async def set_trigger(
+        self,
+        group_id: int,
+        trigger: str,
+    ) -> None:
         await self._ensure(group_id)
+
         await self.db.execute(
             f"""
             UPDATE {self.TABLE}
@@ -204,11 +262,18 @@ class AIGroupSettingsStore:
                 updated_at = CURRENT_TIMESTAMP
             WHERE group_id = ?
             """,
-            (trigger.strip(), group_id),
+            (
+                trigger.strip(),
+                group_id,
+            ),
         )
 
-    async def reset_trigger(self, group_id: int) -> None:
+    async def reset_trigger(
+        self,
+        group_id: int,
+    ) -> None:
         await self._ensure(group_id)
+
         await self.db.execute(
             f"""
             UPDATE {self.TABLE}
@@ -218,7 +283,6 @@ class AIGroupSettingsStore:
             """,
             (group_id,),
         )
-
 class AIMemorySettingsStore:
     TABLE = "ai_memory_settings"
     DEFAULT_TOKEN_LIMIT = 8000
