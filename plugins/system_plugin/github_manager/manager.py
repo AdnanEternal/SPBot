@@ -7,24 +7,44 @@ from config import config
 
 class GitHubManager:
     BASE_URL = "https://api.github.com"
+    REQUEST_TIMEOUT = 30
 
     def __init__(self):
         self.token = config.get("GITHUB_TOKEN")
-        self.repository = config.get("GITHUB_REPOSITORY")
-        self.branch = config.get("GITHUB_BRANCH", "main")
+        self.repository = config.get(
+            "GITHUB_REPOSITORY"
+        )
+        self.branch = config.get(
+            "GITHUB_BRANCH",
+            "main",
+        )
 
         if not self.token:
-            raise ValueError("GITHUB_TOKEN is not configured")
+            raise ValueError(
+                "GITHUB_TOKEN is not configured"
+            )
 
         if not self.repository:
-            raise ValueError("GITHUB_REPOSITORY is not configured")
+            raise ValueError(
+                "GITHUB_REPOSITORY is not configured"
+            )
 
         self.headers = {
-            "Accept": "application/vnd.github+json",
-            "Authorization": f"Bearer {self.token}",
-            "X-GitHub-Api-Version": "2022-11-28",
+            "Accept": (
+                "application/vnd.github+json"
+            ),
+            "Authorization": (
+                f"Bearer {self.token}"
+            ),
+            "X-GitHub-Api-Version": (
+                "2022-11-28"
+            ),
         }
 
+    def _timeout(self):
+        return aiohttp.ClientTimeout(
+            total=self.REQUEST_TIMEOUT
+        )
 
     async def download_directory(
         self,
@@ -34,9 +54,14 @@ class GitHubManager:
         from pathlib import Path
 
         local_dir = Path(local_path)
-        local_dir.mkdir(parents=True, exist_ok=True)
+        local_dir.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
 
-        entries = await self.list_directory(remote_path)
+        entries = await self.list_directory(
+            remote_path
+        )
 
         for entry in entries:
             name = entry.get("name")
@@ -49,7 +74,9 @@ class GitHubManager:
                 f"{remote_path.rstrip('/')}/{name}"
             )
 
-            child_local_path = local_dir / name
+            child_local_path = (
+                local_dir / name
+            )
 
             if entry_type == "dir":
                 await self.download_directory(
@@ -60,23 +87,32 @@ class GitHubManager:
             elif entry_type == "file":
                 await self.download_file(
                     remote_path=child_remote_path,
-                    local_path=str(child_local_path),
+                    local_path=str(
+                        child_local_path
+                    ),
                 )
 
     async def check_connection(self) -> bool:
-        url = f"{self.BASE_URL}/repos/{self.repository}"
+        url = (
+            f"{self.BASE_URL}/repos/"
+            f"{self.repository}"
+        )
 
         async with aiohttp.ClientSession(
-            headers=self.headers
+            headers=self.headers,
+            timeout=self._timeout(),
         ) as session:
-            async with session.get(url) as response:
+            async with session.get(
+                url
+            ) as response:
+
                 if response.status == 200:
                     return True
 
                 text = await response.text()
 
                 raise RuntimeError(
-                    f"GitHub connection failed: "
+                    "GitHub connection failed: "
                     f"{response.status} - {text}"
                 )
 
@@ -86,11 +122,13 @@ class GitHubManager:
     ) -> list[dict]:
         url = (
             f"{self.BASE_URL}/repos/"
-            f"{self.repository}/contents/{remote_path}"
+            f"{self.repository}/contents/"
+            f"{remote_path}"
         )
 
         async with aiohttp.ClientSession(
-            headers=self.headers
+            headers=self.headers,
+            timeout=self._timeout(),
         ) as session:
             async with session.get(
                 url,
@@ -101,7 +139,7 @@ class GitHubManager:
                     text = await response.text()
 
                     raise RuntimeError(
-                        f"GitHub directory listing failed: "
+                        "GitHub directory listing failed: "
                         f"{response.status} - {text}"
                     )
 
@@ -109,7 +147,8 @@ class GitHubManager:
 
         if not isinstance(data, list):
             raise RuntimeError(
-                f"GitHub path '{remote_path}' is not a directory"
+                f"GitHub path '{remote_path}' "
+                "is not a directory"
             )
 
         return data
@@ -120,11 +159,13 @@ class GitHubManager:
     ) -> str:
         url = (
             f"{self.BASE_URL}/repos/"
-            f"{self.repository}/contents/{remote_path}"
+            f"{self.repository}/contents/"
+            f"{remote_path}"
         )
 
         async with aiohttp.ClientSession(
-            headers=self.headers
+            headers=self.headers,
+            timeout=self._timeout(),
         ) as session:
             async with session.get(
                 url,
@@ -135,7 +176,7 @@ class GitHubManager:
                     text = await response.text()
 
                     raise RuntimeError(
-                        f"GitHub file read failed: "
+                        "GitHub file read failed: "
                         f"{response.status} - {text}"
                     )
 
@@ -143,7 +184,8 @@ class GitHubManager:
 
         if data.get("encoding") != "base64":
             raise RuntimeError(
-                "GitHub returned an unsupported file encoding"
+                "GitHub returned an unsupported "
+                "file encoding"
             )
 
         content = data.get("content")
@@ -172,16 +214,21 @@ class GitHubManager:
     ) -> None:
         url = (
             f"{self.BASE_URL}/repos/"
-            f"{self.repository}/contents/{remote_path}"
+            f"{self.repository}/contents/"
+            f"{remote_path}"
         )
 
-        with open(local_path, "rb") as file:
+        with open(
+            local_path,
+            "rb",
+        ) as file:
             content = base64.b64encode(
                 file.read()
             ).decode("utf-8")
 
         async with aiohttp.ClientSession(
-            headers=self.headers
+            headers=self.headers,
+            timeout=self._timeout(),
         ) as session:
 
             sha = None
@@ -199,7 +246,7 @@ class GitHubManager:
                     text = await response.text()
 
                     raise RuntimeError(
-                        f"Failed to check remote file: "
+                        "Failed to check remote file: "
                         f"{response.status} - {text}"
                     )
 
@@ -217,11 +264,14 @@ class GitHubManager:
                 json=payload,
             ) as response:
 
-                if response.status not in (200, 201):
+                if response.status not in (
+                    200,
+                    201,
+                ):
                     text = await response.text()
 
                     raise RuntimeError(
-                        f"GitHub upload failed: "
+                        "GitHub upload failed: "
                         f"{response.status} - {text}"
                     )
 
@@ -232,12 +282,15 @@ class GitHubManager:
     ) -> None:
         url = (
             f"{self.BASE_URL}/repos/"
-            f"{self.repository}/contents/{remote_path}"
+            f"{self.repository}/contents/"
+            f"{remote_path}"
         )
 
         async with aiohttp.ClientSession(
-            headers=self.headers
+            headers=self.headers,
+            timeout=self._timeout(),
         ) as session:
+
             async with session.get(
                 url,
                 params={"ref": self.branch},
@@ -247,7 +300,7 @@ class GitHubManager:
                     text = await response.text()
 
                     raise RuntimeError(
-                        f"GitHub download failed: "
+                        "GitHub download failed: "
                         f"{response.status} - {text}"
                     )
 
@@ -255,7 +308,8 @@ class GitHubManager:
 
         if data.get("encoding") != "base64":
             raise RuntimeError(
-                "GitHub returned an unsupported file encoding"
+                "GitHub returned an unsupported "
+                "file encoding"
             )
 
         content = data.get("content")
@@ -265,14 +319,17 @@ class GitHubManager:
                 "GitHub returned an empty file"
             )
 
-        content = content.replace("\n", "")
-
         try:
-            decoded = base64.b64decode(content)
+            decoded = base64.b64decode(
+                content.replace("\n", "")
+            )
         except Exception as e:
             raise RuntimeError(
                 f"Failed to decode GitHub file: {e}"
             ) from e
 
-        with open(local_path, "wb") as file:
+        with open(
+            local_path,
+            "wb",
+        ) as file:
             file.write(decoded)
