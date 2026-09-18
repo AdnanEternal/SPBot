@@ -234,10 +234,17 @@ async def api_key_models_ping(
         f"📡 در حال Ping کردن {len(models)} مدل..."
     )
 
-    results = await self.gateway.ping_remote_models(
-        api_key,
-        models,
-    )
+    try:
+        results = await self.gateway.ping_remote_models(
+            api_key,
+            models,
+        )
+
+    except Exception as exc:
+        await event.reply(
+            f"❌ اجرای Ping ناموفق بود:\n{exc}"
+        )
+        return
 
     lines = [
         f"📡 نتیجه Ping برای `{name}`:",
@@ -250,23 +257,48 @@ async def api_key_models_ping(
                 f"✅ `{model_id}` — {latency:.0f}ms"
             )
         else:
-            error = (
-                error
-                .replace("\n", " ")
-                .strip()
-            )
+            error = str(error).replace(
+                "\n",
+                " ",
+            ).strip()
 
-            if len(error) > 120:
-                error = error[:117] + "..."
+            if len(error) > 100:
+                error = error[:97] + "..."
 
             lines.append(
                 f"❌ `{model_id}` — "
                 f"{latency:.0f}ms — {error}"
             )
 
-    await event.reply(
-        "\n".join(lines)
-    )
+    # پیام‌ها را به چند قسمت تقسیم می‌کنیم
+    # تا از محدودیت طول پیام رد نشویم.
+    chunk_size = 3000
+    chunks = []
+    current = ""
+
+    for line in lines:
+        if len(current) + len(line) + 1 > chunk_size:
+            if current:
+                chunks.append(current)
+
+            current = line
+        else:
+            if current:
+                current += "\n"
+
+            current += line
+
+    if current:
+        chunks.append(current)
+
+    for chunk in chunks:
+        try:
+            await event.reply(chunk)
+        except Exception as exc:
+            print(
+                f"❌ خطا در ارسال نتیجه Ping: {exc}"
+            )
+            break
 
 
 
