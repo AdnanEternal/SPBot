@@ -187,6 +187,37 @@ async def api_key_models(
     )
 
 
+
+@command(
+    name="حافظه پاک",
+    permission="owner",
+    chat_type="group",
+    description="تمام حافظه و خلاصه‌ی بوبی در این گروه را پاک می‌کند.",
+)
+async def clear_memory(
+    self,
+    event: events.NewMessage.Event,
+) -> None:
+    try:
+        await self.memory.store.clear_group(
+            event.chat_id
+        )
+
+    except Exception as exc:
+        print(
+            f"❌ خطا در پاک کردن حافظه گروه "
+            f"{event.chat_id}: {exc}"
+        )
+
+        await event.reply(
+            "❌ پاک کردن حافظه ناموفق بود."
+        )
+        return
+
+    await event.reply(
+        "🧠 حافظه‌ی بوبی در این گروه کامل پاک شد."
+    )
+
 @command(
     name="کلید مدل ها پینگ",
     permission="owner",

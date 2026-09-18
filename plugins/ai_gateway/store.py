@@ -281,6 +281,26 @@ class AIMemoryStore:
     def __init__(self, db: DatabaseManager) -> None:
         self.db = db
 
+    async def clear_group(
+    self,
+    group_id: int,
+) -> None:
+        await self.db.execute(
+            f"""
+            DELETE FROM {self.TABLE}
+            WHERE group_id = ?
+            """,
+            (group_id,),
+        )
+
+        await self.db.execute(
+            f"""
+            DELETE FROM {self.SUMMARY_TABLE}
+            WHERE group_id = ?
+            """,
+            (group_id,),
+        )
+
     async def create_tables(self) -> None:
         await self.db.create_table(
             self.TABLE,

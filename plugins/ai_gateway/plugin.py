@@ -10,7 +10,7 @@ from .store import AIGatewayStore
 
 class AIGatewayPlugin(BasePlugin):
     name = "AI Gateway"
-    version = "2.2.0"
+    version = "2.3.0"
 
     def __init__(self, client, command_manager, db, event_bus):
         super().__init__(
@@ -85,7 +85,7 @@ class AIGatewayPlugin(BasePlugin):
     bot_name = handlers.bot_name
 
     memory_limit = handlers.memory_limit
-
+    clear_memory = handlers.clear_memory
     # -------------------------
     # AI trigger
     # -------------------------
