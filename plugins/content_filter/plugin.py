@@ -17,7 +17,7 @@ class ContentFilterPlugin(BasePlugin):
     """
 
     name = "Content Filter"
-    version = "2.5.1"
+    version = "2.5.0"
 
     def __init__(self, client, command_manager, db, event_bus):
         super().__init__(client, command_manager, db, event_bus)
