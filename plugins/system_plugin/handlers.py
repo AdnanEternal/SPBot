@@ -248,6 +248,14 @@ async def database_restore(
         )
 
         await backup.restore_backup()
+        for plugin in self.plugin_manager.get_all_plugins():
+            try:
+                await plugin.on_load()
+            except Exception as e:
+                print(
+                    f"❌ خطا در بازسازی دیتابیس پلاگین "
+                    f"'{plugin.name}': {e}"
+                )
 
     except Exception as e:
         await event.reply(

@@ -19,7 +19,7 @@ class SystemPlugin(BasePlugin):
     """
 
     name = "System"
-    version = "2.6.0"
+    version = "2.6.1"
 
     show_help = handlers.show_help
     github_check = handlers.github_check
