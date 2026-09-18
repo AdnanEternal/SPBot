@@ -160,12 +160,23 @@ async def on_message(self, event):
     context = await self.memory.build_context(event.chat_id, await self.groups.get_system_prompt(event.chat_id))
     try:
         answer = await self.gateway.chat(context)
+
     except AIGatewayError as exc:
-        await event.reply(f'❌ مدل: {exc}')
+        print(f"❌ AI Gateway: {exc}")
+
+        await event.reply(
+            "❌ بوبی فعلاً نتونست پاسخ بده. "
+            "لطفاً دوباره امتحان کن."
+        )
         return
+
     except Exception as exc:
-        print(f'❌ AI Gateway: {exc}')
-        await event.reply('❌ فعلاً نتونستم پاسخ بگیرم.')
+        print(f"❌ خطای غیرمنتظره AI Gateway: {exc}")
+
+        await event.reply(
+            "❌ بوبی فعلاً نتونست پاسخ بده. "
+            "لطفاً دوباره امتحان کن."
+        )
         return
     await self.memory.store.add_message(event.chat_id, 'assistant', answer)
     await event.reply(answer[:4000] if len(answer) > 4000 else answer)
