@@ -86,7 +86,11 @@ async def update_model_key(self, event):
     await event.reply('✅ API Key بروزرسانی شد.')
 
 
-@command(name='مدل پینگ', permission='owner', chat_type='all', description='تست مدل ها')
+@command(
+        name='مدل پینگ', 
+        permission='owner', 
+        chat_type='all', 
+        description='تست مدل ها')
 async def ping_models(self, event):
     target = (event.args_text or '').strip()
     models = [await self.models.get(target)] if target else await self.models.get_all()
@@ -103,12 +107,22 @@ async def ping_models(self, event):
     await event.reply('\n'.join(lines))
 
 
-@command(name='پرامپت', permission='owner', chat_type='group', description='دیدن System Prompt')
+@command(
+        name='پرامپت', 
+        permission='owner', 
+        chat_type='all', 
+        description='دیدن System Prompt'
+        )
 async def show_prompt(self, event):
     await event.reply('🧠 System Prompt:\n\n' + await self.groups.get_system_prompt(event.chat_id))
 
 
-@command(name='پرامپت تنظیم', permission='owner', chat_type='group', description='تغییر System Prompt')
+@command(
+        name='پرامپت تنظیم', 
+        permission='owner', 
+        chat_type='all', 
+        description='تغییر System Prompt'
+        )
 async def set_prompt(self, event):
     prompt = (event.args_text or '').strip()
     if not prompt:
@@ -118,13 +132,23 @@ async def set_prompt(self, event):
     await event.reply('✅ System Prompt تغییر کرد.')
 
 
-@command(name='پرامپت ریست', permission='owner', chat_type='group', description='بازگردانی System Prompt')
+@command(
+        name='پرامپت ریست', 
+        permission='owner', 
+        chat_type='all', 
+        description='بازگردانی System Prompt'
+)
 async def reset_prompt(self, event):
     await self.groups.reset_system_prompt(event.chat_id)
     await event.reply('✅ System Prompt ریست شد.')
 
 
-@command(name='نام ربات', permission='owner', chat_type='group', description='دیدن یا تغییر Trigger')
+@command(
+        name='نام ربات', 
+        permission='owner', 
+        chat_type='all', 
+        description='دیدن یا تغییر Trigger'
+        )
 async def bot_name(self, event):
     value = (event.args_text or '').strip()
     if not value:
