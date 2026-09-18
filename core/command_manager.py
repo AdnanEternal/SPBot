@@ -98,9 +98,9 @@ class CommandManager:
         return best_name, args_text
 
     def register_dispatcher(
-        self,
-        client: SoroushClient,
-    ) -> None:
+    self,
+    client: SoroushClient,
+) -> None:
 
         @client.on(events.NewMessage(incoming=True))
         async def dispatcher(
@@ -128,17 +128,19 @@ class CommandManager:
                 if command is None:
                     return
 
+                # کامند واقعی پیدا شده؛ از اینجا به بعد
+                # این event متعلق به سیستم command است.
                 if (
                     command.chat_type == "group"
                     and not event.is_group
                 ):
-                    return
+                    raise StopPropagation
 
                 if (
                     command.chat_type == "private"
                     and not event.is_private
                 ):
-                    return
+                    raise StopPropagation
 
                 sender_id = event.sender_id
 
@@ -150,11 +152,11 @@ class CommandManager:
                         chat,
                         sender_id,
                     ):
-                        return
+                        raise StopPropagation
 
                 elif command.permission == "owner":
                     if not is_owner(sender_id):
-                        return
+                        raise StopPropagation
 
                 event.args_text = args_text
                 event.args = (
@@ -162,24 +164,17 @@ class CommandManager:
                     if args_text
                     else []
                 )
-                try:
-                    await command.handler(event)
-                    raise StopPropagation
-                except StopPropagation:
-                    raise
-                except Exception:
-                    print(
-                        f"\n❌ خطای بحرانی در اجرای دستور "
-                        f"'{command_name}'"
-                    )
-                    traceback.print_exc()
 
-                    try:
-                        await event.reply(
-                            "❌ هنگام اجرای این دستور خطایی رخ داد."
-                        )
-                    except Exception:
-                        pass
+                await command.handler(event)
+
+                # کامند اجرا شد؛ هیچ handler دیگری
+                # نباید این event را پردازش کند.
+                raise StopPropagation
+
+            except StopPropagation:
+                # بسیار مهم:
+                # این exception نباید توسط Exception گرفته شود.
+                raise
 
             except Exception:
                 command_name_for_log = locals().get(
