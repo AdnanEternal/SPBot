@@ -1,7 +1,8 @@
-# main.py
+
 
 import asyncio
 import traceback
+import time
 
 from config import config
 from core.client import ClientManager
@@ -62,37 +63,25 @@ async def run_bot() -> None:
 
 
 def main() -> None:
+    delay = 5
     while True:
+        started = time.monotonic()
         try:
             asyncio.run(run_bot())
 
-            print(
-                "⚠️ اتصال ربات قطع شد؛ "
-                "تلاش برای اتصال مجدد..."
-            )
-
         except KeyboardInterrupt:
-            print(
-                "\n🛑 ربات توسط کاربر متوقف شد."
-            )
+            
             break
 
         except Exception:
-            print(
-                "\n🔥 برنامه با خطای غیرمنتظره "
-                "متوقف شد."
-            )
+           
             traceback.print_exc()
 
             print(
                 "♻️ راه‌اندازی مجدد ربات..."
             )
 
-        except BaseException:
-            print(
-                "\n🔥 خطای سیستمی دریافت شد."
-            )
-            traceback.print_exc()
-            break
+        delay = 5 if time.monotonic() - started > 60 else min(delay * 2, 300)
+        time.sleep(delay)
 
 main()
