@@ -121,19 +121,53 @@ async def set_max_violations(self: "ViolationManagerPlugin", event: events.NewMe
     name="مجازات میوت",
     permission="admin",
     chat_type="group",
-    description="مجازات خودکارِ این گروه رو میوت می‌ذاره و مدتش (به ساعت) رو تنظیم می‌کنه.",
+    description="مجازات خودکار را روی میوت تنظیم می‌کند؛ بدون ساعت یعنی دائمی.",
 )
-async def set_punishment_mute(self: "ViolationManagerPlugin", event: events.NewMessage.Event) -> None:
-    value = event.args_text.strip()
-    if not value.isdigit() or int(value) <= 0:
-        await event.reply("مثال: !مجازات میوت 6")
+async def set_punishment_mute(
+    self,
+    event: events.NewMessage.Event,
+) -> None:
+    value = (event.args_text or "").strip()
+
+    # بدون آرگومان = میوت دائمی
+    if not value:
+        await self.settings.set_punishment_mute(
+            event.chat_id,
+            None,
+        )
+
+        await event.reply(
+            "✅ مجازات خودکار روی «میوت دائمی» تنظیم شد."
+        )
+        return
+
+    # با ساعت
+    if not value.isdigit():
+        await event.reply(
+            "مثال:\n"
+            "!مجازات میوت\n"
+            "یا:\n"
+            "!مجازات میوت 6"
+        )
         return
 
     hours = int(value)
-    await self.settings.set_punishment_mute(event.chat_id, hours)
-    await event.reply(f"زمان مجازات میوت کردن با موفقیت به {hours} ساعت اپدیت شد!")
 
+    if hours <= 0:
+        await event.reply(
+            "❌ تعداد ساعت باید بیشتر از صفر باشد."
+        )
+        return
 
+    await self.settings.set_punishment_mute(
+        event.chat_id,
+        hours,
+    )
+
+    await event.reply(
+        f"✅ مجازات خودکار روی "
+        f"«میوت {hours} ساعته» تنظیم شد."
+    )
 @command(
     name="مجازات بن",
     permission="admin",
@@ -301,10 +335,7 @@ async def on_violation(
         )
 
     elif settings["punishment_type"] == "mute":
-        hours = (
-            settings["mute_hours"]
-            or DEFAULT_MUTE_HOURS
-        )
+        hours = settings["mute_hours"]
 
         await moderation.mute_user(
             self.client,
