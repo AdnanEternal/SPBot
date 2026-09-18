@@ -477,16 +477,17 @@ class AIAPIKeyStore:
 
         return cursor.rowcount > 0
 
-
 class AIGatewayStore:
     def __init__(self, db: DatabaseManager) -> None:
         self.models = AIModelStore(db)
         self.groups = AIGroupSettingsStore(db)
         self.memory = AIMemoryStore(db)
+        self.memory_settings = AIMemorySettingsStore(db)
         self.api_keys = AIAPIKeyStore(db)
 
     async def create_tables(self) -> None:
         await self.models.create_table()
         await self.groups.create_table()
         await self.memory.create_tables()
+        await self.memory_settings.create_table()
         await self.api_keys.create_table()

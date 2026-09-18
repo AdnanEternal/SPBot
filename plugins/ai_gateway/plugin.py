@@ -10,29 +10,35 @@ from .store import AIGatewayStore
 
 class AIGatewayPlugin(BasePlugin):
     name = "AI Gateway"
-    version = "2.1.0"
+    version = "2.1.1"
 
     def __init__(self, client, command_manager, db, event_bus):
-        super().__init__(client, command_manager, db, event_bus)
-        self.api_keys = self.store.api_keys
+        super().__init__(
+            client,
+            command_manager,
+            db,
+            event_bus,
+        )
+
         self.store = AIGatewayStore(db)
+
         self.models = self.store.models
         self.groups = self.store.groups
         self.memory = AIMemoryManager(
             self.store.memory,
             self.store.memory_settings,
         )
+        self.api_keys = self.store.api_keys
+
         self.gateway = AIGateway(self.models)
 
         self.bot_user_id = None
         self.default_trigger = "بوبی"
 
     async def on_load(self):
-        # ساخت تمام جدول‌های موردنیاز پلاگین
         await self.store.create_tables()
 
     async def on_enable(self):
-        # اطمینان از وجود جدول‌ها حتی اگر on_load قبلاً اجرا نشده باشد
         await self.store.create_tables()
 
         result = self.client.get_me()
@@ -40,7 +46,15 @@ class AIGatewayPlugin(BasePlugin):
         if inspect.isawaitable(result):
             result = await result
 
-        self.bot_user_id = getattr(result, "id", None)
+        self.bot_user_id = getattr(
+            result,
+            "id",
+            None,
+        )
+
+    # -------------------------
+    # Model management
+    # -------------------------
 
     add_model = handlers.add_model
     list_models = handlers.list_models
@@ -50,17 +64,30 @@ class AIGatewayPlugin(BasePlugin):
     update_model_key = handlers.update_model_key
     ping_models = handlers.ping_models
 
-    show_prompt = handlers.show_prompt
-    set_prompt = handlers.set_prompt
-    reset_prompt = handlers.reset_prompt
-
-    bot_name = handlers.bot_name
-
-    on_message = handlers.on_message
-    memory_limit = handlers.memory_limit
+    # -------------------------
+    # API Key management
+    # -------------------------
 
     add_api_key = handlers.add_api_key
     list_api_keys = handlers.list_api_keys
     delete_api_key = handlers.delete_api_key
     api_key_models = handlers.api_key_models
     api_key_models_ping = handlers.api_key_models_ping
+
+    # -------------------------
+    # Group AI settings
+    # -------------------------
+
+    show_prompt = handlers.show_prompt
+    set_prompt = handlers.set_prompt
+    reset_prompt = handlers.reset_prompt
+
+    bot_name = handlers.bot_name
+
+    memory_limit = handlers.memory_limit
+
+    # -------------------------
+    # AI trigger
+    # -------------------------
+
+    on_message = handlers.on_message
