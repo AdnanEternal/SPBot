@@ -29,7 +29,7 @@ async def add_word(
     await event.reply(
         f"کلمه «{word}» به لیست فیلتر این گروه اضافه شد."
     )
-    return
+    
 
 
 @command(

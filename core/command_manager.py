@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Iterable, Optional
 
 from splusthon import SoroushClient, events
+from splusthon.events import StopPropagation
 
 from core.permissions import is_chat_admin, is_owner
 
@@ -161,8 +162,24 @@ class CommandManager:
                     if args_text
                     else []
                 )
+                try:
+                    await command.handler(event)
+                    raise StopPropagation
+                except StopPropagation:
+                    raise
+                except Exception:
+                    print(
+                        f"\n❌ خطای بحرانی در اجرای دستور "
+                        f"'{command_name}'"
+                    )
+                    traceback.print_exc()
 
-                await command.handler(event)
+                    try:
+                        await event.reply(
+                            "❌ هنگام اجرای این دستور خطایی رخ داد."
+                        )
+                    except Exception:
+                        pass
 
             except Exception:
                 command_name_for_log = locals().get(
