@@ -111,5 +111,5 @@ async def on_message(
         event=event,
         group_id=event.chat_id,
         user_id=event.sender_id,
-        reason=f"استفاده از کلمه «{matched_word}» ممنوع است.",
+        reason=f"استفاده از کلمه ||{matched_word}|| ممنوع است.",
     )
