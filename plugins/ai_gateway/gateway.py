@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import aiohttp
+
 import time
 from typing import Any, Optional
 
@@ -19,6 +21,215 @@ class AIGateway:
 
     def __init__(self, models: AIModelStore) -> None:
         self.models = models
+
+
+    @staticmethod
+    def _normalize_provider(provider: str) -> str:
+        provider = provider.strip().lower()
+
+        if provider in {
+            "zai",
+            "z.ai",
+            "z-ai",
+        }:
+            return "openai"
+
+        return provider
+
+    @staticmethod
+    def _models_url(api_key_data: dict) -> str:
+        explicit_url = api_key_data.get("models_url")
+
+        if explicit_url:
+            return explicit_url.rstrip("/")
+
+        base_url = api_key_data.get("base_url")
+
+        if not base_url:
+            raise AIGatewayError(
+                "Base URL برای گرفتن لیست مدل‌ها تنظیم نشده است."
+            )
+
+        return base_url.rstrip("/") + "/models"
+
+    async def list_remote_models(
+        self,
+        api_key_data: dict,
+        timeout: float = 15.0,
+    ) -> list[str]:
+
+        url = self._models_url(api_key_data)
+
+        headers = {
+            "Authorization": f"Bearer {api_key_data['api_key']}",
+        }
+
+        timeout_config = aiohttp.ClientTimeout(
+            total=timeout
+        )
+
+        try:
+            async with aiohttp.ClientSession(
+                timeout=timeout_config
+            ) as session:
+
+                async with session.get(
+                    url,
+                    headers=headers,
+                ) as response:
+
+                    text = await response.text()
+
+                    if response.status != 200:
+                        raise AIGatewayError(
+                            f"HTTP {response.status}: {text[:300]}"
+                        )
+
+                    try:
+                        data = await response.json(
+                            content_type=None
+                        )
+                    except Exception as exc:
+                        raise AIGatewayError(
+                            "پاسخ API برای /models قابل خواندن نبود."
+                        ) from exc
+
+        except asyncio.TimeoutError as exc:
+            raise AIGatewayError(
+                "درخواست دریافت مدل‌ها Timeout شد."
+            ) from exc
+
+        except aiohttp.ClientError as exc:
+            raise AIGatewayError(
+                f"خطای اتصال: {exc}"
+            ) from exc
+
+        models = data.get("data")
+
+        if not isinstance(models, list):
+            raise AIGatewayError(
+                "پاسخ API شامل لیست data نیست."
+            )
+
+        result = []
+
+        for item in models:
+            if not isinstance(item, dict):
+                continue
+
+            model_id = item.get("id")
+
+            if model_id:
+                result.append(str(model_id))
+
+        return sorted(set(result))
+
+    async def ping_remote_model(
+        self,
+        api_key_data: dict,
+        model_id: str,
+        timeout: float = 20.0,
+    ) -> tuple[bool, float, str]:
+
+        provider = self._normalize_provider(
+            api_key_data["provider"]
+        )
+
+        model_name = f"{provider}/{model_id}"
+
+        kwargs = {
+            "model": model_name,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Reply with exactly: pong",
+                }
+            ],
+            "api_key": api_key_data["api_key"],
+            "timeout": timeout,
+            "temperature": 0,
+        }
+
+        if api_key_data.get("base_url"):
+            kwargs["api_base"] = api_key_data["base_url"]
+
+        started = asyncio.get_running_loop().time()
+
+        try:
+            await acompletion(**kwargs)
+
+            latency = (
+                asyncio.get_running_loop().time()
+                - started
+            ) * 1000
+
+            return True, latency, ""
+
+        except Exception as exc:
+            latency = (
+                asyncio.get_running_loop().time()
+                - started
+            ) * 1000
+
+            error = str(exc).replace(
+                api_key_data["api_key"],
+                "***",
+            )
+
+            return False, latency, error
+
+    async def ping_remote_models(
+        self,
+        api_key_data: dict,
+        models: list[str],
+        timeout: float = 20.0,
+    ) -> list[tuple[str, bool, float, str]]:
+
+        tasks = [
+            self.ping_remote_model(
+                api_key_data,
+                model_id,
+                timeout,
+            )
+            for model_id in models
+        ]
+
+        results = await asyncio.gather(
+            *tasks,
+            return_exceptions=True,
+        )
+
+        output = []
+
+        for model_id, result in zip(
+            models,
+            results,
+        ):
+
+            if isinstance(result, Exception):
+                output.append(
+                    (
+                        model_id,
+                        False,
+                        0,
+                        str(result),
+                    )
+                )
+                continue
+
+            ok, latency, error = result
+
+            output.append(
+                (
+                    model_id,
+                    ok,
+                    latency,
+                    error,
+                )
+            )
+
+        return output
+
 
     @staticmethod
     def _litellm_model(model: dict[str, Any]) -> str:

@@ -408,15 +408,85 @@ class AIMemoryStore:
             (group_id, message_id),
         )
 
+
+class AIAPIKeyStore:
+    TABLE = "ai_api_keys"
+
+    def __init__(self, db: DatabaseManager) -> None:
+        self.db = db
+
+    async def create_table(self) -> None:
+        await self.db.create_table(
+            self.TABLE,
+            columns={
+                "id": "INTEGER PRIMARY KEY AUTOINCREMENT",
+                "name": "TEXT NOT NULL UNIQUE",
+                "provider": "TEXT NOT NULL",
+                "api_key": "TEXT NOT NULL",
+                "base_url": "TEXT",
+                "models_url": "TEXT",
+                "created_at": "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP",
+                "updated_at": "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP",
+            },
+            indexes=["provider"],
+        )
+
+    async def add(
+        self,
+        name: str,
+        provider: str,
+        api_key: str,
+        base_url: str | None = None,
+        models_url: str | None = None,
+    ) -> None:
+        await self.db.insert(
+            self.TABLE,
+            {
+                "name": name.strip().lower(),
+                "provider": provider.strip(),
+                "api_key": api_key.strip(),
+                "base_url": base_url.strip() if base_url else None,
+                "models_url": models_url.strip() if models_url else None,
+            },
+        )
+
+    async def get(self, name: str) -> dict | None:
+        row = await self.db.select_one(
+            self.TABLE,
+            where={"name": name.strip().lower()},
+        )
+
+        return dict(row) if row else None
+
+    async def get_all(self) -> list[dict]:
+        rows = await self.db.fetchall(
+            f"""
+            SELECT *
+            FROM {self.TABLE}
+            ORDER BY name ASC
+            """
+        )
+
+        return [dict(row) for row in rows]
+
+    async def delete(self, name: str) -> bool:
+        cursor = await self.db.delete(
+            self.TABLE,
+            {"name": name.strip().lower()},
+        )
+
+        return cursor.rowcount > 0
+
+
 class AIGatewayStore:
     def __init__(self, db: DatabaseManager) -> None:
         self.models = AIModelStore(db)
         self.groups = AIGroupSettingsStore(db)
         self.memory = AIMemoryStore(db)
-        self.memory_settings = AIMemorySettingsStore(db)
+        self.api_keys = AIAPIKeyStore(db)
 
     async def create_tables(self) -> None:
         await self.models.create_table()
         await self.groups.create_table()
         await self.memory.create_tables()
-        await self.memory_settings.create_table()
+        await self.api_keys.create_table()

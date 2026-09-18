@@ -2,12 +2,271 @@ from splusthon import events
 from core.decorators import command, on_event
 from .gateway import AIGatewayError
 from .trigger import extract_trigger_text
-
+from .gateway import AIGatewayError
 
 def mask_secret(secret):
     if not secret: return 'تنظیم نشده'
     if len(secret) <= 8: return '••••••••'
     return f'{secret[:4]}••••{secret[-4:]}'
+
+
+
+@command(
+    name="کلید افزودن",
+    permission="owner",
+    chat_type="all",
+    description="یک API Key را برای استفاده و مدیریت ذخیره می‌کند.",
+)
+async def add_api_key(
+    self,
+    event,
+):
+    args = (event.args_text or "").strip().split()
+
+    if len(args) < 3:
+        await event.reply(
+            "مثال:\n"
+            "!کلید افزودن zai openai API_KEY BASE_URL [MODELS_URL]"
+        )
+        return
+
+    name = args[0]
+    provider = args[1]
+    api_key = args[2]
+
+    base_url = (
+        args[3]
+        if len(args) >= 4
+        else None
+    )
+
+    models_url = (
+        args[4]
+        if len(args) >= 5
+        else None
+    )
+
+    try:
+        await self.api_keys.add(
+            name=name,
+            provider=provider,
+            api_key=api_key,
+            base_url=base_url,
+            models_url=models_url,
+        )
+
+    except Exception as exc:
+        await event.reply(
+            f"❌ ذخیره API Key ناموفق بود:\n{exc}"
+        )
+        return
+
+    try:
+        await event.delete()
+    except Exception:
+        pass
+
+    await event.reply(
+        f"✅ API Key «{name}» ذخیره شد."
+    )
+
+
+@command(
+    name="کلید ها",
+    permission="owner",
+    chat_type="all",
+    description="لیست API Keyهای ذخیره‌شده را نشان می‌دهد.",
+)
+async def list_api_keys(
+    self,
+    event,
+):
+    keys = await self.api_keys.get_all()
+
+    if not keys:
+        await event.reply(
+            "🔑 هیچ API Key ذخیره نشده است."
+        )
+        return
+
+    lines = []
+
+    for item in keys:
+        lines.append(
+            f"🔑 `{item['name']}` — "
+            f"{item['provider']}"
+        )
+
+    await event.reply(
+        "🔐 API Keyهای ذخیره‌شده:\n\n"
+        + "\n".join(lines)
+    )
+
+
+@command(
+    name="کلید حذف",
+    permission="owner",
+    chat_type="all",
+    description="یک API Key را حذف می‌کند.",
+)
+async def delete_api_key(
+    self,
+    event,
+):
+    name = (event.args_text or "").strip()
+
+    if not name:
+        await event.reply(
+            "مثال: !کلید حذف zai"
+        )
+        return
+
+    if not await self.api_keys.delete(name):
+        await event.reply(
+            f"❌ API Key «{name}» پیدا نشد."
+        )
+        return
+
+    await event.reply(
+        f"✅ API Key «{name}» حذف شد."
+    )
+
+
+@command(
+    name="کلید مدل ها",
+    permission="owner",
+    chat_type="all",
+    description="مدل‌های موجود روی API را بدون Ping نشان می‌دهد.",
+)
+async def api_key_models(
+    self,
+    event,
+):
+    name = (event.args_text or "").strip()
+
+    if not name:
+        await event.reply(
+            "مثال: !کلید مدل ها zai"
+        )
+        return
+
+    api_key = await self.api_keys.get(name)
+
+    if api_key is None:
+        await event.reply(
+            f"❌ API Key «{name}» پیدا نشد."
+        )
+        return
+
+    try:
+        models = await self.gateway.list_remote_models(
+            api_key
+        )
+
+    except AIGatewayError as exc:
+        await event.reply(
+            f"❌ نتونستم مدل‌های «{name}» رو بگیرم:\n"
+            f"{exc}"
+        )
+        return
+
+    if not models:
+        await event.reply(
+            "📦 این API هیچ مدلی برنگردوند."
+        )
+        return
+
+    lines = [
+        f"🔹 `{model}`"
+        for model in models
+    ]
+
+    await event.reply(
+        f"📦 مدل‌های API «{name}»:\n\n"
+        + "\n".join(lines)
+    )
+
+
+@command(
+    name="کلید مدل ها پینگ",
+    permission="owner",
+    chat_type="all",
+    description="مدل‌های API را همزمان Ping می‌کند.",
+)
+async def api_key_models_ping(
+    self,
+    event,
+):
+    name = (event.args_text or "").strip()
+
+    if not name:
+        await event.reply(
+            "مثال: !کلید مدل ها پینگ zai"
+        )
+        return
+
+    api_key = await self.api_keys.get(name)
+
+    if api_key is None:
+        await event.reply(
+            f"❌ API Key «{name}» پیدا نشد."
+        )
+        return
+
+    try:
+        models = await self.gateway.list_remote_models(
+            api_key
+        )
+
+    except AIGatewayError as exc:
+        await event.reply(
+            f"❌ دریافت مدل‌ها ناموفق بود:\n{exc}"
+        )
+        return
+
+    if not models:
+        await event.reply(
+            "📦 هیچ مدلی برای Ping پیدا نشد."
+        )
+        return
+
+    await event.reply(
+        f"📡 در حال Ping کردن {len(models)} مدل..."
+    )
+
+    results = await self.gateway.ping_remote_models(
+        api_key,
+        models,
+    )
+
+    lines = [
+        f"📡 نتیجه Ping برای `{name}`:",
+        "",
+    ]
+
+    for model_id, ok, latency, error in results:
+        if ok:
+            lines.append(
+                f"✅ `{model_id}` — {latency:.0f}ms"
+            )
+        else:
+            error = (
+                error
+                .replace("\n", " ")
+                .strip()
+            )
+
+            if len(error) > 120:
+                error = error[:117] + "..."
+
+            lines.append(
+                f"❌ `{model_id}` — "
+                f"{latency:.0f}ms — {error}"
+            )
+
+    await event.reply(
+        "\n".join(lines)
+    )
 
 
 

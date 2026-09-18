@@ -10,11 +10,11 @@ from .store import AIGatewayStore
 
 class AIGatewayPlugin(BasePlugin):
     name = "AI Gateway"
-    version = "2.0.0"
+    version = "2.1.0"
 
     def __init__(self, client, command_manager, db, event_bus):
         super().__init__(client, command_manager, db, event_bus)
-
+        self.api_keys = self.store.api_keys
         self.store = AIGatewayStore(db)
         self.models = self.store.models
         self.groups = self.store.groups
@@ -58,3 +58,9 @@ class AIGatewayPlugin(BasePlugin):
 
     on_message = handlers.on_message
     memory_limit = handlers.memory_limit
+
+    add_api_key = handlers.add_api_key
+    list_api_keys = handlers.list_api_keys
+    delete_api_key = handlers.delete_api_key
+    api_key_models = handlers.api_key_models
+    api_key_models_ping = handlers.api_key_models_ping
