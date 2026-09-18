@@ -10,7 +10,7 @@ from .store import AIGatewayStore
 
 class AIGatewayPlugin(BasePlugin):
     name = "AI Gateway"
-    version = "1.1.1"
+    version = "2.0.0"
 
     def __init__(self, client, command_manager, db, event_bus):
         super().__init__(client, command_manager, db, event_bus)
@@ -18,7 +18,10 @@ class AIGatewayPlugin(BasePlugin):
         self.store = AIGatewayStore(db)
         self.models = self.store.models
         self.groups = self.store.groups
-        self.memory = AIMemoryManager(self.store.memory)
+        self.memory = AIMemoryManager(
+            self.store.memory,
+            self.store.memory_settings,
+        )
         self.gateway = AIGateway(self.models)
 
         self.bot_user_id = None
@@ -54,3 +57,4 @@ class AIGatewayPlugin(BasePlugin):
     bot_name = handlers.bot_name
 
     on_message = handlers.on_message
+    memory_limit = handlers.memory_limit

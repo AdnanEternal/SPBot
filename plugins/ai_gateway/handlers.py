@@ -10,6 +10,55 @@ def mask_secret(secret):
     return f'{secret[:4]}••••{secret[-4:]}'
 
 
+
+@command(
+    name="حافظه",
+    permission="owner",
+    chat_type="group",
+    description="حداکثر تعداد توکن حافظه مکالمه این گروه را تنظیم می‌کند.",
+)
+async def memory_limit(
+    self,
+    event: events.NewMessage.Event,
+) -> None:
+    value = (event.args_text or "").strip()
+
+    if not value:
+        limit = await self.memory.settings.get_token_limit(
+            event.chat_id
+        )
+
+        await event.reply(
+            f"🧠 سقف حافظه این گروه: {limit:,} توکن"
+        )
+        return
+
+    if not value.isdigit():
+        await event.reply(
+            "مثال:\n"
+            "!حافظه 8000"
+        )
+        return
+
+    limit = int(value)
+
+    if limit < 100:
+        await event.reply(
+            "❌ حداقل مقدار حافظه 100 توکن است."
+        )
+        return
+
+    await self.memory.settings.set_token_limit(
+        event.chat_id,
+        limit,
+    )
+
+    await event.reply(
+        f"✅ سقف حافظه این گروه روی "
+        f"{limit:,} توکن تنظیم شد."
+    )
+
+
 @command(name='مدل افزودن', permission='owner', chat_type='all', description='افزودن مدل AI')
 async def add_model(self, event):
     args = (event.args_text or '').split()
@@ -181,7 +230,13 @@ async def on_message(self, event):
         name = str(event.sender_id)
     user_content = self.memory.format_user_message(name, int(event.sender_id), prompt_text)
     await self.memory.store.add_message(event.chat_id, 'user', user_content, event.sender_id)
-    context = await self.memory.build_context(event.chat_id, await self.groups.get_system_prompt(event.chat_id))
+
+    context = await self.memory.build_context(
+        event.chat_id,
+        await self.groups.get_system_prompt(event.chat_id),
+        self.gateway,
+    )
+
     try:
         answer = await self.gateway.chat(context)
 
@@ -204,5 +259,4 @@ async def on_message(self, event):
         return
     await self.memory.store.add_message(event.chat_id, 'assistant', answer)
     await event.reply(answer[:4000] if len(answer) > 4000 else answer)
-    import asyncio
-    asyncio.create_task(self.memory.maybe_summarize(event.chat_id, self.gateway))
+    

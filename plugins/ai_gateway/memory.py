@@ -1,59 +1,115 @@
-import asyncio
+from __future__ import annotations
+
+from litellm import token_counter
+
 
 class AIMemoryManager:
-    RECENT_MESSAGES = 24
-    SUMMARY_TRIGGER = 48
-    SUMMARY_KEEP_RECENT = 24
+    MAX_FETCH_MESSAGES = 1000
 
-    def __init__(self, store):
+    def __init__(self, store, settings_store):
         self.store = store
-        self._locks = {}
+        self.settings = settings_store
 
-    def _lock(self, group_id):
-        if group_id not in self._locks:
-            self._locks[group_id] = asyncio.Lock()
-        return self._locks[group_id]
+    async def _count_tokens(
+        self,
+        messages: list[dict[str, str]],
+        gateway,
+    ) -> int:
+        try:
+            model = await gateway.models.get_active()
 
-    async def build_context(self, group_id, system_prompt):
-        summary = await self.store.get_summary(group_id)
-        recent = await self.store.get_recent(group_id, self.RECENT_MESSAGES)
-        messages = [{'role':'system','content':system_prompt}]
-        if summary and summary['summary']:
-            messages.append({'role':'system','content':'خلاصه حافظه قدیمی گروه:\n' + summary['summary']})
-        for row in recent:
-            messages.append({'role':row['role'],'content':row['content']})
-        return messages
+            if model is not None:
+                model_name = gateway._litellm_model(model)
 
-    async def maybe_summarize(self, group_id, gateway):
-        async with self._lock(group_id):
-            count = await self.store.count(group_id)
-            if count <= self.SUMMARY_TRIGGER:
-                return
-            recent = await self.store.get_recent(group_id, self.SUMMARY_KEEP_RECENT)
-            if not recent:
-                return
-            cutoff = recent[0]['id'] - 1
-            old_summary = await self.store.get_summary(group_id)
-            after = int(old_summary['through_message_id']) if old_summary else 0
-            if cutoff <= after:
-                return
-            rows = await self.store.get_unsummarized(group_id, after, cutoff, 24)
-            if not rows:
-                return
-            transcript = '\n'.join(('کاربر' if r['role']=='user' else 'بوبی') + ': ' + r['content'] for r in rows)
-            previous = old_summary['summary'] if old_summary else 'هیچ حافظه قدیمی وجود ندارد.'
-            prompt = [
-                {'role':'system','content':'حافظه گروه را خلاصه کن. نام اعضا، روابط، ترجیحات و واقعیت های مهم را حفظ کن و فقط خلاصه را برگردان.'},
-                {'role':'user','content':'حافظه قبلی:\n'+previous+'\n\nگفتگو:\n'+transcript},
+                return int(
+                    token_counter(
+                        model=model_name,
+                        messages=messages,
+                    )
+                )
+
+        except Exception as exc:
+            print(f"⚠️ خطا در محاسبه توکن حافظه: {exc}")
+
+        # fallback تقریبی
+        return sum(
+            max(1, len(message["content"]) // 4) + 4
+            for message in messages
+        )
+
+    async def build_context(
+        self,
+        group_id: int,
+        system_prompt: str,
+        gateway,
+    ) -> list[dict[str, str]]:
+
+        token_limit = await self.settings.get_token_limit(
+            group_id
+        )
+
+        recent = await self.store.get_recent(
+            group_id,
+            self.MAX_FETCH_MESSAGES,
+        )
+
+        selected: list[dict[str, str]] = []
+
+        # از جدیدترین پیام به سمت قدیمی‌تر حرکت می‌کنیم.
+        for row in reversed(recent):
+            candidate = [
+                {"role": "system", "content": system_prompt}
             ]
-            try:
-                summary = await gateway.chat(prompt, timeout=45, temperature=0)
-            except Exception as exc:
-                print(f'⚠️ خطا در خلاصه سازی حافظه گروه {group_id}: {exc}')
-                return
-            await self.store.save_summary(group_id, summary, rows[-1]['id'])
-            await self.store.delete_through(group_id, rows[-1]['id'])
+
+            candidate.extend(reversed(selected))
+
+            candidate.append(
+                {
+                    "role": row["role"],
+                    "content": row["content"],
+                }
+            )
+
+            token_count = await self._count_tokens(
+                candidate,
+                gateway,
+            )
+
+            if token_count <= token_limit or not selected:
+                selected.append(
+                    {
+                        "role": row["role"],
+                        "content": row["content"],
+                    }
+                )
+            else:
+                break
+
+        selected.reverse()
+
+        # اگر انتخاب حافظه با پاسخ assistant شروع شده،
+        # آن پاسخ را حذف می‌کنیم تا context منطقی‌تر باشد.
+        if selected and selected[0]["role"] == "assistant":
+            selected.pop(0)
+
+        return [
+            {
+                "role": "system",
+                "content": system_prompt,
+            },
+            *selected,
+        ]
+
+    def get_default_token_limit(self) -> int:
+        return self.settings.DEFAULT_TOKEN_LIMIT
 
     @staticmethod
-    def format_user_message(name, user_id, text):
-        return f'[کاربر: {name} | شناسه: {user_id}]\n{text}'
+    def format_user_message(
+        name: str,
+        user_id: int,
+        text: str,
+    ) -> str:
+        return (
+            f"[کاربر: {name} | شناسه: {user_id}]\n"
+            f"{text}"
+        )

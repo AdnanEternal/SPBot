@@ -219,6 +219,60 @@ class AIGroupSettingsStore:
             (group_id,),
         )
 
+class AIMemorySettingsStore:
+    TABLE = "ai_memory_settings"
+    DEFAULT_TOKEN_LIMIT = 8000
+
+    def __init__(self, db: DatabaseManager) -> None:
+        self.db = db
+
+    async def create_table(self) -> None:
+        await self.db.create_table(
+            self.TABLE,
+            columns={
+                "group_id": "INTEGER PRIMARY KEY",
+                "token_limit": (
+                    f"INTEGER NOT NULL DEFAULT {self.DEFAULT_TOKEN_LIMIT}"
+                ),
+                "updated_at": (
+                    "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                ),
+            },
+        )
+
+    async def _ensure(self, group_id: int) -> None:
+        await self.db.insert(
+            self.TABLE,
+            {"group_id": group_id},
+            or_ignore=True,
+        )
+
+    async def get_token_limit(self, group_id: int) -> int:
+        await self._ensure(group_id)
+
+        row = await self.db.select_one(
+            self.TABLE,
+            where={"group_id": group_id},
+        )
+
+        return int(row["token_limit"])
+
+    async def set_token_limit(
+        self,
+        group_id: int,
+        token_limit: int,
+    ) -> None:
+        await self._ensure(group_id)
+
+        await self.db.execute(
+            f"""
+            UPDATE {self.TABLE}
+            SET token_limit = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE group_id = ?
+            """,
+            (token_limit, group_id),
+        )
 
 class AIMemoryStore:
     TABLE = "ai_memory_messages"
@@ -354,14 +408,15 @@ class AIMemoryStore:
             (group_id, message_id),
         )
 
-
 class AIGatewayStore:
     def __init__(self, db: DatabaseManager) -> None:
         self.models = AIModelStore(db)
         self.groups = AIGroupSettingsStore(db)
         self.memory = AIMemoryStore(db)
+        self.memory_settings = AIMemorySettingsStore(db)
 
     async def create_tables(self) -> None:
         await self.models.create_table()
         await self.groups.create_table()
         await self.memory.create_tables()
+        await self.memory_settings.create_table()
