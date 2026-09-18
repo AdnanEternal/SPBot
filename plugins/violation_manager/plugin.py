@@ -16,7 +16,7 @@ class ViolationManagerPlugin(BasePlugin):
     """
 
     name = "Violation Manager"
-    version = "1.1.0"
+    version = "1.2.0"
 
     def __init__(self, client, command_manager, db, event_bus):
         super().__init__(client, command_manager, db, event_bus)
