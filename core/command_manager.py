@@ -98,9 +98,9 @@ class CommandManager:
         return best_name, args_text
 
     def register_dispatcher(
-    self,
-    client: SoroushClient,
-) -> None:
+        self,
+        client: SoroushClient,
+        ) -> None:
 
         @client.on(events.NewMessage(incoming=True))
         async def dispatcher(
