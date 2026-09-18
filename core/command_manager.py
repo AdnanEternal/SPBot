@@ -128,52 +128,66 @@ class CommandManager:
                 if command is None:
                     return
 
-                # کامند واقعی پیدا شده؛ از اینجا به بعد
-                # این event متعلق به سیستم command است.
-                if (
-                    command.chat_type == "group"
-                    and not event.is_group
-                ):
-                    raise StopPropagation
-
-                if (
-                    command.chat_type == "private"
-                    and not event.is_private
-                ):
-                    raise StopPropagation
-
-                sender_id = event.sender_id
-
-                if command.permission == "admin":
-                    chat = await event.get_chat()
-
-                    if not await is_chat_admin(
-                        client,
-                        chat,
-                        sender_id,
+                # از اینجا به بعد، event یک کامند واقعی است.
+                # بنابراین در هر شرایطی باید propagation متوقف شود.
+                try:
+                    if (
+                        command.chat_type == "group"
+                        and not event.is_group
                     ):
-                        raise StopPropagation
+                        return
 
-                elif command.permission == "owner":
-                    if not is_owner(sender_id):
-                        raise StopPropagation
+                    if (
+                        command.chat_type == "private"
+                        and not event.is_private
+                    ):
+                        return
 
-                event.args_text = args_text
-                event.args = (
-                    args_text.split()
-                    if args_text
-                    else []
-                )
+                    sender_id = event.sender_id
 
-                await command.handler(event)
+                    if command.permission == "admin":
+                        chat = await event.get_chat()
 
-                # کامند اجرا شد؛ هیچ handler دیگری
-                # نباید این event را پردازش کند.
-                raise StopPropagation
+                        if not await is_chat_admin(
+                            client,
+                            chat,
+                            sender_id,
+                        ):
+                            return
+
+                    elif command.permission == "owner":
+                        if not is_owner(sender_id):
+                            return
+
+                    event.args_text = args_text
+                    event.args = (
+                        args_text.split()
+                        if args_text
+                        else []
+                    )
+
+                    try:
+                        await command.handler(event)
+
+                    except Exception:
+                        print(
+                            f"\n❌ خطای بحرانی در اجرای دستور "
+                            f"'{command_name}'"
+                        )
+                        traceback.print_exc()
+
+                        try:
+                            await event.reply(
+                                "❌ هنگام اجرای این دستور خطایی رخ داد."
+                            )
+                        except Exception:
+                            pass
+
+                finally:
+                    # این event دیگر نباید به هیچ handler دیگری برسد.
+                    raise StopPropagation
 
             except StopPropagation:
-                # بسیار مهم:
-                # این exception نباید توسط Exception گرفته شود.
                 raise
 
             except Exception:
@@ -183,17 +197,15 @@ class CommandManager:
                 )
 
                 print(
-                    f"\n❌ خطای بحرانی در اجرای دستور "
+                    f"\n❌ خطای بحرانی در Command Dispatcher "
                     f"'{command_name_for_log}'"
                 )
-
                 traceback.print_exc()
 
                 try:
                     await event.reply(
-                        "❌ هنگام اجرای این دستور خطایی رخ داد."
+                        "❌ هنگام پردازش این پیام خطایی رخ داد."
                     )
                 except Exception:
                     pass
-
         self._dispatcher = dispatcher
