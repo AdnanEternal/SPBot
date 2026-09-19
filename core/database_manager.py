@@ -139,9 +139,9 @@ class DatabaseManager:
                 )
 
     async def execute(
-    self,
-    query: str,
-    params: tuple = (),
+        self,
+        query: str,
+        params: tuple = (),
 ) -> ExecuteResult:
         async with self.maintenance_lock:
             if self.connection is None:
@@ -149,12 +149,14 @@ class DatabaseManager:
                     "Database connection is not available"
                 )
 
-            cursor = await self.connection.execute(
-                query,
-                params,
-            )
+            cursor = None
 
             try:
+                cursor = await self.connection.execute(
+                    query,
+                    params,
+                )
+
                 await self.connection.commit()
 
                 return ExecuteResult(
@@ -162,8 +164,17 @@ class DatabaseManager:
                     lastrowid=cursor.lastrowid,
                 )
 
+            except Exception:
+                try:
+                    await self.connection.rollback()
+                except Exception:
+                    pass
+
+                raise
+
             finally:
-                await cursor.close()
+                if cursor is not None:
+                    await cursor.close()    
     async def fetchone(
         self,
         query: str,
