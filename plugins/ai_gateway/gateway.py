@@ -174,58 +174,7 @@ class AIGateway:
 
         return results
 
-    async def ping_remote_models(
-        self,
-        api_key_data: dict,
-        models: list[str],
-        timeout: float = 20.0,
-    ) -> list[tuple[str, bool, float, str]]:
-
-        tasks = [
-            self.ping_remote_model(
-                api_key_data,
-                model_id,
-                timeout,
-            )
-            for model_id in models
-        ]
-
-        results = await asyncio.gather(
-            *tasks,
-            return_exceptions=True,
-        )
-
-        output = []
-
-        for model_id, result in zip(
-            models,
-            results,
-        ):
-
-            if isinstance(result, Exception):
-                output.append(
-                    (
-                        model_id,
-                        False,
-                        0,
-                        str(result),
-                    )
-                )
-                continue
-
-            ok, latency, error = result
-
-            output.append(
-                (
-                    model_id,
-                    ok,
-                    latency,
-                    error,
-                )
-            )
-
-        return output
-
+    
 
     @staticmethod
     def _litellm_model(model: dict[str, Any]) -> str:
