@@ -1,3 +1,8 @@
+
+
+import asyncio
+
+from litellm import token_counter
 from __future__ import annotations
 
 from typing import Any, Optional
@@ -491,12 +496,25 @@ class AIMemoryStore:
             """,
             (group_id, message_id),
         )
-
-    from __future__ import annotations
-
-import asyncio
-
-from litellm import token_counter
+    async def trim_group(
+        self,
+        group_id: int,
+        keep: int,
+    ) -> None:
+        """فقط `keep` پیام آخر هر گروه رو نگه می‌داره."""
+        await self.db.execute(
+            f"""
+            DELETE FROM {self.TABLE}
+            WHERE group_id = ?
+              AND id <= (
+                  SELECT id FROM {self.TABLE}
+                  WHERE group_id = ?
+                  ORDER BY id DESC
+                  LIMIT 1 OFFSET ?
+              )
+            """,
+            (group_id, group_id, keep),
+        )
 
 
 class AIMemoryManager:
