@@ -913,6 +913,13 @@ async def on_message(self, event):
             trigger,
         )
 
+        current_reply_context = (
+            await self.memory.get_current_reply_context(
+                event
+            )
+        )
+
+
         if event.is_reply:
 
             try:
@@ -961,6 +968,13 @@ async def on_message(self, event):
             )
         )
 
+        if current_reply_context:
+            user_content = (
+                current_reply_context
+                + "\n\n"
+                + user_content
+            )
+
         await self.memory.store.add_message(
             event.chat_id,
             "user",
@@ -979,6 +993,7 @@ async def on_message(self, event):
                 event.chat_id
             ),
             self.gateway,
+            current_reply_context=current_reply_context,
         )
 
         answer = await self.gateway.chat(

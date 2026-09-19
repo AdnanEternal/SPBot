@@ -49,6 +49,98 @@ class AIMemoryManager:
     # Existing memory system
     # =========================================================
 
+
+    async def get_current_reply_context(
+        self,
+        event,
+    ) -> str | None:
+        """
+        رابطه Reply پیام جاری را مستقیماً از خود Event می‌گیرد.
+        این اطلاعات مستقل از Timeline است.
+        """
+
+        if not getattr(event, "is_reply", False):
+            return None
+
+        try:
+            replied = await event.get_reply_message()
+        except Exception as exc:
+            print(
+                f"⚠️ خطا در دریافت پیام Reply شده: {exc}"
+            )
+            return None
+
+        if replied is None:
+            return None
+
+        message_id = self._extract_message_id(
+            replied
+        )
+
+        if message_id is None:
+            return None
+
+        sender_id = getattr(
+            replied,
+            "sender_id",
+            None,
+        )
+
+        if sender_id is not None:
+            try:
+                sender_id = int(sender_id)
+            except Exception:
+                sender_id = None
+
+        sender_name = await self._resolve_sender_name(
+            event.chat_id,
+            replied,
+            sender_id,
+        )
+
+        raw_text = (
+            getattr(
+                replied,
+                "raw_text",
+                None,
+            )
+            or getattr(
+                replied,
+                "message",
+                None,
+            )
+            or ""
+        )
+
+        text = str(raw_text).strip()
+
+        if not text:
+            text = "[پیام بدون متن یا رسانه]"
+
+        if len(text) > 1200:
+            text = text[:1200] + "..."
+
+        date = self._format_date(
+            getattr(
+                replied,
+                "date",
+                None,
+            )
+        )
+
+        return (
+            "📌 اطلاعات قطعی Reply پیام جاری:\n"
+            "پیام فعلی مستقیماً به پیام زیر Reply شده است.\n\n"
+            f"فرستنده پیام هدف: {sender_name}\n"
+            f"شناسه فرستنده: {sender_id}\n"
+            f"شناسه پیام هدف: {message_id}\n"
+            f"زمان پیام هدف: {date}\n"
+            f"متن پیام هدف:\n{text}\n\n"
+            "این رابطه را حدس نزن؛ این پیام مستقیماً "
+            "به پیام بالا Reply شده است."
+        )
+
+
     async def maybe_trim(
         self,
         group_id: int,
@@ -780,6 +872,8 @@ class AIMemoryManager:
         group_id: int,
         system_prompt: str,
         gateway,
+        current_reply_context: str | None = None,
+
     ) -> list[dict[str, str]]:
 
         token_limit = await self.settings.get_token_limit(
