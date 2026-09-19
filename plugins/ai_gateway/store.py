@@ -387,12 +387,7 @@ class AIGroupSettingsStore:
             (group_id,),
         )
 
-        self._trigger_cache.set(
-            group_id,
-            self.DEFAULT_SYSTEM_PROMPT
-            if False
-            else "",
-        )
+        self._trigger_cache.delete(group_id)
 class AIMemorySettingsStore:
     TABLE = "ai_memory_settings"
 
