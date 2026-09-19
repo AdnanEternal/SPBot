@@ -18,6 +18,7 @@ class AIGatewayError(Exception):
 class AIGateway:
     MAX_RETRIES = 3
     RETRY_DELAYS = (1, 2, 4)
+    PING_CONCURRENCY = 15
 
     def __init__(self, models: AIModelStore) -> None:
         self.models = models
@@ -124,59 +125,54 @@ class AIGateway:
 
         return sorted(set(result))
 
-    async def ping_remote_model(
-        self,
-        api_key_data: dict,
-        model_id: str,
-        timeout: float = 20.0,
-    ) -> tuple[bool, float, str]:
+    async def ping_remote_models(
+    self,
+    api_key_data: dict,
+    models: list[str],
+    timeout: float = 20.0,
+) -> list[tuple[str, bool, float, str]]:
 
-        provider = self._normalize_provider(
-            api_key_data["provider"]
+        semaphore = asyncio.Semaphore(
+            self.PING_CONCURRENCY
         )
 
-        model_name = f"{provider}/{model_id}"
+        async def worker(
+            model_id: str,
+        ) -> tuple[str, bool, float, str]:
 
-        kwargs = {
-            "model": model_name,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": "Reply with exactly: pong",
-                }
-            ],
-            "api_key": api_key_data["api_key"],
-            "timeout": timeout,
-            "temperature": 0,
-        }
+            async with semaphore:
+                try:
+                    ok, latency, error = (
+                        await self.ping_remote_model(
+                            api_key_data,
+                            model_id,
+                            timeout,
+                        )
+                    )
 
-        if api_key_data.get("base_url"):
-            kwargs["api_base"] = api_key_data["base_url"]
+                    return (
+                        model_id,
+                        ok,
+                        latency,
+                        error,
+                    )
 
-        started = asyncio.get_running_loop().time()
+                except Exception as exc:
+                    return (
+                        model_id,
+                        False,
+                        0,
+                        str(exc),
+                    )
 
-        try:
-            await acompletion(**kwargs)
-
-            latency = (
-                asyncio.get_running_loop().time()
-                - started
-            ) * 1000
-
-            return True, latency, ""
-
-        except Exception as exc:
-            latency = (
-                asyncio.get_running_loop().time()
-                - started
-            ) * 1000
-
-            error = str(exc).replace(
-                api_key_data["api_key"],
-                "***",
+        results = await asyncio.gather(
+            *(
+                worker(model_id)
+                for model_id in models
             )
+        )
 
-            return False, latency, error
+        return results
 
     async def ping_remote_models(
         self,

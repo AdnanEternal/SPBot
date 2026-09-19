@@ -76,27 +76,57 @@ class AIModelStore:
         )
         return dict(row) if row else None
 
-    async def set_active(self, name: str) -> bool:
+    async def set_active(
+        self,
+        name: str,
+    ) -> bool:
         normalized = name.strip().lower()
-        model = await self.get(normalized)
 
-        if model is None:
-            return False
+        async with self.db.maintenance_lock:
+            if self.db.connection is None:
+                raise RuntimeError(
+                    "Database connection is not available"
+                )
 
-        await self.db.execute(
-            f"UPDATE {self.TABLE} SET is_active = 0, updated_at = CURRENT_TIMESTAMP"
-        )
-        await self.db.execute(
-            f"""
-            UPDATE {self.TABLE}
-            SET is_active = 1,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE name = ?
-            """,
-            (normalized,),
-        )
-        return True
+            try:
+                await self.db.connection.execute(
+                    f"""
+                    UPDATE {self.TABLE}
+                    SET is_active = 0,
+                        updated_at = CURRENT_TIMESTAMP
+                    """
+                )
 
+                cursor = await self.db.connection.execute(
+                    f"""
+                    UPDATE {self.TABLE}
+                    SET is_active = 1,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE name = ?
+                    """,
+                    (normalized,),
+                )
+
+                if cursor.rowcount <= 0:
+                    await self.db.connection.rollback()
+                    return False
+
+                await self.db.connection.commit()
+                return True
+
+            except Exception:
+                try:
+                    await self.db.connection.rollback()
+                except Exception:
+                    pass
+
+                raise
+
+            finally:
+                try:
+                    await cursor.close()
+                except Exception:
+                    pass
     async def delete(self, name: str) -> bool:
         cursor = await self.db.delete(
             self.TABLE,
