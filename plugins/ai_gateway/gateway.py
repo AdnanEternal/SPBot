@@ -20,9 +20,17 @@ class AIGateway:
     RETRY_DELAYS = (1, 2, 4)
     PING_CONCURRENCY = 15
 
-    def __init__(self, models: AIModelStore) -> None:
+    AI_CONCURRENCY = 3
+
+    def __init__(
+        self,
+        models: AIModelStore,
+    ) -> None:
         self.models = models
 
+        self._ai_semaphore = asyncio.Semaphore(
+            self.AI_CONCURRENCY
+        )
 
     @staticmethod
     def _normalize_provider(provider: str) -> str:
@@ -126,10 +134,10 @@ class AIGateway:
         return sorted(set(result))
 
     async def ping_remote_models(
-    self,
-    api_key_data: dict,
-    models: list[str],
-    timeout: float = 20.0,
+        self,
+        api_key_data: dict,
+        models: list[str],
+        timeout: float = 20.0,
 ) -> list[tuple[str, bool, float, str]]:
 
         semaphore = asyncio.Semaphore(
@@ -302,10 +310,11 @@ class AIGateway:
         if temperature is not None:
             kwargs["temperature"] = temperature
 
-        response = await self._completion(
-            kwargs,
-            api_key,
-        )
+        async with self._ai_semaphore:
+            response = await self._completion(
+                kwargs,
+                api_key,
+            )
 
         try:
             content = response.choices[0].message.content

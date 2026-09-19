@@ -16,6 +16,15 @@ class AIModelStore:
     def __init__(self, db: DatabaseManager) -> None:
         self.db = db
 
+        self._active_cache = TTLCache[
+            str,
+            dict[str, Any],
+        ](
+            max_entries=1,
+            ttl_seconds=300,
+        )
+
+
     async def create_table(self) -> None:
         await self.db.create_table(
             self.TABLE,
@@ -69,12 +78,36 @@ class AIModelStore:
         )
         return [dict(row) for row in rows]
 
-    async def get_active(self) -> Optional[dict[str, Any]]:
+    async def get_active(
+        self,
+    ) -> Optional[dict[str, Any]]:
+        cached = self._active_cache.get(
+            "active"
+        )
+
+        if cached is not None:
+            return dict(cached) if cached else None
+
         row = await self.db.select_one(
             self.TABLE,
             where={"is_active": 1},
         )
-        return dict(row) if row else None
+
+        if row is None:
+            self._active_cache.set(
+                "active",
+                {},
+            )
+            return None
+
+        model = dict(row)
+
+        self._active_cache.set(
+            "active",
+            model,
+        )
+
+        return dict(model)
 
     async def set_active(
         self,
@@ -112,6 +145,11 @@ class AIModelStore:
                     return False
 
                 await self.db.connection.commit()
+
+                self._active_cache.delete(
+                    "active"
+                )
+
                 return True
 
             except Exception:
@@ -151,8 +189,16 @@ class AIModelStore:
                 updated_at = CURRENT_TIMESTAMP
             WHERE name = ?
             """,
-            (api_key, name.strip().lower()),
+            (
+                api_key, 
+                name.strip().lower()
+            ),
         )
+
+        self._active_cache.delete(
+            "active"
+        )
+
         return True
 
 
@@ -394,8 +440,59 @@ class AIMemorySettingsStore:
     DEFAULT_TOKEN_LIMIT = 8000
     DEFAULT_MESSAGE_LIMIT = 500
 
-    def __init__(self, db: DatabaseManager) -> None:
+    def __init__(
+        self,
+        db: DatabaseManager,
+    ) -> None:
         self.db = db
+
+        self._cache = TTLCache[
+            int,
+            dict[str, int],
+        ](
+            max_entries=256,
+            ttl_seconds=900,
+        )
+
+    async def _get(
+        self,
+        group_id: int,
+    ) -> dict[str, int]:
+        cached = self._cache.get(
+            group_id
+        )
+
+        if cached is not None:
+            return dict(cached)
+
+        await self._ensure(
+            group_id
+        )
+
+        row = await self.db.select_one(
+            self.TABLE,
+            where={
+                "group_id": group_id,
+            },
+        )
+
+        settings = {
+            "token_limit": int(
+                row["token_limit"]
+            ),
+            "message_limit": int(
+                row["message_limit"]
+            ),
+        }
+
+        self._cache.set(
+            group_id,
+            settings,
+        )
+
+        return dict(settings)
+
+
 
     async def create_table(self) -> None:
         await self.db.create_table(
@@ -440,15 +537,15 @@ class AIMemorySettingsStore:
             or_ignore=True,
         )
 
-    async def get_token_limit(self, group_id: int) -> int:
-        await self._ensure(group_id)
-
-        row = await self.db.select_one(
-            self.TABLE,
-            where={"group_id": group_id},
+    async def get_token_limit(
+        self,
+        group_id: int,
+    ) -> int:
+        settings = await self._get(
+            group_id
         )
 
-        return int(row["token_limit"])
+        return settings["token_limit"]
 
     async def set_token_limit(
         self,
@@ -464,19 +561,35 @@ class AIMemorySettingsStore:
                 updated_at = CURRENT_TIMESTAMP
             WHERE group_id = ?
             """,
-            (token_limit, group_id),
+            (
+                token_limit,
+                group_id,
+            ),
         )
 
-    async def get_message_limit(self, group_id: int) -> int:
-        await self._ensure(group_id)
-
-        row = await self.db.select_one(
-            self.TABLE,
-            where={"group_id": group_id},
+        cached = self._cache.get(
+            group_id
         )
 
-        return int(row["message_limit"])
+        if cached is not None:
+            cached["token_limit"] = token_limit
 
+            self._cache.set(
+                group_id,
+                cached,
+            )
+
+    async def get_message_limit(
+        self,
+        group_id: int,
+    ) -> int:
+        settings = await self._get(
+            group_id
+        )
+
+        return settings["message_limit"]
+    
+    
     async def set_message_limit(
         self,
         group_id: int,
@@ -491,8 +604,23 @@ class AIMemorySettingsStore:
                 updated_at = CURRENT_TIMESTAMP
             WHERE group_id = ?
             """,
-            (message_limit, group_id),
+            (
+                message_limit,
+                group_id,
+            ),
         )
+
+        cached = self._cache.get(
+            group_id
+        )
+
+        if cached is not None:
+            cached["message_limit"] = message_limit
+
+            self._cache.set(
+                group_id,
+                cached,
+            )
 
 class AIMemoryStore:
     TABLE = "ai_memory_messages"
@@ -710,6 +838,8 @@ class AIAPIKeyStore:
             },
         )
 
+        self._active_cache.delete("active")
+
     async def get(self, name: str) -> dict | None:
         row = await self.db.select_one(
             self.TABLE,
@@ -729,13 +859,23 @@ class AIAPIKeyStore:
 
         return [dict(row) for row in rows]
 
-    async def delete(self, name: str) -> bool:
+    async def delete(
+        self,
+        name: str,
+    ) -> bool:
         cursor = await self.db.delete(
             self.TABLE,
             {"name": name.strip().lower()},
         )
 
-        return cursor.rowcount > 0
+        deleted = cursor.rowcount > 0
+
+        if deleted:
+            self._active_cache.delete(
+                "active"
+            )
+
+        return deleted
 
 class AIGatewayStore:
     def __init__(self, db: DatabaseManager) -> None:

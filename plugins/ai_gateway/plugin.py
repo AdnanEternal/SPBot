@@ -10,7 +10,7 @@ from .store import AIGatewayStore
 
 class AIGatewayPlugin(BasePlugin):
     name = "AI Gateway"
-    version = "2.8.3"
+    version = "2.8.4"
 
     def __init__(self, client, command_manager, db, event_bus):
         super().__init__(
