@@ -166,12 +166,22 @@ class AIModelStore:
                         await cursor.close()
                 except Exception:
                     pass
-    async def delete(self, name: str) -> bool:
+
+    async def delete(
+        self,
+        name: str,
+    ) -> bool:
         cursor = await self.db.delete(
             self.TABLE,
             {"name": name.strip().lower()},
         )
-        return cursor.rowcount > 0
+
+        deleted = cursor.rowcount > 0
+
+        if deleted:
+            self._active_cache.delete("active")
+
+        return deleted
 
     async def update_api_key(
         self,
