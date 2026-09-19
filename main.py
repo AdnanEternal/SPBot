@@ -58,13 +58,22 @@ async def run_bot(
             shutdown_event.wait()
         )
 
-        done, _ = await asyncio.wait(
-            {
-                run_task,
-                shutdown_task,
-            },
-            return_when=asyncio.FIRST_COMPLETED,
-        )
+        done, pending = await asyncio.wait(
+    {
+        run_task,
+        shutdown_task,
+    },
+    return_when=asyncio.FIRST_COMPLETED,
+)
+
+        for task in pending:
+            task.cancel()
+
+        if pending:
+            await asyncio.gather(
+                *pending,
+                return_exceptions=True,
+            )
 
         if shutdown_task in done:
             print(

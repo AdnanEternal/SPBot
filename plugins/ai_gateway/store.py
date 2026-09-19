@@ -1,7 +1,7 @@
 
 
 import asyncio
-
+from core.ttl_cache import TTLCache
 from litellm import token_counter
 
 
@@ -87,7 +87,7 @@ class AIModelStore:
                 raise RuntimeError(
                     "Database connection is not available"
                 )
-
+            cursor = None
             try:
                 await self.db.connection.execute(
                     f"""
@@ -124,7 +124,8 @@ class AIModelStore:
 
             finally:
                 try:
-                    await cursor.close()
+                    if cursor is not None:
+                        await cursor.close()
                 except Exception:
                     pass
     async def delete(self, name: str) -> bool:
@@ -175,6 +176,22 @@ class AIGroupSettingsStore:
     def __init__(self, db: DatabaseManager) -> None:
         self.db = db
 
+        self._trigger_cache = TTLCache[
+            int,
+            str,
+        ](
+            max_entries=512,
+            ttl_seconds=900,
+        )
+
+        self._system_prompt_cache = TTLCache[
+            int,
+            str,
+        ](
+            max_entries=1,
+            ttl_seconds=1800,
+        )
+
     async def create_table(self) -> None:
         await self.db.create_table(
             self.TABLE,
@@ -207,10 +224,16 @@ class AIGroupSettingsStore:
         return dict(row)
 
     async def get_system_prompt(
-        self,
-        group_id: int,
-    ) -> str:
-        # System Prompt همیشه از ردیف سراسری خوانده می‌شود.
+    self,
+    group_id: int,
+) -> str:
+        cached = self._system_prompt_cache.get(
+            self.GLOBAL_GROUP_ID
+        )
+
+        if cached is not None:
+            return cached
+
         await self._ensure(
             self.GLOBAL_GROUP_ID
         )
@@ -222,13 +245,18 @@ class AIGroupSettingsStore:
             },
         )
 
-        if not row:
-            return self.DEFAULT_SYSTEM_PROMPT
-
-        return (
+        prompt = (
             row["system_prompt"]
-            or self.DEFAULT_SYSTEM_PROMPT
+            if row and row["system_prompt"]
+            else self.DEFAULT_SYSTEM_PROMPT
         )
+
+        self._system_prompt_cache.set(
+            self.GLOBAL_GROUP_ID,
+            prompt,
+        )
+
+        return prompt
 
     async def set_system_prompt(
         self,
@@ -252,6 +280,10 @@ class AIGroupSettingsStore:
                 self.GLOBAL_GROUP_ID,
             ),
         )
+        self._system_prompt_cache.set(
+            self.GLOBAL_GROUP_ID,
+            prompt,
+        )
 
     async def reset_system_prompt(
         self,
@@ -270,25 +302,54 @@ class AIGroupSettingsStore:
             """,
             (self.GLOBAL_GROUP_ID,),
         )
+        self._system_prompt_cache.delete(
+            self.GLOBAL_GROUP_ID
+        )
 
     async def get_trigger(
         self,
         group_id: int,
         default: str,
-    ) -> str:
-        settings = await self.get(group_id)
+) -> str:
+        cached = self._trigger_cache.get(
+            group_id
+        )
 
-        return (
-            settings["trigger"]
-            or default
+        if cached is not None:
+            return cached
+
+        # بر خلاف نسخه قبلی، برای هر پیام
+        # INSERT OR IGNORE نمی‌زنیم.
+        row = await self.db.select_one(
+            self.TABLE,
+            where={
+                "group_id": group_id,
+            },
+        )
+
+        trigger = (
+            row["trigger"]
+            if row and row["trigger"]
+            else default
         ).strip()
 
+        self._trigger_cache.set(
+            group_id,
+            trigger,
+        )
+
+        return trigger
+
     async def set_trigger(
-        self,
-        group_id: int,
-        trigger: str,
-    ) -> None:
-        await self._ensure(group_id)
+    self,
+    group_id: int,
+    trigger: str,
+) -> None:
+        trigger = trigger.strip()
+
+        await self._ensure(
+            group_id
+        )
 
         await self.db.execute(
             f"""
@@ -298,16 +359,23 @@ class AIGroupSettingsStore:
             WHERE group_id = ?
             """,
             (
-                trigger.strip(),
+                trigger,
                 group_id,
             ),
+        )
+
+        self._trigger_cache.set(
+            group_id,
+            trigger,
         )
 
     async def reset_trigger(
         self,
         group_id: int,
     ) -> None:
-        await self._ensure(group_id)
+        await self._ensure(
+            group_id
+        )
 
         await self.db.execute(
             f"""
@@ -317,6 +385,13 @@ class AIGroupSettingsStore:
             WHERE group_id = ?
             """,
             (group_id,),
+        )
+
+        self._trigger_cache.set(
+            group_id,
+            self.DEFAULT_SYSTEM_PROMPT
+            if False
+            else "",
         )
 class AIMemorySettingsStore:
     TABLE = "ai_memory_settings"

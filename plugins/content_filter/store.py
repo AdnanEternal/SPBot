@@ -1,13 +1,30 @@
+from core.ttl_cache import TTLCache
+
+
 class WordFilterStore:
     """
     لایه‌ی persistence فیلتر کلمات.
-    هر کلمه مال یه گروه خاصه (group_id) و هیچ اشتراکی بین گروه‌ها نیست.
+
+    برای سرعت، لیست کلمات گروه‌ها به‌صورت محدود و موقت
+    در RAM cache می‌شود.
+
+    Cache:
+    - حداکثر 128 گروه
+    - TTL = 10 دقیقه
     """
 
     TABLE = "content_filter_words"
 
+    CACHE_MAX_GROUPS = 128
+    CACHE_TTL_SECONDS = 600
+
     def __init__(self, db):
         self.db = db
+
+        self._cache = TTLCache[int, set[str]](
+            max_entries=self.CACHE_MAX_GROUPS,
+            ttl_seconds=self.CACHE_TTL_SECONDS,
+        )
 
     async def create_table(self):
         await self.db.create_table(
@@ -21,16 +38,38 @@ class WordFilterStore:
             indexes=["group_id"],
         )
 
-    async def add(self, group_id: int, word: str):
+    async def add(
+        self,
+        group_id: int,
+        word: str,
+    ):
         word = word.lower().strip()
 
         await self.db.insert(
             self.TABLE,
-            {"group_id": group_id, "word": word},
+            {
+                "group_id": group_id,
+                "word": word,
+            },
             or_ignore=True,
         )
 
-    async def remove(self, group_id: int, word: str):
+        # اگر این گروه از قبل cache شده،
+        # همان cache را هم بلافاصله به‌روزرسانی کن.
+        cached = self._cache.get(group_id)
+
+        if cached is not None:
+            cached.add(word)
+            self._cache.set(
+                group_id,
+                cached,
+            )
+
+    async def remove(
+        self,
+        group_id: int,
+        word: str,
+    ):
         word = word.lower().strip()
 
         cursor = await self.db.delete(
@@ -41,15 +80,41 @@ class WordFilterStore:
             },
         )
 
-        return cursor.rowcount > 0
+        removed = cursor.rowcount > 0
 
-    async def find_match(self, group_id: int, text: str) -> str | None:
+        if removed:
+            cached = self._cache.get(group_id)
+
+            if cached is not None:
+                cached.discard(word)
+                self._cache.set(
+                    group_id,
+                    cached,
+                )
+
+        return removed
+
+    async def find_match(
+        self,
+        group_id: int,
+        text: str,
+    ) -> str | None:
         """
-        اگر متن شامل یکی از کلمات فیلترشده باشد،
-        همان کلمه را برمی‌گرداند.
-        در غیر این صورت None.
+        مهم‌ترین مسیر:
+
+        اگر گروه در cache باشد:
+            DB اصلاً صدا زده نمی‌شود.
+
+        اگر نباشد:
+            فقط یک بار DB خوانده می‌شود
+            و نتیجه در RAM قرار می‌گیرد.
         """
+
         words = await self.get_all(group_id)
+
+        if not words:
+            return None
+
         text = text.lower()
 
         for word in words:
@@ -58,13 +123,45 @@ class WordFilterStore:
 
         return None
 
-    async def contains(self, group_id: int, text: str) -> bool:
-        return await self.find_match(group_id, text) is not None
-
-    async def get_all(self, group_id: int) -> set:
-        rows = await self.db.select_all(
-            self.TABLE,
-            where={"group_id": group_id},
+    async def contains(
+        self,
+        group_id: int,
+        text: str,
+    ) -> bool:
+        return (
+            await self.find_match(
+                group_id,
+                text,
+            )
+            is not None
         )
 
-        return {row["word"] for row in rows}
+    async def get_all(
+        self,
+        group_id: int,
+    ) -> set[str]:
+        # اول RAM
+        cached = self._cache.get(group_id)
+
+        if cached is not None:
+            return set(cached)
+
+        # فقط در cache miss سراغ DB
+        rows = await self.db.select_all(
+            self.TABLE,
+            where={
+                "group_id": group_id,
+            },
+        )
+
+        words = {
+            row["word"]
+            for row in rows
+        }
+
+        self._cache.set(
+            group_id,
+            words,
+        )
+
+        return set(words)

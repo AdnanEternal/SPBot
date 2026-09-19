@@ -20,7 +20,7 @@ class SpamFilterPlugin(BasePlugin):
     """
 
     name = "Spam Filter"
-    version = "1.2.1"
+    version = "1.2.2"
 
     def __init__(self, client, command_manager, db, event_bus):
         super().__init__(client, command_manager, db, event_bus)
