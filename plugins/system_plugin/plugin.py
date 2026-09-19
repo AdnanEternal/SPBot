@@ -35,7 +35,7 @@ class SystemPlugin(BasePlugin):
 
 
     name = "System"
-    version = "2.8.3"
+    version = "2.8.4"
 
     show_help = handlers.show_help
     github_check = handlers.github_check

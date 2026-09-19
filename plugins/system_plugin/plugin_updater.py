@@ -417,9 +417,9 @@ class PluginUpdateManager:
         return remote_plugin
 
     async def update(
-        self,
-        plugin_id: str,
-    ) -> RemotePlugin:
+    self,
+    plugin_id: str,
+) -> RemotePlugin:
         self._validate_plugin_id(plugin_id)
 
         local_plugin = (
@@ -498,30 +498,37 @@ class PluginUpdateManager:
                 plugin_id
             )
 
-            shutil.rmtree(target_dir)
-
-            shutil.move(
-                str(stage_dir),
-                str(target_dir),
-            )
-
             try:
+                # حذف نسخه‌ی فعلی
+                if target_dir.exists():
+                    shutil.rmtree(target_dir)
+
+                # نصب نسخه‌ی جدید
+                shutil.move(
+                    str(stage_dir),
+                    str(target_dir),
+                )
+
+                # مهم: اگر import/load شکست خورد،
+                # کنترل مستقیم وارد rollback می‌شود.
                 await self.plugin_manager.load_plugin(
                     plugin_id
                 )
 
             except Exception as update_error:
-                if target_dir.exists():
-                    shutil.rmtree(
-                        target_dir
-                    )
 
-                shutil.move(
-                    str(backup_dir),
-                    str(target_dir),
-                )
+                # نسخه‌ی خراب/ناقص جدید را حذف کن.
+                if target_dir.exists():
+                    shutil.rmtree(target_dir)
 
                 try:
+                    # نسخه‌ی قبلی را برگردان.
+                    shutil.copytree(
+                        backup_dir,
+                        target_dir,
+                    )
+
+                    # نسخه‌ی قبلی را دوباره فعال کن.
                     await self.plugin_manager.load_plugin(
                         plugin_id
                     )
