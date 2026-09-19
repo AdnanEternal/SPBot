@@ -8,11 +8,13 @@ from core.client import ClientManager
 from core.plugin_manager import PluginManager
 
 
-async def run_bot() -> bool:
+async def run_bot(
+    shutdown_event: asyncio.Event,
+) -> bool:
     """
     خروجی:
-        True  -> shutdown عمدی، برنامه باید تمام شود.
-        False -> اتصال قطع شده، main دوباره تلاش می‌کند.
+        True  -> shutdown عمدی
+        False -> اتصال قطع شده و باید reconnect شود
     """
 
     session_string = config.get_required(
@@ -25,37 +27,6 @@ async def run_bot() -> bool:
 
     client = None
     plugin_manager = None
-
-    loop = asyncio.get_running_loop()
-
-    shutdown_event = asyncio.Event()
-    signal_handlers = []
-
-    def request_shutdown() -> None:
-        if not shutdown_event.is_set():
-            print(
-                "🛑 درخواست shutdown دریافت شد."
-            )
-            shutdown_event.set()
-
-    for sig in (
-        signal.SIGINT,
-        signal.SIGTERM,
-    ):
-        try:
-            loop.add_signal_handler(
-                sig,
-                request_shutdown,
-            )
-            signal_handlers.append(sig)
-
-        except (
-            NotImplementedError,
-            RuntimeError,
-            ValueError,
-        ):
-            # روی بعضی محیط‌ها signal handler پشتیبانی نمی‌شود.
-            pass
 
     try:
         client = await client_manager.start()
@@ -121,12 +92,6 @@ async def run_bot() -> bool:
         return False
 
     finally:
-        for sig in signal_handlers:
-            try:
-                loop.remove_signal_handler(sig)
-            except Exception:
-                pass
-
         if plugin_manager is not None:
             try:
                 await plugin_manager.disable_all_plugins()
@@ -144,50 +109,102 @@ async def run_bot() -> bool:
             traceback.print_exc()
 
 
-def main() -> None:
+async def async_main() -> None:
     delay = 5
 
-    while True:
-        started = time.monotonic()
+    shutdown_event = asyncio.Event()
+    loop = asyncio.get_running_loop()
 
-        try:
-            should_exit = asyncio.run(
-                run_bot()
+    signal_handlers = []
+
+    def request_shutdown() -> None:
+        if not shutdown_event.is_set():
+            print(
+                "🛑 درخواست shutdown دریافت شد."
             )
+            shutdown_event.set()
 
-            if should_exit:
+    for sig in (
+        signal.SIGINT,
+        signal.SIGTERM,
+    ):
+        try:
+            loop.add_signal_handler(
+                sig,
+                request_shutdown,
+            )
+            signal_handlers.append(sig)
+
+        except (
+            NotImplementedError,
+            RuntimeError,
+            ValueError,
+        ):
+            pass
+
+    try:
+        while not shutdown_event.is_set():
+            started = time.monotonic()
+
+            try:
+                should_exit = await run_bot(
+                    shutdown_event
+                )
+
+                if should_exit:
+                    print(
+                        "👋 ربات به‌صورت امن خاموش شد."
+                    )
+                    break
+
+            except KeyboardInterrupt:
                 print(
-                    "👋 ربات به‌صورت امن خاموش شد."
+                    "👋 ربات متوقف شد."
                 )
                 break
 
-        except KeyboardInterrupt:
+            except Exception:
+                traceback.print_exc()
+
+                print(
+                    "♻️ راه‌اندازی مجدد ربات..."
+                )
+
+            delay = (
+                5
+                if time.monotonic() - started > 60
+                else min(
+                    delay * 2,
+                    300,
+                )
+            )
+
+            if shutdown_event.is_set():
+                break
+
             print(
-                "👋 ربات متوقف شد."
-            )
-            break
-
-        except Exception:
-            traceback.print_exc()
-
-            print(
-                "♻️ راه‌اندازی مجدد ربات..."
+                f"⏳ تلاش بعدی برای اجرا تا "
+                f"{delay} ثانیه دیگر..."
             )
 
-        delay = (
-            5
-            if time.monotonic() - started > 60
-            else min(
-                delay * 2,
-                300,
-            )
-        )
+            try:
+                await asyncio.wait_for(
+                    shutdown_event.wait(),
+                    timeout=delay,
+                )
+            except asyncio.TimeoutError:
+                pass
 
-        print(
-            f"⏳ تلاش بعدی برای اجرا تا {delay} ثانیه دیگر..."
-        )
+    finally:
+        for sig in signal_handlers:
+            try:
+                loop.remove_signal_handler(sig)
+            except Exception:
+                pass
 
-        time.sleep(delay)
+
+def main() -> None:
+    asyncio.run(async_main())
 
 
 main()
