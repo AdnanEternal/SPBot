@@ -6,7 +6,7 @@ from litellm import token_counter
 from collections import defaultdict
 
 class AIMemoryManager:
-    MAX_FETCH_MESSAGES = 1000
+    
     KEEP_MESSAGES = 1000  # بیشتر از این تعداد پیام در هر گروه نگه داشته نمی‌شه
     MESSAGE_OVERHEAD_TOKENS = 4
     TRIM_EVERY_MESSAGES = 50
@@ -89,17 +89,23 @@ class AIMemoryManager:
         ]
 
     async def build_context(
-        self,
-        group_id: int,
-        system_prompt: str,
-        gateway,
-    ) -> list[dict[str, str]]:
+    self,
+    group_id: int,
+    system_prompt: str,
+    gateway,
+) -> list[dict[str, str]]:
 
-        token_limit = await self.settings.get_token_limit(group_id)
+        token_limit = await self.settings.get_token_limit(
+            group_id
+        )
+
+        message_limit = await self.settings.get_message_limit(
+            group_id
+        )
 
         rows = await self.store.get_recent(
             group_id,
-            self.MAX_FETCH_MESSAGES,
+            message_limit,
         )
 
         model_name = None
@@ -111,7 +117,9 @@ class AIMemoryManager:
                 model_name = gateway._litellm_model(model)
 
         except Exception as exc:
-            print(f"⚠️ خطا در گرفتن مدل فعال برای شمارش توکن: {exc}")
+            print(
+                f"⚠️ خطا در گرفتن مدل فعال برای شمارش توکن: {exc}"
+            )
 
         return await asyncio.to_thread(
             self._select_messages,

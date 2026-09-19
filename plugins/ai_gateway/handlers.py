@@ -383,6 +383,62 @@ async def memory_limit(
     )
 
 
+@command(
+    name="حافظه پیام",
+    permission="owner",
+    chat_type="group",
+    description="حداکثر تعداد پیام ذخیره‌شده حافظه این گروه را تنظیم می‌کند.",
+)
+async def memory_message_limit(
+    self,
+    event: events.NewMessage.Event,
+) -> None:
+    value = (event.args_text or "").strip()
+
+    if not value:
+        limit = await self.memory.settings.get_message_limit(
+            event.chat_id
+        )
+
+        await event.reply(
+            f"🗃️ سقف پیام‌های ذخیره‌شده این گروه: {limit:,} پیام"
+        )
+        return
+
+    if not value.isdigit():
+        await event.reply(
+            "مثال:\n"
+            "!حافظه پیام 500"
+        )
+        return
+
+    limit = int(value)
+
+    if limit < 10:
+        await event.reply(
+            "❌ حداقل تعداد پیام 10 است."
+        )
+        return
+
+    await self.memory.settings.set_message_limit(
+        event.chat_id,
+        limit,
+    )
+
+    # اگر مقدار جدید کمتر از تعداد فعلی باشد،
+    # همین الان حافظه اضافی حذف شود.
+    await self.memory.trim(
+        event.chat_id
+    )
+
+    await event.reply(
+        f"✅ سقف پیام‌های حافظه روی "
+        f"{limit:,} پیام تنظیم شد."
+    )
+
+
+
+
 @command(name='مدل افزودن', permission='owner', chat_type='all', description='افزودن مدل AI')
 async def add_model(self, event):
     args = (event.args_text or '').split()

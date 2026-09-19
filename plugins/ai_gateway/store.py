@@ -290,7 +290,9 @@ class AIGroupSettingsStore:
         )
 class AIMemorySettingsStore:
     TABLE = "ai_memory_settings"
+
     DEFAULT_TOKEN_LIMIT = 8000
+    DEFAULT_MESSAGE_LIMIT = 500
 
     def __init__(self, db: DatabaseManager) -> None:
         self.db = db
@@ -303,11 +305,33 @@ class AIMemorySettingsStore:
                 "token_limit": (
                     f"INTEGER NOT NULL DEFAULT {self.DEFAULT_TOKEN_LIMIT}"
                 ),
+                "message_limit": (
+                    f"INTEGER NOT NULL DEFAULT {self.DEFAULT_MESSAGE_LIMIT}"
+                ),
                 "updated_at": (
                     "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP"
                 ),
             },
         )
+
+        # Migration برای دیتابیس‌های قدیمی
+        rows = await self.db.fetchall(
+            f"PRAGMA table_info({self.TABLE})"
+        )
+
+        columns = {
+            row["name"]
+            for row in rows
+        }
+
+        if "message_limit" not in columns:
+            await self.db.execute(
+                f"""
+                ALTER TABLE {self.TABLE}
+                ADD COLUMN message_limit INTEGER
+                NOT NULL DEFAULT {self.DEFAULT_MESSAGE_LIMIT}
+                """
+            )
 
     async def _ensure(self, group_id: int) -> None:
         await self.db.insert(
@@ -341,6 +365,33 @@ class AIMemorySettingsStore:
             WHERE group_id = ?
             """,
             (token_limit, group_id),
+        )
+
+    async def get_message_limit(self, group_id: int) -> int:
+        await self._ensure(group_id)
+
+        row = await self.db.select_one(
+            self.TABLE,
+            where={"group_id": group_id},
+        )
+
+        return int(row["message_limit"])
+
+    async def set_message_limit(
+        self,
+        group_id: int,
+        message_limit: int,
+    ) -> None:
+        await self._ensure(group_id)
+
+        await self.db.execute(
+            f"""
+            UPDATE {self.TABLE}
+            SET message_limit = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE group_id = ?
+            """,
+            (message_limit, group_id),
         )
 
 class AIMemoryStore:
