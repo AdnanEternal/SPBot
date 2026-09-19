@@ -698,6 +698,195 @@ async def bot_name(self, event):
     await self.groups.set_trigger(event.chat_id, value)
     await event.reply(f'✅ Trigger شد: {value}')
 
+
+
+
+@command(
+    name="تایم لاین",
+    permission="owner",
+    chat_type="all",
+    description="خاموش یا روشن کردن سراسری Timeline هوش مصنوعی",
+)
+async def timeline_toggle(
+    self,
+    event,
+):
+    value = (
+        event.args_text or ""
+    ).strip().lower()
+
+    if not value:
+        status = (
+            "🟢 فعال"
+            if self.timeline_enabled
+            else "🔴 خاموش"
+        )
+
+        await event.reply(
+            f"🧭 وضعیت Timeline سراسری: {status}\n\n"
+            "روشن کردن:\n"
+            "!تایم لاین روشن\n\n"
+            "خاموش کردن:\n"
+            "!تایم لاین خاموش"
+        )
+        return
+
+    if value in {
+        "روشن",
+        "on",
+        "1",
+        "فعال",
+    }:
+        self.timeline_enabled = True
+
+        await event.reply(
+            "✅ Timeline سراسری روشن شد."
+        )
+        return
+
+    if value in {
+        "خاموش",
+        "off",
+        "0",
+        "غیرفعال",
+    }:
+        self.timeline_enabled = False
+
+        # چون دیگر استفاده‌ای از Timelineها نداریم،
+        # RAM را هم آزاد می‌کنیم.
+        self.memory.clear_all_timelines()
+
+        await event.reply(
+            "🛑 Timeline سراسری خاموش شد و "
+            "Timelineهای موجود از RAM پاک شدند."
+        )
+        return
+
+    await event.reply(
+        "❌ مقدار نامعتبر.\n\n"
+        "استفاده:\n"
+        "!تایم لاین روشن\n"
+        "!تایم لاین خاموش"
+    )
+
+
+@command(
+    name="تاریخچه",
+    permission="owner",
+    chat_type="group",
+    description="تعداد مشخصی از پیام‌های اخیر را در Timeline RAM آماده می‌کند.",
+)
+async def load_timeline(
+    self,
+    event,
+):
+    if not self.timeline_enabled:
+        await event.reply(
+            "🛑 Timeline در حال حاضر خاموش است.\n"
+            "اول بزن:\n"
+            "!تایم لاین روشن"
+        )
+        return
+
+    value = (
+        event.args_text or ""
+    ).strip()
+
+    if not value.isdigit():
+        await event.reply(
+            "مثال:\n"
+            "!تاریخچه 200"
+        )
+        return
+
+    limit = int(value)
+
+    if limit < 10:
+        await event.reply(
+            "❌ حداقل تعداد پیام 10 است."
+        )
+        return
+
+    if limit > self.memory.MAX_TIMELINE_MESSAGES:
+        await event.reply(
+            f"❌ حداکثر تعداد پیام "
+            f"{self.memory.MAX_TIMELINE_MESSAGES} است."
+        )
+        return
+
+    try:
+        count = await self.memory.load_timeline(
+            self.client,
+            event.chat_id,
+            limit,
+        )
+
+    except Exception as exc:
+        print(
+            "❌ خطا در بارگذاری Timeline:",
+            exc,
+        )
+
+        await event.reply(
+            "❌ نتونستم تاریخچه گروه را بارگذاری کنم."
+        )
+        return
+
+    await event.reply(
+        f"🧭 Timeline آماده شد.\n"
+        f"📦 {count} پیام در RAM نگه داشته می‌شود.\n\n"
+        f"از این لحظه پیام‌های جدید هم "
+        f"به‌صورت خودکار ثبت می‌شوند."
+    )
+
+
+@on_event(events.NewMessage(incoming=True))
+async def on_timeline_incoming(
+    self,
+    event,
+):
+    try:
+        if not self.timeline_enabled:
+            return
+
+        if not event.is_group:
+            return
+
+        await self.memory.record_event(
+            event
+        )
+
+    except Exception:
+        traceback.print_exc()
+
+
+@on_event(events.NewMessage(outgoing=True))
+async def on_timeline_outgoing(
+    self,
+    event,
+):
+    try:
+        if not self.timeline_enabled:
+            return
+
+        if not event.is_group:
+            return
+
+        await self.memory.record_event(
+            event
+        )
+
+    except Exception:
+        traceback.print_exc()
+
+
+
+
+
+
+
+
+
 @on_event(events.NewMessage(incoming=True))
 async def on_message(self, event):
     try:

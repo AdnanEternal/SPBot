@@ -10,7 +10,7 @@ from .store import AIGatewayStore
 
 class AIGatewayPlugin(BasePlugin):
     name = "AI Gateway"
-    version = "2.8.6"
+    version = "2.9.0"
 
     def __init__(self, client, command_manager, db, event_bus):
         super().__init__(
@@ -34,6 +34,8 @@ class AIGatewayPlugin(BasePlugin):
 
         self.bot_user_id = None
         self.default_trigger = "بوبی"
+
+        self.timeline_enabled = True
 
     async def on_load(self):
         await self.store.create_tables()
@@ -91,4 +93,7 @@ class AIGatewayPlugin(BasePlugin):
     # AI trigger
     # -------------------------
 
+    
     on_message = handlers.on_message
+    timeline_toggle = handlers.timeline_toggle
+    load_timeline = handlers.load_timeline
