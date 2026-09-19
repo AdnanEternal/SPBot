@@ -222,10 +222,7 @@ class DatabaseBackupManager:
 
             await self.db.connect()
 
-            await asyncio.to_thread(
-                self._check_sqlite_integrity,
-                db_path,
-            )
+            
 
             if os.path.exists(old_path):
                 os.remove(old_path)
@@ -247,26 +244,20 @@ class DatabaseBackupManager:
             except Exception:
                 pass
 
-            try:
-                if os.path.exists(db_path):
-                    os.remove(db_path)
-            except Exception:
-                pass
-
-            # rollback فقط در صورتی که DB قبلی داشتیم.
-            if (
-                had_existing_db
-                and os.path.exists(old_path)
-            ):
+            if had_existing_db:
                 try:
-                    os.replace(
-                        old_path,
-                        db_path,
-                    )
+                    if os.path.exists(db_path):
+                        os.remove(db_path)
 
-                    print(
-                        "♻️ rollback موفق بود."
-                    )
+                    if os.path.exists(old_path):
+                        os.replace(
+                            old_path,
+                            db_path,
+                        )
+
+                        print(
+                            "♻️ rollback موفق بود."
+                        )
 
                 except Exception as rollback_error:
                     print(
@@ -276,6 +267,13 @@ class DatabaseBackupManager:
                         rollback_error
                     )
 
+            else:
+                # دیتابیس قبلی وجود نداشته؛
+                # backup سالم را بی‌دلیل پاک نکن.
+                print(
+                    "⚠️ دیتابیس قبلی وجود نداشت؛ "
+                    "فایل restore‌شده حذف نشد."
+                )
             try:
                 if self.db.connection is None:
                     await self.db.connect()
