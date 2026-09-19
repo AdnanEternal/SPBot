@@ -25,9 +25,7 @@ class DatabaseBackupManager:
             "backups/latest.db",
         )
 
-    async def _acquire_maintenance_lock(
-        self,
-    ):
+    async def _acquire_maintenance_lock(self) -> None:
         try:
             await asyncio.wait_for(
                 self.db.maintenance_lock.acquire(),
@@ -41,9 +39,7 @@ class DatabaseBackupManager:
             ) from exc
 
     @staticmethod
-    def _check_sqlite_integrity(
-        path: str,
-    ) -> None:
+    def _check_sqlite_integrity(path: str) -> None:
         connection = sqlite3.connect(
             path,
             timeout=30,
@@ -66,43 +62,45 @@ class DatabaseBackupManager:
             connection.close()
 
     async def create_backup(self) -> None:
-        await self._acquire_maintenance_lock()
-
         file_descriptor = None
         temp_path = None
 
         try:
-            if self.db.connection is None:
-                raise RuntimeError(
-                    "اتصال دیتابیس برقرار نیست."
-                )
-
-            file_descriptor, temp_path = (
-                tempfile.mkstemp(
-                    suffix=".db",
-                    prefix="database_backup_",
-                )
+            file_descriptor, temp_path = tempfile.mkstemp(
+                suffix=".db",
+                prefix="database_backup_",
             )
 
             os.close(file_descriptor)
             file_descriptor = None
 
-            print(
-                "💾 ساخت backup دیتابیس..."
-            )
-
-            target = sqlite3.connect(
-                temp_path,
-                timeout=30,
-            )
+            # فقط مرحله‌ی snapshot دیتابیس قفل می‌شود.
+            await self._acquire_maintenance_lock()
 
             try:
-                await self.db.connection.backup(
-                    target
-                )
-            finally:
-                target.close()
+                if self.db.connection is None:
+                    raise RuntimeError(
+                        "اتصال دیتابیس برقرار نیست."
+                    )
 
+                print("💾 ساخت backup دیتابیس...")
+
+                target = sqlite3.connect(
+                    temp_path,
+                    timeout=30,
+                )
+
+                try:
+                    await self.db.connection.backup(
+                        target
+                    )
+                finally:
+                    target.close()
+
+            finally:
+                self.db.maintenance_lock.release()
+
+            # از اینجا به بعد DB آزاد است.
             await asyncio.to_thread(
                 self._check_sqlite_integrity,
                 temp_path,
@@ -130,39 +128,31 @@ class DatabaseBackupManager:
                 except OSError:
                     pass
 
-            if (
-                temp_path
-                and os.path.exists(temp_path)
-            ):
+            if temp_path and os.path.exists(temp_path):
                 try:
                     os.remove(temp_path)
                 except OSError:
                     pass
 
-            self.db.maintenance_lock.release()
-
     async def restore_backup(self) -> None:
-        await self._acquire_maintenance_lock()
-
         file_descriptor = None
         temp_path = None
+        lock_acquired = False
 
         db_path = self.db.db_path
         old_path = f"{db_path}.restore_old"
 
-        restore_succeeded = False
-        database_closed = False
+        had_existing_db = False
 
         try:
-            file_descriptor, temp_path = (
-                tempfile.mkstemp(
-                    suffix=".db",
-                    prefix="database_restore_",
-                    dir=(
-                        os.path.dirname(db_path)
-                        or "."
-                    ),
-                )
+            # اول backup را دانلود می‌کنیم؛ بدون قفل DB.
+            file_descriptor, temp_path = tempfile.mkstemp(
+                suffix=".db",
+                prefix="database_restore_",
+                dir=(
+                    os.path.dirname(db_path)
+                    or "."
+                ),
             )
 
             os.close(file_descriptor)
@@ -186,20 +176,24 @@ class DatabaseBackupManager:
                 temp_path,
             )
 
-            # دیتابیس فعلی را کامل می‌بندیم.
+            # فقط از اینجا به بعد DB قفل می‌شود.
+            await self._acquire_maintenance_lock()
+            lock_acquired = True
+
+            had_existing_db = os.path.exists(
+                db_path
+            )
+
             if self.db.connection is not None:
                 await self.db.connection.close()
                 self.db.connection = None
-                database_closed = True
 
-            # اگر rollback قدیمی باقی مانده،
-            # چون دیتابیس فعلی سالم و موجود است،
-            # آن را نسخه‌ی stale فرض می‌کنیم.
+            # rollback قبلی را پاک می‌کنیم.
             if os.path.exists(old_path):
                 os.remove(old_path)
 
-            # نسخه‌ی فعلی را نگه می‌داریم.
-            if os.path.exists(db_path):
+            # دیتابیس فعلی را نگه می‌داریم.
+            if had_existing_db:
                 os.replace(
                     db_path,
                     old_path,
@@ -214,7 +208,7 @@ class DatabaseBackupManager:
             if os.path.exists(shm_path):
                 os.remove(shm_path)
 
-            # نصب backup جدید
+            # backup جدید را نصب می‌کنیم.
             os.replace(
                 temp_path,
                 db_path,
@@ -228,18 +222,13 @@ class DatabaseBackupManager:
 
             await self.db.connect()
 
-            # فایل جدید بعد از اتصال هم قابل استفاده است.
             await asyncio.to_thread(
                 self._check_sqlite_integrity,
                 db_path,
             )
 
-            # restore کامل موفق بوده؛
-            # حالا rollback قدیمی را حذف می‌کنیم.
             if os.path.exists(old_path):
                 os.remove(old_path)
-
-            restore_succeeded = True
 
             print(
                 "✅ دیتابیس با موفقیت بازیابی شد."
@@ -251,7 +240,6 @@ class DatabaseBackupManager:
                 "در حال تلاش برای rollback..."
             )
 
-            # اتصال خراب/نیمه‌کاره را ببند.
             try:
                 if self.db.connection is not None:
                     await self.db.connection.close()
@@ -259,13 +247,18 @@ class DatabaseBackupManager:
             except Exception:
                 pass
 
-            # اگر نسخه‌ی قبلی را داریم،
-            # آن را برمی‌گردانیم.
-            if os.path.exists(old_path):
-                try:
-                    if os.path.exists(db_path):
-                        os.remove(db_path)
+            try:
+                if os.path.exists(db_path):
+                    os.remove(db_path)
+            except Exception:
+                pass
 
+            # rollback فقط در صورتی که DB قبلی داشتیم.
+            if (
+                had_existing_db
+                and os.path.exists(old_path)
+            ):
+                try:
                     os.replace(
                         old_path,
                         db_path,
@@ -283,9 +276,6 @@ class DatabaseBackupManager:
                         rollback_error
                     )
 
-            # حتی اگر restore خراب شده،
-            # تلاش می‌کنیم یک connection سالم
-            # به دیتابیس فعلی داشته باشیم.
             try:
                 if self.db.connection is None:
                     await self.db.connect()
@@ -306,16 +296,11 @@ class DatabaseBackupManager:
                 except OSError:
                     pass
 
-            if (
-                temp_path
-                and os.path.exists(temp_path)
-            ):
+            if temp_path and os.path.exists(temp_path):
                 try:
                     os.remove(temp_path)
                 except OSError:
                     pass
 
-            # عمداً اینجا old_path را حذف نمی‌کنیم.
-            # فقط بعد از restore موفق حذف شده است.
-
-            self.db.maintenance_lock.release()
+            if lock_acquired:
+                self.db.maintenance_lock.release()

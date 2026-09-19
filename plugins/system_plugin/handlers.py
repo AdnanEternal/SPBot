@@ -331,9 +331,10 @@ async def plugin_install(
             github=github,
         )
 
-        plugin = await updater.install(
-            plugin_id
-        )
+        async with self.runtime_update_lock:
+            plugin = await updater.install(
+                plugin_id
+            )
 
     except Exception as e:
         await event.reply(
@@ -376,9 +377,10 @@ async def plugin_update(
             github=github,
         )
 
-        plugin = await updater.update(
-            plugin_id
-        )
+        async with self.runtime_update_lock:
+            plugin = await updater.install(
+                plugin_id
+            )
 
     except Exception as e:
         await event.reply(

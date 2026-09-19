@@ -2,11 +2,16 @@ import asyncio
 import os
 import re
 from pathlib import Path
-from typing import Optional
+from typing import NamedTuple, Optional
+
 
 import aiosqlite
 
 from config import config
+
+class ExecuteResult(NamedTuple):
+    rowcount: int
+    lastrowid: int | None
 
 
 _IDENTIFIER_RE = re.compile(
@@ -39,90 +44,90 @@ class DatabaseManager:
         # برای جلوگیری از تداخل عملیات عادی دیتابیس
         # با backup/restore
         self.maintenance_lock = asyncio.Lock()
+        self._connect_lock = asyncio.Lock()
 
-    async def connect(self):
-        if self.connection is not None:
-            return
+    async def connect(self) -> None:
+        async with self._connect_lock:
+            if self.connection is not None:
+                return
 
-        db_path = Path(self.db_path)
+            db_path = Path(self.db_path)
 
-        db_path.parent.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
-
-        restore_old = Path(
-            f"{self.db_path}.restore_old"
-        )
-
-        if (
-            not db_path.exists()
-            and restore_old.exists()
-        ):
-            print(
-                "♻️ دیتابیس اصلی پیدا نشد؛ "
-                "در حال بازیابی نسخه‌ی rollback..."
+            db_path.parent.mkdir(
+                parents=True,
+                exist_ok=True,
             )
 
-            os.replace(
-                restore_old,
-                db_path,
+            restore_old = Path(
+                f"{self.db_path}.restore_old"
             )
 
-        connection = None
+            if (
+                not db_path.exists()
+                and restore_old.exists()
+            ):
+                print(
+                    "♻️ دیتابیس اصلی پیدا نشد؛ "
+                    "در حال بازیابی نسخه‌ی rollback..."
+                )
 
-        try:
-            connection = await aiosqlite.connect(
-                self.db_path
-            )
+                os.replace(
+                    restore_old,
+                    db_path,
+                )
 
-            connection.row_factory = (
-                aiosqlite.Row
-            )
-
-            await connection.execute(
-                "PRAGMA foreign_keys=ON"
-            )
-
-            await connection.execute(
-                "PRAGMA busy_timeout=10000"
-            )
+            connection = None
 
             try:
-                await connection.execute(
-                    "PRAGMA journal_mode=WAL"
+                connection = await aiosqlite.connect(
+                    self.db_path
                 )
 
-            except Exception as exc:
-                print(
-                    "⚠️ فعال‌سازی WAL ناموفق بود؛ "
-                    "SQLite با journal معمولی اجرا می‌شود."
-                )
-                print(exc)
+                connection.row_factory = aiosqlite.Row
 
                 await connection.execute(
-                    "PRAGMA journal_mode=DELETE"
+                    "PRAGMA foreign_keys=ON"
                 )
 
-            await connection.execute(
-                "PRAGMA synchronous=NORMAL"
-            )
+                await connection.execute(
+                    "PRAGMA busy_timeout=10000"
+                )
 
-            await connection.commit()
-
-            self.connection = connection
-
-            print("✅ دیتابیس متصل شد.")
-
-        except Exception:
-            if connection is not None:
                 try:
-                    await connection.close()
-                except Exception:
-                    pass
+                    await connection.execute(
+                        "PRAGMA journal_mode=WAL"
+                    )
 
-            self.connection = None
-            raise
+                except Exception as exc:
+                    print(
+                        "⚠️ فعال‌سازی WAL ناموفق بود؛ "
+                        "SQLite با journal معمولی اجرا می‌شود."
+                    )
+                    print(exc)
+
+                    await connection.execute(
+                        "PRAGMA journal_mode=DELETE"
+                    )
+
+                await connection.execute(
+                    "PRAGMA synchronous=NORMAL"
+                )
+
+                await connection.commit()
+
+                self.connection = connection
+
+                print("✅ دیتابیس متصل شد.")
+
+            except Exception:
+                if connection is not None:
+                    try:
+                        await connection.close()
+                    except Exception:
+                        pass
+
+                self.connection = None
+                raise
     async def close(self):
         async with self.maintenance_lock:
             if self.connection is not None:
@@ -134,10 +139,10 @@ class DatabaseManager:
                 )
 
     async def execute(
-        self,
-        query: str,
-        params: tuple = (),
-    ):
+    self,
+    query: str,
+    params: tuple = (),
+) -> ExecuteResult:
         async with self.maintenance_lock:
             if self.connection is None:
                 raise RuntimeError(
@@ -149,10 +154,16 @@ class DatabaseManager:
                 params,
             )
 
-            await self.connection.commit()
+            try:
+                await self.connection.commit()
 
-            return cursor
+                return ExecuteResult(
+                    rowcount=cursor.rowcount,
+                    lastrowid=cursor.lastrowid,
+                )
 
+            finally:
+                await cursor.close()
     async def fetchone(
         self,
         query: str,

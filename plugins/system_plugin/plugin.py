@@ -1,5 +1,5 @@
 from . import handlers
-
+import asyncio
 from core.base_plugin import BasePlugin
 
 
@@ -17,9 +17,25 @@ class SystemPlugin(BasePlugin):
     استفاده می‌کنه. یعنی اگه غیرفعال یا حذف بشه، بقیه‌ی ربات دقیقاً مثل
     قبل کار می‌کنه.
     """
+    def __init__(
+    self,
+    client,
+    command_manager,
+    db,
+    event_bus,
+):
+        super().__init__(
+            client,
+            command_manager,
+            db,
+            event_bus,
+        )
+
+        self.runtime_update_lock = asyncio.Lock()
+
 
     name = "System"
-    version = "2.8.1"
+    version = "2.8.2"
 
     show_help = handlers.show_help
     github_check = handlers.github_check

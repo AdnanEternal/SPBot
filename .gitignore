@@ -5,3 +5,9 @@ __pycache__/
 
 # Environment variables / secrets
 .env
+
+# Local runtime state
+data/
+*.db
+*.db-*
+*.restore_old
