@@ -119,42 +119,100 @@ async def _flag_flood(self: "SpamFilterPlugin", event: events.NewMessage.Event, 
         reason=f"اسپم: ارسال بیش از حد پیام در {window_seconds} ثانیه (فلاد)",
     )
 
-@on_event(events.NewMessage(incoming=True))
-async def on_message(self: "SpamFilterPlugin", event: events.NewMessage.Event) -> None:
-    if not event.is_group or event.sender_id is None:
-        return
 
-    cached = self.admin_cache.get(event.chat_id, event.sender_id)
-    if cached is None:
-        try:
-            chat = await event.get_chat()
-            cached = await is_chat_admin(
-                self.client, chat, event.sender_id, raise_on_error=True
-            )
-        except Exception:
-            # نتیجه‌ی نامعلوم رو کش نمی‌کنیم و کاربر رو مجازات هم نمی‌کنیم
-            return
-        self.admin_cache.set(event.chat_id, event.sender_id, cached)
-    if cached:
+@on_event(events.NewMessage(incoming=True))
+async def on_message(
+    self: "SpamFilterPlugin",
+    event: events.NewMessage.Event,
+) -> None:
+    if (
+        not event.is_group
+        or event.sender_id is None
+    ):
         return
 
     text = event.raw_text or ""
-    settings = await self.settings.get(event.chat_id)
-    repeat_count = self.tracker.register(event.chat_id, event.sender_id, event.id, text)
 
-    link_count = detection.count_links(text)
+    settings = await self.settings.get(
+        event.chat_id
+    )
+
+    repeat_count = self.tracker.register(
+        event.chat_id,
+        event.sender_id,
+        event.id,
+        text,
+    )
+
+    reason = None
+    is_flood = False
+
+    link_count = detection.count_links(
+        text
+    )
+
     if link_count > settings["max_links"]:
-        await _flag(self, event, f"بیش از حدِ مجاز لینک تو یه پیام ({link_count} لینک)")
+        reason = (
+            "بیش از حدِ مجاز لینک تو یه پیام "
+            f"({link_count} لینک)"
+        )
+
+    elif repeat_count > settings["max_repeat"]:
+        reason = (
+            "ارسال پیام تکراری پشت‌سرهم"
+        )
+
+    elif detection.has_char_flood(text):
+        reason = (
+            "تکرار بیش‌ازحد یه کاراکتر تو پیام"
+        )
+
+    elif (
+        self.tracker.count_in_window(
+            event.chat_id,
+            event.sender_id,
+            settings["flood_seconds"],
+        )
+        > settings["flood_count"]
+    ):
+        is_flood = True
+
+    # پیام عادی:
+    # بدون API call و بدون permission check
+    if reason is None and not is_flood:
         return
 
-    if repeat_count > settings["max_repeat"]:
-        await _flag(self, event, "ارسال پیام تکراری پشت‌سرهم")
+    # فقط پیام مشکوک به اینجا می‌رسد.
+    try:
+        chat = await event.get_chat()
+
+        if await is_chat_admin(
+            self.client,
+            chat,
+            event.sender_id,
+            raise_on_error=True,
+        ):
+            self.tracker.clear_user(
+                event.chat_id,
+                event.sender_id,
+            )
+            return
+
+    except Exception:
+        # وقتی مطمئن نیستیم ادمین نیست،
+        # مجازات نکن.
         return
 
-    if detection.has_char_flood(text):
-        await _flag(self, event, "تکرار بیش‌ازحد یه کاراکتر تو پیام")
+    if is_flood:
+        await _flag_flood(
+            self,
+            event,
+            settings["flood_seconds"],
+        )
         return
 
-    recent_count = self.tracker.count_in_window(event.chat_id, event.sender_id, settings["flood_seconds"])
-    if recent_count > settings["flood_count"]:
-        await _flag_flood(self, event, settings["flood_seconds"])
+    await _flag(
+        self,
+        event,
+        reason,
+    )

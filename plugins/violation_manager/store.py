@@ -1,7 +1,7 @@
 from typing import Any
 
 from core.database_manager import DatabaseManager
-
+from core.ttl_cache import TTLCache
 
 DEFAULT_MAX_VIOLATIONS = 3
 DEFAULT_PUNISHMENT_TYPE = "mute"
@@ -110,12 +110,19 @@ class ViolationStore:
 
 class GroupSettingsStore:
     TABLE = "violation_settings"
-
     def __init__(
         self,
         db: DatabaseManager,
     ) -> None:
         self.db = db
+
+        self._cache = TTLCache[
+            int,
+            dict[str, Any],
+        ](
+            max_entries=256,
+            ttl_seconds=900,
+        )
 
     async def create_table(self) -> None:
         await self.db.create_table(
@@ -178,7 +185,17 @@ class GroupSettingsStore:
         self,
         group_id: int,
     ) -> dict[str, Any]:
-        await self._ensure_row(group_id)
+
+        cached = self._cache.get(
+            group_id
+        )
+
+        if cached is not None:
+            return dict(cached)
+
+        await self._ensure_row(
+            group_id
+        )
 
         row = await self.db.select_one(
             self.TABLE,
@@ -187,7 +204,14 @@ class GroupSettingsStore:
             },
         )
 
-        return dict(row)
+        settings = dict(row)
+
+        self._cache.set(
+            group_id,
+            settings,
+        )
+
+        return dict(settings)
 
     async def set_max_violations(
         self,
@@ -205,6 +229,18 @@ class GroupSettingsStore:
                 "group_id": group_id,
             },
         )
+
+        cached = self._cache.get(
+            group_id
+        )
+
+        if cached is not None:
+            cached["max_violations"] = value
+
+            self._cache.set(
+                group_id,
+                cached,
+            )
 
     async def set_punishment_mute(
         self,
@@ -224,6 +260,19 @@ class GroupSettingsStore:
             },
         )
 
+        cached = self._cache.get(
+            group_id
+        )
+
+        if cached is not None:
+            cached["punishment_type"] = "mute"
+            cached["mute_hours"] = hours
+
+            self._cache.set(
+                group_id,
+                cached,
+            )
+
     async def set_punishment_ban(
         self,
         group_id: int,
@@ -240,3 +289,16 @@ class GroupSettingsStore:
                 "group_id": group_id,
             },
         )
+
+        cached = self._cache.get(
+            group_id
+        )
+
+        if cached is not None:
+            cached["punishment_type"] = "ban"
+            cached["mute_hours"] = None
+
+            self._cache.set(
+                group_id,
+                cached,
+            )

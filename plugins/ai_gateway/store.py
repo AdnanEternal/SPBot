@@ -810,7 +810,10 @@ class AIMemoryStore:
 class AIAPIKeyStore:
     TABLE = "ai_api_keys"
 
-    def __init__(self, db: DatabaseManager) -> None:
+    def __init__(
+        self,
+        db: DatabaseManager,
+    ) -> None:
         self.db = db
 
     async def create_table(self) -> None:
@@ -823,8 +826,14 @@ class AIAPIKeyStore:
                 "api_key": "TEXT NOT NULL",
                 "base_url": "TEXT",
                 "models_url": "TEXT",
-                "created_at": "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP",
-                "updated_at": "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP",
+                "created_at": (
+                    "TEXT NOT NULL "
+                    "DEFAULT CURRENT_TIMESTAMP"
+                ),
+                "updated_at": (
+                    "TEXT NOT NULL "
+                    "DEFAULT CURRENT_TIMESTAMP"
+                ),
             },
             indexes=["provider"],
         )
@@ -843,22 +852,35 @@ class AIAPIKeyStore:
                 "name": name.strip().lower(),
                 "provider": provider.strip(),
                 "api_key": api_key.strip(),
-                "base_url": base_url.strip() if base_url else None,
-                "models_url": models_url.strip() if models_url else None,
+                "base_url": (
+                    base_url.strip()
+                    if base_url
+                    else None
+                ),
+                "models_url": (
+                    models_url.strip()
+                    if models_url
+                    else None
+                ),
             },
         )
 
-        self._active_cache.delete("active")
-
-    async def get(self, name: str) -> dict | None:
+    async def get(
+        self,
+        name: str,
+    ) -> dict | None:
         row = await self.db.select_one(
             self.TABLE,
-            where={"name": name.strip().lower()},
+            where={
+                "name": name.strip().lower()
+            },
         )
 
         return dict(row) if row else None
 
-    async def get_all(self) -> list[dict]:
+    async def get_all(
+        self,
+    ) -> list[dict]:
         rows = await self.db.fetchall(
             f"""
             SELECT *
@@ -867,7 +889,10 @@ class AIAPIKeyStore:
             """
         )
 
-        return [dict(row) for row in rows]
+        return [
+            dict(row)
+            for row in rows
+        ]
 
     async def delete(
         self,
@@ -875,18 +900,12 @@ class AIAPIKeyStore:
     ) -> bool:
         cursor = await self.db.delete(
             self.TABLE,
-            {"name": name.strip().lower()},
+            {
+                "name": name.strip().lower()
+            },
         )
 
-        deleted = cursor.rowcount > 0
-
-        if deleted:
-            self._active_cache.delete(
-                "active"
-            )
-
-        return deleted
-
+        return cursor.rowcount > 0
 class AIGatewayStore:
     def __init__(self, db: DatabaseManager) -> None:
         self.models = AIModelStore(db)
