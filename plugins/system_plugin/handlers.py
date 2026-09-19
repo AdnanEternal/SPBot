@@ -378,7 +378,7 @@ async def plugin_update(
         )
 
         async with self.runtime_update_lock:
-            plugin = await updater.install(
+            plugin = await updater.update(
                 plugin_id
             )
 
