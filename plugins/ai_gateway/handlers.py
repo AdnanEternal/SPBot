@@ -2,7 +2,9 @@ from splusthon import events
 from core.decorators import command, on_event
 from .gateway import AIGatewayError
 from .trigger import extract_trigger_text
-from .gateway import AIGatewayError
+
+
+import traceback
 
 def mask_secret(secret):
     if not secret: return 'تنظیم نشده'
@@ -528,57 +530,137 @@ async def bot_name(self, event):
     await self.groups.set_trigger(event.chat_id, value)
     await event.reply(f'✅ Trigger شد: {value}')
 
-
 @on_event(events.NewMessage(incoming=True))
 async def on_message(self, event):
-    if not event.is_group:
-        return
-    text = (event.raw_text or '').strip()
-    if not text or text.startswith('!'):
-        return
-    trigger = await self.groups.get_trigger(event.chat_id, self.default_trigger)
-    prompt_text = extract_trigger_text(text, trigger)
-    if event.is_reply:
-        try: replied = await event.get_reply_message()
-        except Exception: replied = None
-        if replied is not None and replied.sender_id == self.bot_user_id:
-            prompt_text = text
-    if prompt_text is None:
-        return
     try:
-        sender = await event.get_sender()
-        name = getattr(sender, 'username', None) or getattr(sender, 'first_name', None) or str(event.sender_id)
-    except Exception:
-        name = str(event.sender_id)
-    user_content = self.memory.format_user_message(name, int(event.sender_id), prompt_text)
-    await self.memory.store.add_message(event.chat_id, 'user', user_content, event.sender_id)
+        if not event.is_group:
+            return
 
-    context = await self.memory.build_context(
-        event.chat_id,
-        await self.groups.get_system_prompt(event.chat_id),
-        self.gateway,
-    )
+        text = (
+            event.raw_text or ""
+        ).strip()
 
-    try:
-        answer = await self.gateway.chat(context)
+        if not text or text.startswith("!"):
+            return
+
+        if event.sender_id is None:
+            return
+
+        trigger = await self.groups.get_trigger(
+            event.chat_id,
+            self.default_trigger,
+        )
+
+        prompt_text = extract_trigger_text(
+            text,
+            trigger,
+        )
+
+        if event.is_reply:
+
+            try:
+                replied = (
+                    await event.get_reply_message()
+                )
+
+            except Exception:
+                replied = None
+
+            if (
+                replied is not None
+                and replied.sender_id
+                == self.bot_user_id
+            ):
+                prompt_text = text
+
+        if prompt_text is None:
+            return
+
+        try:
+            sender = await event.get_sender()
+
+            name = (
+                getattr(
+                    sender,
+                    "username",
+                    None,
+                )
+                or getattr(
+                    sender,
+                    "first_name",
+                    None,
+                )
+                or str(event.sender_id)
+            )
+
+        except Exception:
+            name = str(event.sender_id)
+
+        user_content = (
+            self.memory.format_user_message(
+                name,
+                int(event.sender_id),
+                prompt_text,
+            )
+        )
+
+        await self.memory.store.add_message(
+            event.chat_id,
+            "user",
+            user_content,
+            event.sender_id,
+        )
+
+        # حافظه را حتی اگر AI بعداً Fail شد هم محدود نگه می‌داریم.
+        await self.memory.maybe_trim(
+            event.chat_id
+        )
+
+        context = await self.memory.build_context(
+            event.chat_id,
+            await self.groups.get_system_prompt(
+                event.chat_id
+            ),
+            self.gateway,
+        )
+
+        answer = await self.gateway.chat(
+            context
+        )
+
+        await self.memory.store.add_message(
+            event.chat_id,
+            "assistant",
+            answer,
+        )
+
+        await event.reply(
+            answer[:4000]
+        )
 
     except AIGatewayError as exc:
-        print(f"❌ AI Gateway: {exc}")
-
-        await event.reply(
-            "❌ بوبی فعلاً نتونست پاسخ بده. "
-            "لطفاً دوباره امتحان کن."
+        print(
+            f"❌ AI Gateway: {exc}"
         )
-        return
 
-    except Exception as exc:
-        print(f"❌ خطای غیرمنتظره AI Gateway: {exc}")
+        try:
+            await event.reply(
+                "❌ بوبی فعلاً نتونست پاسخ بده. "
+                "لطفاً دوباره امتحان کن."
+            )
+        except Exception:
+            pass
 
-        await event.reply(
-            "❌ بوبی فعلاً نتونست پاسخ بده. "
-            "لطفاً دوباره امتحان کن."
+    except Exception:
+        print(
+            "❌ خطای غیرمنتظره در "
+            "AI Message Handler:"
         )
-        return
-    await self.memory.store.add_message(event.chat_id, 'assistant', answer)
-    await event.reply(answer[:4000] if len(answer) > 4000 else answer)
-    
+        traceback.print_exc()
+
+        try:
+            await event.reply(
+                "❌ هنگام پردازش پیام مشکلی پیش آمد."
+            )
+        except Exception:
+            pass

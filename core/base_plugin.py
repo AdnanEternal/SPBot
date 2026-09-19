@@ -5,7 +5,7 @@ import traceback
 from typing import Any, Callable, Optional
 
 from splusthon import SoroushClient
-
+from splusthon.events import StopPropagation
 from config import config
 from core.command_manager import CommandManager
 from core.database_manager import DatabaseManager
@@ -33,10 +33,54 @@ class BasePlugin:
         self._event_handlers: list[tuple[Callable, Any]] = []
         self._bus_listeners: list[tuple[str, Callable]] = []
 
-    def listen(self, event_type: Any) -> Callable[[Callable], Callable]:
+    def _wrap_event_handler(
+        self,
+        handler: Callable,
+) -> Callable:
+        async def wrapped(event):
+            try:
+                result = handler(event)
+
+                if inspect.isawaitable(result):
+                    await result
+
+            except StopPropagation:
+                raise
+
+            except Exception:
+                print(
+                    f"\n❌ خطا در Event Handler پلاگین "
+                    f"'{self.name}' "
+                    f"({getattr(handler, '__name__', 'unknown')})"
+                )
+                traceback.print_exc()
+
+        wrapped.__name__ = getattr(
+            handler,
+            "__name__",
+            "event_handler",
+        )
+
+        return wrapped
+
+
+    def listen(
+        self,
+        event_type: Any,
+) -> Callable[[Callable], Callable]:
+
         def decorator(func: Callable) -> Callable:
-            self.client.add_event_handler(func, event_type)
-            self._event_handlers.append((func, event_type))
+            wrapped = self._wrap_event_handler(func)
+
+            self.client.add_event_handler(
+                wrapped,
+                event_type,
+            )
+
+            self._event_handlers.append(
+                (wrapped, event_type)
+            )
+
             return func
 
         return decorator
@@ -58,9 +102,16 @@ class BasePlugin:
             event_type = getattr(member, "_event_type", None)
 
             if event_type is not None:
-                self.client.add_event_handler(member, event_type)
-                self._event_handlers.append((member, event_type))
+                wrapped = self._wrap_event_handler(member)
 
+                self.client.add_event_handler(
+                    wrapped,
+                    event_type,
+                )
+
+                self._event_handlers.append(
+                    (wrapped, event_type)
+                )
             bus_event_name = getattr(member, "_bus_event_name", None)
 
             if bus_event_name is not None:
@@ -70,6 +121,8 @@ class BasePlugin:
                 )
 
     async def enable(self) -> None:
+        if self.enabled:
+            return
         try:
             self._register_decorated()
 

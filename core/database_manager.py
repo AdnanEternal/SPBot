@@ -41,7 +41,11 @@ class DatabaseManager:
         self.maintenance_lock = asyncio.Lock()
 
     async def connect(self):
+        if self.connection is not None:
+            return
+
         db_path = Path(self.db_path)
+
         db_path.parent.mkdir(
             parents=True,
             exist_ok=True,
@@ -51,9 +55,6 @@ class DatabaseManager:
             f"{self.db_path}.restore_old"
         )
 
-        # اگر ربات وسط restore کرش کرده باشد و
-        # دیتابیس اصلی از بین رفته باشد، دیتابیس قبلی
-        # را خودکار برمی‌گردانیم.
         if (
             not db_path.exists()
             and restore_old.exists()
@@ -68,30 +69,60 @@ class DatabaseManager:
                 db_path,
             )
 
-        self.connection = await aiosqlite.connect(
-            self.db_path
-        )
+        connection = None
 
-        self.connection.row_factory = (
-            aiosqlite.Row
-        )
+        try:
+            connection = await aiosqlite.connect(
+                self.db_path
+            )
 
-        await self.connection.execute(
-            "PRAGMA journal_mode=WAL"
-        )
+            connection.row_factory = (
+                aiosqlite.Row
+            )
 
-        await self.connection.execute(
-            "PRAGMA foreign_keys=ON"
-        )
+            await connection.execute(
+                "PRAGMA foreign_keys=ON"
+            )
 
-        await self.connection.execute(
-            "PRAGMA busy_timeout=10000"
-        )
+            await connection.execute(
+                "PRAGMA busy_timeout=10000"
+            )
 
-        await self.connection.commit()
+            try:
+                await connection.execute(
+                    "PRAGMA journal_mode=WAL"
+                )
 
-        print("✅ دیتابیس متصل شد.")
+            except Exception as exc:
+                print(
+                    "⚠️ فعال‌سازی WAL ناموفق بود؛ "
+                    "SQLite با journal معمولی اجرا می‌شود."
+                )
+                print(exc)
 
+                await connection.execute(
+                    "PRAGMA journal_mode=DELETE"
+                )
+
+            await connection.execute(
+                "PRAGMA synchronous=NORMAL"
+            )
+
+            await connection.commit()
+
+            self.connection = connection
+
+            print("✅ دیتابیس متصل شد.")
+
+        except Exception:
+            if connection is not None:
+                try:
+                    await connection.close()
+                except Exception:
+                    pass
+
+            self.connection = None
+            raise
     async def close(self):
         async with self.maintenance_lock:
             if self.connection is not None:

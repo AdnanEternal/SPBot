@@ -1,7 +1,7 @@
 from splusthon.tl import functions, types
 from config import config
-
-
+import asyncio
+import traceback
 async def is_chat_admin(
     client,
     chat,
@@ -9,32 +9,42 @@ async def is_chat_admin(
     *,
     raise_on_error: bool = False,
 ) -> bool:
-    """
-    بررسی می‌کند که sender_id در chat ادمین یا مالک است یا نه.
-    برای چت خصوصی همیشه False برمی‌گرداند.
 
-    اگر raise_on_error=True باشد، به‌جای False دادن در صورت خطا،
-    خطا را دوباره raise می‌کند تا فراخوان بتواند «نمی‌دانم» را از
-    «ادمین نیست» تشخیص بدهد.
-    """
-    try:
+    async def check() -> bool:
+
         if isinstance(chat, types.Chat):
+
             full_chat = await client(
-                functions.messages.GetFullChatRequest(chat.id)
+                functions.messages.GetFullChatRequest(
+                    chat.id
+                )
             )
-            participants = full_chat.full_chat.participants.participants
+
+            participants = (
+                full_chat
+                .full_chat
+                .participants
+                .participants
+            )
 
             for p in participants:
+
                 if p.user_id != sender_id:
                     continue
+
                 if isinstance(
                     p,
-                    (types.ChatParticipantCreator, types.ChatParticipantAdmin),
+                    (
+                        types.ChatParticipantCreator,
+                        types.ChatParticipantAdmin,
+                    ),
                 ):
                     return True
+
             return False
 
-        elif isinstance(chat, types.Channel):
+        if isinstance(chat, types.Channel):
+
             result = await client(
                 functions.channels.GetParticipantsRequest(
                     channel=chat,
@@ -44,21 +54,41 @@ async def is_chat_admin(
                     hash=0,
                 )
             )
+
             return any(
-                getattr(p, "user_id", None) == sender_id
+                getattr(p, "user_id", None)
+                == sender_id
                 for p in result.participants
             )
 
-        else:
-            return False
-
-    except Exception as e:
-        print(f"❌ خطا در بررسی دسترسی ادمین: {e}")
-        if raise_on_error:
-            raise
         return False
 
+    try:
+        return await asyncio.wait_for(
+            check(),
+            timeout=15,
+        )
 
+    except asyncio.TimeoutError as exc:
+        print(
+            "⚠️ بررسی ادمین Timeout شد."
+        )
+
+        if raise_on_error:
+            raise
+
+        return False
+
+    except Exception:
+        print(
+            "❌ خطا در بررسی دسترسی ادمین:"
+        )
+        traceback.print_exc()
+
+        if raise_on_error:
+            raise
+
+        return False
 def is_owner(sender_id: int) -> bool:
     if sender_id is None:
         return False

@@ -233,7 +233,9 @@ class AIGateway:
 
     @staticmethod
     def _litellm_model(model: dict[str, Any]) -> str:
-        provider = model["provider"].strip().rstrip("/")
+        provider = AIGateway._normalize_provider(
+            model["provider"]
+        ).strip().rstrip("/")
         model_id = model["model_id"].strip().lstrip("/")
 
         if not provider or not model_id:

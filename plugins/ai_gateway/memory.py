@@ -3,17 +3,36 @@ from __future__ import annotations
 import asyncio
 
 from litellm import token_counter
-
+from collections import defaultdict
 
 class AIMemoryManager:
     MAX_FETCH_MESSAGES = 1000
     KEEP_MESSAGES = 1000  # بیشتر از این تعداد پیام در هر گروه نگه داشته نمی‌شه
     MESSAGE_OVERHEAD_TOKENS = 4
+    TRIM_EVERY_MESSAGES = 50
 
     def __init__(self, store, settings_store):
         self.store = store
         self.settings = settings_store
+        self._trim_counters = defaultdict(int)
 
+    async def maybe_trim(
+        self,
+        group_id: int,
+) -> None:
+
+        self._trim_counters[group_id] += 1
+
+        if (
+            self._trim_counters[group_id]
+            < self.TRIM_EVERY_MESSAGES
+        ):
+            return
+
+        self._trim_counters[group_id] = 0
+
+        await self.trim(group_id)
+        
     def _select_messages(
         self,
         rows: list[dict],
