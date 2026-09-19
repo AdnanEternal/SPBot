@@ -28,7 +28,7 @@ class SpamTracker:
             self._cleanup()
 
         key = (group_id, user_id)
-        self._messages[key].append((time.time(), message_id))
+        self._messages[key].append((time.monotonic(), message_id))
 
         last_text, repeat_count = self._last_text.get(key, ("", 0))
         repeat_count = repeat_count + 1 if text and text == last_text else 1
@@ -42,7 +42,7 @@ class SpamTracker:
         self._last_text.pop(key, None)
 
     def _cleanup(self) -> None:
-        cutoff = time.time() - self.STALE_SECONDS
+        cutoff = time.monotonic() - self.STALE_SECONDS
         stale = [
             key
             for key, messages in self._messages.items()
@@ -53,12 +53,12 @@ class SpamTracker:
             self._last_text.pop(key, None)
 
     def count_in_window(self, group_id: int, user_id: int, seconds: int) -> int:
-        cutoff = time.time() - seconds
+        cutoff = time.monotonic() - seconds
         messages = self._messages.get((group_id, user_id), ())
         return sum(1 for ts, _ in messages if ts >= cutoff)
 
     def ids_in_window(self, group_id: int, user_id: int, seconds: int) -> list[int]:
-        cutoff = time.time() - seconds
+        cutoff = time.monotonic() - seconds
         messages = self._messages.get((group_id, user_id), ())
         return [mid for ts, mid in messages if ts >= cutoff]
 
@@ -81,17 +81,45 @@ class AdminCache:
             return None
 
         is_admin, cached_at = entry
-        if time.time() - cached_at > self.TTL_SECONDS:
+        if time.monotonic() - cached_at > self.TTL_SECONDS:
             return None
         return is_admin
 
-    def set(self, group_id: int, user_id: int, is_admin: bool) -> None:
-        if len(self._cache) >= self.MAX_ENTRIES:
-            now = time.time()
-            self._cache = {
-                key: value
-                for key, value in self._cache.items()
-                if now - value[1] <= self.TTL_SECONDS
-            }
+    def set(
+    self,
+    group_id: int,
+    user_id: int,
+    is_admin: bool,
+) -> None:
+        key = (group_id, user_id)
+        now = time.monotonic()
 
-        self._cache[(group_id, user_id)] = (is_admin, time.time())
+        if key not in self._cache:
+            expired_keys = [
+                cache_key
+                for cache_key, (_, cached_at) in self._cache.items()
+                if now - cached_at > self.TTL_SECONDS
+            ]
+
+            for cache_key in expired_keys:
+                self._cache.pop(
+                    cache_key,
+                    None,
+                )
+
+            if len(self._cache) >= self.MAX_ENTRIES:
+                oldest_key = min(
+                    self._cache,
+                    key=lambda cache_key:
+                    self._cache[cache_key][1],
+                )
+
+                self._cache.pop(
+                    oldest_key,
+                    None,
+                )
+
+        self._cache[key] = (
+            is_admin,
+            now,
+        )
