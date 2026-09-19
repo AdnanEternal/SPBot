@@ -439,23 +439,135 @@ async def memory_message_limit(
 
 
 
-@command(name='مدل افزودن', permission='owner', chat_type='all', description='افزودن مدل AI')
-async def add_model(self, event):
-    args = (event.args_text or '').split()
-    if len(args) < 4:
-        await event.reply('مثال: !مدل افزودن gpt openai gpt-4o-mini API_KEY [BASE_URL]')
-        return
-    name, provider, model_id, key = args[:4]
-    base_url = args[4] if len(args) > 4 else None
-    try:
-        await self.models.add(name, provider, model_id, None if key == '-' else key, base_url)
-    except Exception as exc:
-        await event.reply(f'❌ خطا: {exc}')
-        return
-    try: await event.delete()
-    except Exception: pass
-    await event.reply(f'✅ مدل «{name}» اضافه شد.')
+@command(
+    name="مدل افزودن",
+    permission="owner",
+    chat_type="all",
+    description="افزودن مدل AI با استفاده از API Key ذخیره‌شده یا اطلاعات کامل.",
+)
+async def add_model(
+    self,
+    event,
+):
+    args = (
+        event.args_text or ""
+    ).strip().split()
 
+    if not args:
+        await event.reply(
+            "فرمت‌ها:\n\n"
+            "🔹 استفاده از API Key ذخیره‌شده:\n"
+            "!مدل افزودن <نام_مدل> <نام_API_Key> <model_id>\n\n"
+            "مثال:\n"
+            "!مدل افزودن gpt5 zai glm-4.5\n\n"
+            "🔹 وارد کردن اطلاعات کامل:\n"
+            "!مدل افزودن <نام_مدل> <provider> <model_id> <API_KEY> [BASE_URL]"
+        )
+        return
+
+    # -------------------------------------------------
+    # حالت جدید:
+    # !مدل افزودن gpt5 zai glm-4.5
+    # -------------------------------------------------
+    if len(args) == 3:
+        model_name = args[0]
+        api_key_name = args[1]
+        model_id = args[2]
+
+        api_key_data = await self.api_keys.get(
+            api_key_name
+        )
+
+        if api_key_data is None:
+            await event.reply(
+                f"❌ API Key «{api_key_name}» پیدا نشد."
+            )
+            return
+
+        provider = api_key_data["provider"]
+        api_key = api_key_data["api_key"]
+        base_url = api_key_data["base_url"]
+
+        try:
+            await self.models.add(
+                name=model_name,
+                provider=provider,
+                model_id=model_id,
+                api_key=api_key,
+                base_url=base_url,
+            )
+
+        except Exception as exc:
+            await event.reply(
+                f"❌ خطا در افزودن مدل:\n{exc}"
+            )
+            return
+
+        try:
+            await event.delete()
+        except Exception:
+            pass
+
+        await event.reply(
+            f"✅ مدل «{model_name}» اضافه شد.\n"
+            f"🔑 API Key: {api_key_name}\n"
+            f"🤖 Model ID: {model_id}"
+        )
+
+        return
+
+    # -------------------------------------------------
+    # حالت قدیمی:
+    # !مدل افزودن gpt openai gpt-4o-mini API_KEY BASE_URL
+    # -------------------------------------------------
+    if len(args) < 4:
+        await event.reply(
+            "❌ پارامترهای کافی وارد نشده.\n\n"
+            "استفاده از API Key ذخیره‌شده:\n"
+            "!مدل افزودن <نام_مدل> <نام_API_Key> <model_id>\n\n"
+            "یا اطلاعات کامل:\n"
+            "!مدل افزودن <نام_مدل> <provider> <model_id> <API_KEY> [BASE_URL]"
+        )
+        return
+
+    model_name = args[0]
+    provider = args[1]
+    model_id = args[2]
+    api_key = args[3]
+
+    base_url = (
+        args[4]
+        if len(args) >= 5
+        else None
+    )
+
+    try:
+        await self.models.add(
+            name=model_name,
+            provider=provider,
+            model_id=model_id,
+            api_key=(
+                None
+                if api_key == "-"
+                else api_key
+            ),
+            base_url=base_url,
+        )
+
+    except Exception as exc:
+        await event.reply(
+            f"❌ خطا در افزودن مدل:\n{exc}"
+        )
+        return
+
+    try:
+        await event.delete()
+    except Exception:
+        pass
+
+    await event.reply(
+        f"✅ مدل «{model_name}» اضافه شد."
+    )
 
 @command(name='مدل ها', permission='owner', chat_type='all', description='لیست مدل ها')
 async def list_models(self, event):
