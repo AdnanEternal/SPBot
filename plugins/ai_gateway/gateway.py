@@ -133,6 +133,58 @@ class AIGateway:
 
         return sorted(set(result))
 
+
+    async def ping_remote_model(
+        self,
+        api_key_data: dict,
+        model_id: str,
+        timeout: float = 20.0,
+    ) -> tuple[bool, float, str]:
+
+        started = time.perf_counter()
+
+        model = {
+            "name": model_id,
+            "provider": api_key_data["provider"],
+            "model_id": model_id,
+            "api_key": api_key_data["api_key"],
+            "base_url": api_key_data.get("base_url"),
+        }
+
+        try:
+            await self.chat(
+                [
+                    {
+                        "role": "user",
+                        "content": "Reply with exactly: pong",
+                    }
+                ],
+                model=model,
+                timeout=timeout,
+                temperature=0,
+            )
+
+        except AIGatewayError as exc:
+            latency = (
+                time.perf_counter() - started
+            ) * 1000
+
+            return False, latency, str(exc)
+
+        except Exception as exc:
+            latency = (
+                time.perf_counter() - started
+            ) * 1000
+
+            return False, latency, str(exc)
+
+        latency = (
+            time.perf_counter() - started
+        ) * 1000
+
+        return True, latency, ""
+
+
     async def ping_remote_models(
         self,
         api_key_data: dict,
