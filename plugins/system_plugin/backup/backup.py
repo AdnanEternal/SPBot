@@ -140,12 +140,22 @@ class DatabaseBackupManager:
         lock_acquired = False
 
         db_path = self.db.db_path
-        old_path = f"{db_path}.restore_old"
+
+        # فایل‌های rollback
+        old_db_path = f"{db_path}.restore_old"
+        old_wal_path = f"{db_path}-wal.restore_old"
+        old_shm_path = f"{db_path}-shm.restore_old"
+
+        # فایل‌های جانبی دیتابیس فعال
+        wal_path = f"{db_path}-wal"
+        shm_path = f"{db_path}-shm"
 
         had_existing_db = False
 
         try:
-            # اول backup را دانلود می‌کنیم؛ بدون قفل DB.
+            # -------------------------------------------------
+            # 1. دریافت backup بدون قفل دیتابیس
+            # -------------------------------------------------
             file_descriptor, temp_path = tempfile.mkstemp(
                 suffix=".db",
                 prefix="database_restore_",
@@ -176,7 +186,9 @@ class DatabaseBackupManager:
                 temp_path,
             )
 
-            # فقط از اینجا به بعد DB قفل می‌شود.
+            # -------------------------------------------------
+            # 2. قفل دیتابیس
+            # -------------------------------------------------
             await self._acquire_maintenance_lock()
             lock_acquired = True
 
@@ -184,31 +196,62 @@ class DatabaseBackupManager:
                 db_path
             )
 
+            # -------------------------------------------------
+            # 3. بستن اتصال فعلی
+            # -------------------------------------------------
             if self.db.connection is not None:
                 await self.db.connection.close()
                 self.db.connection = None
 
-            # rollback قبلی را پاک می‌کنیم.
-            if os.path.exists(old_path):
-                os.remove(old_path)
+            # -------------------------------------------------
+            # 4. پاک کردن rollback قبلی
+            # -------------------------------------------------
+            for path in (
+                old_db_path,
+                old_wal_path,
+                old_shm_path,
+            ):
+                if os.path.exists(path):
+                    os.remove(path)
 
-            # دیتابیس فعلی را نگه می‌داریم.
+            # -------------------------------------------------
+            # 5. ذخیره‌ی کامل دیتابیس فعلی برای rollback
+            #
+            # مهم:
+            # اگر DB فعلی WAL/SHM داشته باشد،
+            # آن‌ها هم باید همراه DB نگه داشته شوند.
+            # -------------------------------------------------
             if had_existing_db:
                 os.replace(
                     db_path,
-                    old_path,
+                    old_db_path,
                 )
 
-            wal_path = f"{db_path}-wal"
-            shm_path = f"{db_path}-shm"
+                if os.path.exists(wal_path):
+                    os.replace(
+                        wal_path,
+                        old_wal_path,
+                    )
 
-            if os.path.exists(wal_path):
-                os.remove(wal_path)
+                if os.path.exists(shm_path):
+                    os.replace(
+                        shm_path,
+                        old_shm_path,
+                    )
 
-            if os.path.exists(shm_path):
-                os.remove(shm_path)
+            else:
+                # اگر DB اصلی وجود ندارد، sidecarهای سرگردان
+                # هم نباید وارد restore جدید شوند.
+                for path in (
+                    wal_path,
+                    shm_path,
+                ):
+                    if os.path.exists(path):
+                        os.remove(path)
 
-            # backup جدید را نصب می‌کنیم.
+            # -------------------------------------------------
+            # 6. نصب backup جدید
+            # -------------------------------------------------
             os.replace(
                 temp_path,
                 db_path,
@@ -216,16 +259,31 @@ class DatabaseBackupManager:
 
             temp_path = None
 
+            # backup جدید نباید sidecar قدیمی داشته باشد.
+            for path in (
+                wal_path,
+                shm_path,
+            ):
+                if os.path.exists(path):
+                    os.remove(path)
+
             print(
                 "♻️ اتصال به دیتابیس بازیابی‌شده..."
             )
 
             await self.db.connect()
 
-            
-
-            if os.path.exists(old_path):
-                os.remove(old_path)
+            # -------------------------------------------------
+            # 7. restore موفق بود؛ rollback backupهای قدیمی
+            # دیگر لازم نیست.
+            # -------------------------------------------------
+            for path in (
+                old_db_path,
+                old_wal_path,
+                old_shm_path,
+            ):
+                if os.path.exists(path):
+                    os.remove(path)
 
             print(
                 "✅ دیتابیس با موفقیت بازیابی شد."
@@ -237,6 +295,9 @@ class DatabaseBackupManager:
                 "در حال تلاش برای rollback..."
             )
 
+            # -------------------------------------------------
+            # 8. بستن DB جدید
+            # -------------------------------------------------
             try:
                 if self.db.connection is not None:
                     await self.db.connection.close()
@@ -244,20 +305,49 @@ class DatabaseBackupManager:
             except Exception:
                 pass
 
+            # -------------------------------------------------
+            # 9. حذف کامل DB جدید + WAL/SHM آن
+            # -------------------------------------------------
+            for path in (
+                db_path,
+                wal_path,
+                shm_path,
+            ):
+                try:
+                    if os.path.exists(path):
+                        os.remove(path)
+                except Exception as cleanup_error:
+                    print(
+                        f"⚠️ حذف فایل '{path}' ناموفق بود: "
+                        f"{cleanup_error}"
+                    )
+
+            # -------------------------------------------------
+            # 10. برگرداندن دیتابیس قبلی + WAL/SHM آن
+            # -------------------------------------------------
             if had_existing_db:
                 try:
-                    if os.path.exists(db_path):
-                        os.remove(db_path)
-
-                    if os.path.exists(old_path):
+                    if os.path.exists(old_db_path):
                         os.replace(
-                            old_path,
+                            old_db_path,
                             db_path,
                         )
 
-                        print(
-                            "♻️ rollback موفق بود."
+                    if os.path.exists(old_wal_path):
+                        os.replace(
+                            old_wal_path,
+                            wal_path,
                         )
+
+                    if os.path.exists(old_shm_path):
+                        os.replace(
+                            old_shm_path,
+                            shm_path,
+                        )
+
+                    print(
+                        "♻️ rollback موفق بود."
+                    )
 
                 except Exception as rollback_error:
                     print(
@@ -268,15 +358,18 @@ class DatabaseBackupManager:
                     )
 
             else:
-                # دیتابیس قبلی وجود نداشته؛
-                # backup سالم را بی‌دلیل پاک نکن.
                 print(
                     "⚠️ دیتابیس قبلی وجود نداشت؛ "
-                    "فایل restore‌شده حذف نشد."
+                    "نسخه‌ی restore‌شده حذف نشد."
                 )
+
+            # -------------------------------------------------
+            # 11. اتصال مجدد
+            # -------------------------------------------------
             try:
                 if self.db.connection is None:
                     await self.db.connect()
+
             except Exception as reconnect_error:
                 print(
                     "🔥 اتصال مجدد دیتابیس ممکن نشد:"

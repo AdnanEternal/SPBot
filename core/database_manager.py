@@ -62,6 +62,22 @@ class DatabaseManager:
                 f"{self.db_path}.restore_old"
             )
 
+            restore_old_wal = Path(
+                f"{self.db_path}-wal.restore_old"
+            )
+
+            restore_old_shm = Path(
+                f"{self.db_path}-shm.restore_old"
+            )
+
+            wal_path = Path(
+                f"{self.db_path}-wal"
+            )
+
+            shm_path = Path(
+                f"{self.db_path}-shm"
+            )
+
             if (
                 not db_path.exists()
                 and restore_old.exists()
@@ -76,6 +92,20 @@ class DatabaseManager:
                     db_path,
                 )
 
+                if restore_old_wal.exists():
+                    os.replace(
+                        restore_old_wal,
+                        wal_path,
+                    )
+
+                if restore_old_shm.exists():
+                    os.replace(
+                        restore_old_shm,
+                        shm_path,
+                    )
+
+
+                        
             connection = None
 
             try:
