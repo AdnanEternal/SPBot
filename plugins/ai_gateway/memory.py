@@ -529,6 +529,70 @@ class AIMemoryManager:
 
 
 
+
+    def _insert_timeline_record(
+        self,
+        group_id: int,
+        record: dict[str, Any],
+    ) -> None:
+        timeline = self._timelines[group_id]
+        seen = self._timeline_seen.setdefault(
+            group_id,
+            set(),
+        )
+
+        if timeline.maxlen is None:
+            return
+
+        message_id = int(record["message_id"])
+
+        # رکورد تکراری
+        if message_id in seen:
+            return
+
+        records = list(timeline)
+
+        # پیدا کردن جای درست بر اساس message_id
+        insert_at = len(records)
+
+        for index, existing in enumerate(records):
+            try:
+                existing_id = int(
+                    existing["message_id"]
+                )
+            except (
+                TypeError,
+                ValueError,
+            ):
+                continue
+
+            if message_id < existing_id:
+                insert_at = index
+                break
+
+        records.insert(
+            insert_at,
+            record,
+        )
+
+        # اگر از سقف عبور کرد، قدیمی‌ترین رکورد حذف شود.
+        if len(records) > timeline.maxlen:
+            records = records[-timeline.maxlen:]
+
+        self._timelines[group_id] = deque(
+            records,
+            maxlen=timeline.maxlen,
+        )
+
+        self._timeline_seen[group_id] = {
+            int(item["message_id"])
+            for item in records
+        }
+
+
+
+
+
     async def _resolve_sender_name(
         self,
         group_id: int,
@@ -952,24 +1016,10 @@ class AIMemoryManager:
         if reply_preview is not None:
             record["reply_preview"] = reply_preview
 
-        timeline = self._timelines[group_id]
-
-        if timeline.maxlen is None:
-            return False
-
-        if len(timeline) >= timeline.maxlen:
-            old = timeline.popleft()
-
-            try:
-                seen.discard(
-                    int(old["message_id"])
-                )
-            except Exception:
-                pass
-
-        timeline.append(record)
-        seen.add(message_id)
-
+        self._insert_timeline_record(
+            group_id,
+            record,
+        )
         return True
 
 
@@ -1087,24 +1137,10 @@ class AIMemoryManager:
         if reply_preview is not None:
             record["reply_preview"] = reply_preview
 
-        timeline = self._timelines[group_id]
-
-        if timeline.maxlen is None:
-            return False
-
-        if len(timeline) >= timeline.maxlen:
-            old = timeline.popleft()
-
-            try:
-                seen.discard(
-                    int(old["message_id"])
-                )
-            except Exception:
-                pass
-
-        timeline.append(record)
-        seen.add(message_id)
-
+        self._insert_timeline_record(
+            group_id,
+            record,
+        )
         return True
 
 
