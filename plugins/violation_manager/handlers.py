@@ -267,7 +267,7 @@ async def on_reply_shortcut(self: "ViolationManagerPlugin", event: events.NewMes
         return
 
     text = (event.raw_text or "").strip()
-    if text not in ("میوت", "آنمیوت"):
+    if text not in ("میوت", "آنمیوت","بن"):
         return
 
     chat = await event.get_chat()
@@ -279,14 +279,17 @@ async def on_reply_shortcut(self: "ViolationManagerPlugin", event: events.NewMes
         return
     target_id = reply.sender_id
 
-    if text == "میوت":
+    if text in ("میوت", "سکوت"):
         settings = await self.settings.get(event.chat_id)
         hours = settings["mute_hours"] or DEFAULT_MUTE_HOURS
         await moderation.mute_user(self.client, chat, target_id, hours)
         await event.reply(f"کاربر `{target_id}` به مدت {hours} ساعت میوت شد.")
-    else:
+    elif text == "آنمیوت":
         await moderation.unmute_user(self.client, chat, target_id)
         await event.reply(f"میوتِ کاربر `{target_id}` برداشته شد.")
+    elif text in ("ریم","بن"):
+        await moderation.ban_user(self.client,chat,target_id)
+
 
 @on_bus_event("violation")
 async def on_violation(
