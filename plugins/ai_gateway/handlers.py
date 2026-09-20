@@ -947,7 +947,56 @@ async def on_timeline_outgoing(
 
 
 
+@on_event(events.MessageDeleted)
+async def on_timeline_message_deleted(
+    self,
+    event,
+):
+    try:
+        if not self.timeline_enabled:
+            return
 
+        group_id = getattr(
+            event,
+            "chat_id",
+            None,
+        )
+
+        if group_id is None:
+            return
+
+        message_ids = getattr(
+            event,
+            "message_id",
+            None,
+        )
+
+        if message_ids is None:
+            return
+
+        # برای اطمینان اگر نسخه‌ای لیست برگرداند
+        # هر دو حالت را پشتیبانی می‌کنیم.
+        if isinstance(
+            message_ids,
+            (list, tuple, set),
+        ):
+            ids = message_ids
+        else:
+            ids = [message_ids]
+
+        for message_id in ids:
+            try:
+                message_id = int(message_id)
+            except (TypeError, ValueError):
+                continue
+
+            self.memory.mark_deleted_message(
+                group_id,
+                message_id,
+            )
+
+    except Exception:
+        traceback.print_exc()
 
 
 @on_event(events.NewMessage(incoming=True))

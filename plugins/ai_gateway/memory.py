@@ -740,6 +740,33 @@ class AIMemoryManager:
         self._pending_deletions.setdefault(group_id, {})[message_id] = reason
 
 
+    def mark_deleted_message(
+    self,
+    group_id: int,
+    message_id: int,
+    reason: str = "این پیام حذف شده است",
+) -> bool:
+        """
+        یک پیام موجود در Timeline را به‌عنوان حذف‌شده علامت می‌زند.
+        اطلاعات هویتی، زمان و Reply دست‌نخورده می‌مانند.
+        """
+
+        timeline = self._timelines.get(group_id)
+
+        if not timeline:
+            return False
+
+        placeholder = f"[{reason}]"
+
+        for record in timeline:
+            if record["message_id"] == message_id:
+                record["text"] = placeholder
+                return True
+
+        return False
+
+
+
     def clear_timeline(
         self,
         group_id: int,
