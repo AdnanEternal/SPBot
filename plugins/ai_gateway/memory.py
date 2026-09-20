@@ -900,37 +900,59 @@ class AIMemoryManager:
             {},
         )[message_id] = reason
 
-    def mark_deleted(
+
+
+    def mark_deleted_message(
         self,
-        group_id: int,
-        event,
-        reason: str,
-) -> None:
+        message_id: int,
+        group_id: int | None = None,
+        reason: str = "این پیام حذف شده است",
+    ) -> bool:
         """
-        وقتی یک پلاگین پیام را به دلیل تخلف حذف می‌کند،
-        متن آن را در Timeline با placeholder جایگزین می‌کند.
+        پیام حذف‌شده را در Timeline علامت می‌زند.
 
-        اگر پیام هنوز وارد Timeline نشده باشد،
-        دلیل حذف موقتاً نگه داشته می‌شود تا record_event
-        هنگام ثبت پیام از آن استفاده کند.
+        اگر group_id مشخص باشد:
+            فقط همان گروه بررسی می‌شود.
+
+        اگر group_id مشخص نباشد:
+            در همه Timelineهای موجود جستجو می‌شود.
+            فقط وقتی تغییر می‌دهیم که message_id دقیقاً در
+            یک Timeline پیدا شده باشد؛ اگر در چند گروه باشد،
+            برای جلوگیری از false positive هیچ‌کدام تغییر نمی‌کنند.
         """
 
-        message_id = self._extract_message_id(
-            event
-        )
+        placeholder = f"[{reason}]"
 
-        if message_id is None:
-            return
+        # حالت دقیق: گروه مشخص است.
+        if group_id is not None:
+            timeline = self._timelines.get(group_id)
 
-        placeholder = (
-            f"[پیام حذف شده: {reason}]"
-        )
+            if not timeline:
+                return False
 
-        timeline = self._timelines.get(
-            group_id
-        )
+            for record in timeline:
+                try:
+                    current_id = int(
+                        record["message_id"]
+                    )
+                except (
+                    TypeError,
+                    ValueError,
+                ):
+                    continue
 
-        if timeline:
+                if current_id != message_id:
+                    continue
+
+                record["text"] = placeholder
+                return True
+
+            return False
+
+        # حالت fallback: گروه مشخص نیست.
+        matches = []
+
+        for current_group_id, timeline in self._timelines.items():
             for record in timeline:
                 try:
                     current_id = int(
@@ -943,14 +965,33 @@ class AIMemoryManager:
                     continue
 
                 if current_id == message_id:
-                    record["text"] = placeholder
-                    return
+                    matches.append(
+                        (
+                            current_group_id,
+                            record,
+                        )
+                    )
 
-        self._pending_deletions.setdefault(
-            group_id,
-            {},
-        )[message_id] = reason
+        # هیچ تطابقی پیدا نشد.
+        if not matches:
+            return False
 
+        # بیش از یک گروه دارای همین message_id هستند.
+        # نمی‌دانیم کدام پیام واقعاً حذف شده.
+        if len(matches) > 1:
+            print(
+                "⚠️ MessageDeleted بدون chat_id بود و "
+                f"message_id={message_id} در "
+                f"{len(matches)} Timeline پیدا شد؛ "
+                "برای جلوگیری از حذف اشتباه، نادیده گرفته شد."
+            )
+            return False
+
+        # دقیقاً یک تطابق پیدا شد.
+        _, record = matches[0]
+
+        record["text"] = placeholder
+        return True
 
     def clear_timeline(
         self,
