@@ -10,7 +10,7 @@ from .store import AIGatewayStore
 
 class AIGatewayPlugin(BasePlugin):
     name = "AI Gateway"
-    version = "2.12.3"
+    version = "2.12.4"
 
     def __init__(self, client, command_manager, db, event_bus):
         super().__init__(
@@ -114,3 +114,4 @@ class AIGatewayPlugin(BasePlugin):
     show_timeline = handlers.show_timeline
     clear_timeline_command = handlers.clear_timeline_command
     on_timeline_message_deleted = handlers.on_timeline_message_deleted
+    on_timeline_system_message = handlers.on_timeline_system_message

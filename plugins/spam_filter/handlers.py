@@ -116,7 +116,11 @@ async def _flag_flood(self: "SpamFilterPlugin", event: events.NewMessage.Event, 
         event=event,
         group_id=event.chat_id,
         user_id=event.sender_id,
-        reason=f"اسپم: ارسال بیش از حد پیام در {window_seconds} ثانیه (فلاد)",
+        reason=(
+            f"اسپم: ارسال بیش از حد پیام "
+            f"در {window_seconds} ثانیه (فلاد)"
+        ),
+        message_ids=ids,
     )
 
 

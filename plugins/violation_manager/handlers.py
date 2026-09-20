@@ -35,19 +35,19 @@ async def _display_name(event, user_id: int) -> str:
     return str(user_id)
 
 
-async def _notify(event, text: str) -> None:
-    # ترجیحاً ریپلای می‌کنیم؛ حتی اگه پیام اصلی پاک شده باشه معمولاً
-    # مشکلی نیست، فقط پیش‌نمایش پیام اصلی نشون داده نمی‌شه. این
-    # ریپلای باعث می‌شه تو Timeline بوبی هم این پیام سیستمی به همون
-    # پیام حذف‌شده وصل بشه.
+async def _notify(event, text: str):
     try:
-        await event.reply(text)
+        return await event.reply(text)
+
     except Exception:
         try:
-            await event.respond(text)
-        except Exception as e:
-            print(f"⚠️ نتونستم پیام تخلف رو ارسال کنم: {e}")
+            return await event.respond(text)
 
+        except Exception as e:
+            print(
+                f"⚠️ نتونستم پیام تخلف رو ارسال کنم: {e}"
+            )
+            return None
 
 @command(
     name="حذف سابقه",
@@ -303,6 +303,7 @@ async def on_violation(
     group_id: int,
     user_id: int,
     reason: str,
+    message_ids: list[int] | None = None,
 ) -> None:
     """
     دریافت گزارش تخلف از سایر پلاگین‌ها.
@@ -326,11 +327,20 @@ async def on_violation(
     name = await _display_name(event, user_id)
 
     if is_admin:
-        await _notify(
+
+        
+
+        sent = await _notify(
             event,
             f"⚠️ {name} مرتکب تخلف شد.\n"
             f"📌 دلیل: {reason}",
         )
+        await self.event_bus.emit(
+            "timeline_system_message",
+            group_id,
+            message=sent
+        )
+
         return
 
     await self.violations.add(group_id, user_id, reason)
@@ -370,4 +380,10 @@ async def on_violation(
                 "(ربات دسترسی لازم رو داره؟)"
             )
 
-    await _notify(event, message)
+    sent = await _notify(event, message)
+
+    await self.event_bus.emit(
+        "timeline_system_message",
+        group_id,
+        sent
+    )

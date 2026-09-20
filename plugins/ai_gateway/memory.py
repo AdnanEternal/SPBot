@@ -54,6 +54,11 @@ class AIMemoryManager:
             int,
             dict[int, str],
         ] = {}
+
+        self._timeline_load_locks: dict[
+            int,
+            asyncio.Lock,
+        ] = {}
     # =========================================================
     # Existing memory system
     # =========================================================
@@ -68,22 +73,33 @@ class AIMemoryManager:
         limit: int,
     ) -> bool:
         """
-        اگر Timeline این گروه هنوز ساخته نشده باشد،
-        تاریخچه را خودکار Load می‌کند.
+        اگر Timeline گروه وجود نداشته باشد،
+        فقط یک بار آن را Load می‌کند.
+
+        برای جلوگیری از Load همزمان توسط چند Event،
+        برای هر گروه Lock جداگانه داریم.
         """
 
         if group_id in self._timelines:
             return False
 
-        await self.load_timeline(
-            client,
+        lock = self._timeline_load_locks.setdefault(
             group_id,
-            limit,
+            asyncio.Lock(),
         )
 
-        return True
+        async with lock:
+            # ممکن است Event دیگری قبل از ما Timeline را ساخته باشد.
+            if group_id in self._timelines:
+                return False
 
+            await self.load_timeline(
+                client,
+                group_id,
+                limit,
+            )
 
+            return True
 
 
     async def get_current_reply_context(
@@ -854,6 +870,7 @@ class AIMemoryManager:
         group_id: int,
         event,
         reason: str,
+        message_id: int | None = None
 ) -> None:
         """
         وقتی یک پلاگین پیام را به دلیل تخلف حذف می‌کند،
@@ -863,10 +880,10 @@ class AIMemoryManager:
         دلیل حذف موقتاً نگه داشته می‌شود تا record_event
         هنگام ثبت پیام از آن استفاده کند.
         """
-
-        message_id = self._extract_message_id(
-            event
-        )
+        if message_id is None:
+            message_id = self._extract_message_id(
+                event
+            )
 
         if message_id is None:
             return

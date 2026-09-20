@@ -831,12 +831,25 @@ async def timeline_toggle(
     description="محتوای فعلی Timeline این گروه رو (همونی که بوبی می‌بینه) نشون می‌ده - برای دیباگ.",
 )
 async def show_timeline(self, event) -> None:
-    context = self.memory.get_timeline_context(event.chat_id)
+    if not self.timeline_enabled:
+        await event.reply(
+            "🛑 Timeline سراسری خاموش است."
+        )
+        return
 
+    await self.memory.ensure_timeline(
+        self.client,
+        event.chat_id,
+        self.timeline_limit,
+    )
+
+
+    context = self.memory.get_timeline_context(
+        event.chat_id
+    )
     if not context:
         await event.reply(
-            "🧭 Timeline این گروه خالیه یا لود نشده.\n"
-            "با !تاریخچه {عدد} لودش کن."
+            "🧭 هنوز پیام قابل‌نمایشی در Timeline این گروه وجود ندارد."
         )
         return
 
@@ -1191,7 +1204,6 @@ async def on_message(self, event):
             pass
 
 
-
 @on_bus_event("violation")
 async def on_violation_deleted(
     self,
@@ -1199,12 +1211,61 @@ async def on_violation_deleted(
     group_id: int,
     user_id: int,
     reason: str,
+    message_ids: list[int] | None = None,
 ) -> None:
-    """
-    وقتی یه پلاگین دیگه یه پیام رو به‌خاطر تخلف پاک می‌کنه، فقط
-    Timeline رو آپدیت می‌کنیم - نه چیز دیگه‌ای.
-    """
     if not self.timeline_enabled:
         return
 
-    self.memory.mark_deleted(group_id, event, reason)
+    ids = message_ids
+
+    if not ids:
+        message_id = self.memory._extract_message_id(
+            event
+        )
+
+        if message_id is None:
+            return
+
+        ids = [message_id]
+
+    for message_id in ids:
+        self.memory.mark_deleted(
+            group_id,
+            event,
+            reason,
+            message_id=message_id,
+        )
+
+
+
+
+
+
+
+
+@on_bus_event("timeline_system_message")
+async def on_timeline_system_message(
+    self,
+    group_id: int,
+    message,
+) -> None:
+    if not self.timeline_enabled:
+        return
+
+    if message is None:
+        return
+
+    try:
+        await self.memory.ensure_timeline(
+            self.client,
+            group_id,
+            self.timeline_limit,
+        )
+
+        await self.memory.record_generated_message(
+            group_id,
+            message,
+        )
+
+    except Exception:
+        traceback.print_exc()
