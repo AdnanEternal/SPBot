@@ -429,6 +429,106 @@ class AIMemoryManager:
 
         return None
 
+
+
+    async def _get_reply_message(
+        self,
+        message: Any,
+    ) -> Any | None:
+        """
+        خود پیام Reply شده را برمی‌گرداند.
+
+        این متد فقط برای ساخت reply_preview استفاده می‌شود.
+        هیچ فیلتری روی متن پیام هدف انجام نمی‌دهد.
+        """
+        try:
+            getter = getattr(
+                message,
+                "get_reply_message",
+                None,
+            )
+
+            if not callable(getter):
+                return None
+
+            return await getter()
+
+        except Exception:
+            return None
+
+    async def _build_reply_preview(
+        self,
+        group_id: int,
+        target,
+    ) -> dict[str, Any] | None:
+        """
+        اطلاعات کامل پیام Reply شده را برای preview ذخیره می‌کند.
+
+        توجه:
+        - هیچ محتوایی به خاطر ! یا Secret حذف نمی‌شود.
+        - متن کامل پیام در RAM نگه داشته می‌شود.
+        """
+
+        message_id = self._extract_message_id(
+            target
+        )
+
+        if message_id is None:
+            return None
+
+        sender_id = getattr(
+            target,
+            "sender_id",
+            None,
+        )
+
+        if sender_id is not None:
+            try:
+                sender_id = int(sender_id)
+            except Exception:
+                sender_id = None
+
+        sender_name = await self._resolve_sender_name(
+            group_id,
+            target,
+            sender_id,
+        )
+
+        raw_text = (
+            getattr(
+                target,
+                "raw_text",
+                None,
+            )
+            or getattr(
+                target,
+                "message",
+                None,
+            )
+            or ""
+        )
+
+        text = str(raw_text).strip()
+
+        if not text:
+            text = "[پیام بدون متن یا رسانه]"
+
+        return {
+            "message_id": message_id,
+            "sender_id": sender_id,
+            "sender_name": sender_name,
+            "text": text,
+            "date": self._format_date(
+                getattr(
+                    target,
+                    "date",
+                    None,
+                )
+            ),
+        }
+
+
+
     async def _resolve_sender_name(
         self,
         group_id: int,
@@ -474,7 +574,6 @@ class AIMemoryManager:
         cache[sender_id] = name
 
         return name
-
     async def load_timeline(
         self,
         client,
@@ -484,6 +583,13 @@ class AIMemoryManager:
         """
         آخرین پیام‌های گروه را از Soroush گرفته
         و در RAM آماده می‌کند.
+
+        Commandها همچنان به‌عنوان رکورد مستقل Timeline
+        ذخیره نمی‌شوند.
+
+        اما اگر پیام دیگری به یک Command یا هر پیام دیگری
+        که خارج از Timeline فعلی است Reply کرده باشد،
+        اطلاعات پیام هدف در reply_preview ذخیره می‌شود.
         """
 
         limit = max(
@@ -508,10 +614,31 @@ class AIMemoryManager:
         ):
             messages = [messages]
 
+        messages = list(messages)
+
+        # تمام پیام‌های دریافت‌شده، حتی Commandها،
+        # اینجا نگه داشته می‌شوند تا بتوانیم Reply هدف
+        # را از بین آن‌ها پیدا کنیم.
+        fetched_messages_by_id: dict[int, Any] = {}
+
+        for message in messages:
+            message_id = self._extract_message_id(
+                message
+            )
+
+            if message_id is not None:
+                fetched_messages_by_id[
+                    message_id
+                ] = message
+
         records: list[dict[str, Any]] = []
 
+        # برای اینکه اگر target خارج از Timeline فعلی بود،
+        # خود Message مربوط به رکورد را داشته باشیم.
+        source_messages_by_id: dict[int, Any] = {}
+
         # get_messages معمولاً جدیدترین -> قدیمی‌ترین برمی‌گرداند
-        for message in reversed(list(messages)):
+        for message in reversed(messages):
 
             message_id = self._extract_message_id(
                 message
@@ -536,8 +663,7 @@ class AIMemoryManager:
 
             text = str(raw_text).strip()
 
-            # کامندها را داخل Timeline ذخیره نمی‌کنیم
-            # تا چیزهایی مثل API Key وارد حافظه نشوند.
+            # خود Command وارد Timeline نمی‌شود.
             if text.startswith("!"):
                 continue
 
@@ -566,25 +692,85 @@ class AIMemoryManager:
                 message
             )
 
-            records.append(
-                {
-                    "message_id": message_id,
-                    "group_id": group_id,
-                    "sender_id": sender_id,
-                    "sender_name": sender_name,
-                    "text": text,
-                    "date": self._format_date(
-                        getattr(
-                            message,
-                            "date",
-                            None,
-                        )
-                    ),
-                    "reply_to_id": reply_to_id,
-                }
+            record = {
+                "message_id": message_id,
+                "group_id": group_id,
+                "sender_id": sender_id,
+                "sender_name": sender_name,
+                "text": text,
+                "date": self._format_date(
+                    getattr(
+                        message,
+                        "date",
+                        None,
+                    )
+                ),
+                "reply_to_id": reply_to_id,
+            }
+
+            records.append(record)
+            source_messages_by_id[
+                message_id
+            ] = message
+
+        # سقف Timeline
+        records = records[-limit:]
+
+        # شناسه‌هایی که واقعاً در Timeline قرار گرفته‌اند
+        timeline_ids = {
+            int(record["message_id"])
+            for record in records
+        }
+
+        # برای هر Reply که target خودش در Timeline نیست،
+        # preview می‌سازیم.
+        for record in records:
+            reply_to_id = record.get(
+                "reply_to_id"
             )
 
-        records = records[-limit:]
+            if reply_to_id is None:
+                continue
+
+            try:
+                reply_to_id = int(reply_to_id)
+            except Exception:
+                continue
+
+            # اگر خود target داخل Timeline است،
+            # formatter همان رکورد اصلی را استفاده می‌کند.
+            if reply_to_id in timeline_ids:
+                continue
+
+            source_message = source_messages_by_id.get(
+                int(record["message_id"])
+            )
+
+            if source_message is None:
+                continue
+
+            # اول در همان batch دریافت‌شده دنبالش می‌گردیم.
+            # این حالت مخصوصاً Commandهای حذف‌شده از Timeline است.
+            target = fetched_messages_by_id.get(
+                reply_to_id
+            )
+
+            # اگر در batch نبود، مستقیم از Reply می‌گیریمش.
+            if target is None:
+                target = await self._get_reply_message(
+                    source_message
+                )
+
+            if target is None:
+                continue
+
+            preview = await self._build_reply_preview(
+                group_id,
+                target,
+            )
+
+            if preview is not None:
+                record["reply_preview"] = preview
 
         timeline = deque(
             records,
@@ -604,7 +790,6 @@ class AIMemoryManager:
         )
 
         return len(records)
-
     async def record_event(
         self,
         event,
@@ -717,6 +902,37 @@ class AIMemoryManager:
             event
         )
 
+        
+
+        reply_preview = None
+
+        if reply_to_id is not None:
+            try:
+                reply_to_id = int(reply_to_id)
+            except Exception:
+                reply_to_id = None
+
+        # اگر target در Timeline نیست،
+        # خود پیام target را می‌گیریم و داخل رکورد فعلی
+        # به‌عنوان preview ذخیره می‌کنیم.
+        #
+        # این شامل Commandها هم می‌شود.
+        if (
+            reply_to_id is not None
+            and reply_to_id not in seen
+        ):
+            replied = await self._get_reply_message(
+                event
+            )
+
+            if replied is not None:
+                reply_preview = (
+                    await self._build_reply_preview(
+                        group_id,
+                        replied,
+                    )
+                )
+
         record = {
             "message_id": message_id,
             "group_id": group_id,
@@ -732,6 +948,9 @@ class AIMemoryManager:
             ),
             "reply_to_id": reply_to_id,
         }
+
+        if reply_preview is not None:
+            record["reply_preview"] = reply_preview
 
         timeline = self._timelines[group_id]
 
@@ -825,6 +1044,30 @@ class AIMemoryManager:
             message
         )
 
+        reply_preview = None
+
+        if reply_to_id is not None:
+            try:
+                reply_to_id = int(reply_to_id)
+            except Exception:
+                reply_to_id = None
+
+        if (
+            reply_to_id is not None
+            and reply_to_id not in seen
+        ):
+            replied = await self._get_reply_message(
+                message
+            )
+
+            if replied is not None:
+                reply_preview = (
+                    await self._build_reply_preview(
+                        group_id,
+                        replied,
+                    )
+                )
+
         record = {
             "message_id": message_id,
             "group_id": group_id,
@@ -840,6 +1083,9 @@ class AIMemoryManager:
             ),
             "reply_to_id": reply_to_id,
         }
+
+        if reply_preview is not None:
+            record["reply_preview"] = reply_preview
 
         timeline = self._timelines[group_id]
 
@@ -1036,6 +1282,7 @@ class AIMemoryManager:
 
         return bool(timeline)
 
+
     def _format_timeline_record(
         self,
         record: dict[str, Any],
@@ -1066,41 +1313,81 @@ class AIMemoryManager:
         if reply_to_id is None:
             return result
 
+        try:
+            reply_to_id = int(reply_to_id)
+        except Exception:
+            return result
+
         target = by_id.get(
-            int(reply_to_id)
+            reply_to_id
         )
 
-        if target is None:
+        # حالت عادی:
+        # target خودش در Timeline وجود دارد.
+        if target is not None:
+            target_text = str(
+                target.get(
+                    "text",
+                    "",
+                )
+            ).strip()
+
+            if len(target_text) > 600:
+                target_text = (
+                    target_text[:600]
+                    + "..."
+                )
+
             result += (
                 "\n↳ در پاسخ به "
-                f"message_id={reply_to_id} "
-                "(پیام هدف خارج از Timeline فعلی است)"
+                f"[{target['date']}] "
+                f"{target['sender_name']} "
+                f"(message_id={target['message_id']}):\n"
+                f"{target_text}"
             )
 
             return result
 
-        target_text = str(
-            target.get(
-                "text",
-                "",
-            )
-        ).strip()
+        # حالت جدید:
+        # target خودش در Timeline نیست،
+        # ولی اطلاعاتش هنگام ثبت Reply ذخیره شده.
+        reply_preview = record.get(
+            "reply_preview"
+        )
 
-        if len(target_text) > 600:
-            target_text = (
-                target_text[:600]
-                + "..."
+        if reply_preview is not None:
+            preview_text = str(
+                reply_preview.get(
+                    "text",
+                    "",
+                )
+            ).strip()
+
+            if len(preview_text) > 600:
+                preview_text = (
+                    preview_text[:600]
+                    + "..."
+                )
+
+            result += (
+                "\n↳ در پاسخ به "
+                f"[{reply_preview.get('date', 'زمان نامشخص')}] "
+                f"{reply_preview.get('sender_name', 'نامشخص')} "
+                f"(message_id={reply_preview.get('message_id', reply_to_id)}):\n"
+                f"{preview_text}"
             )
 
+            return result
+
+        # اگر حتی preview هم در دسترس نبود.
         result += (
             "\n↳ در پاسخ به "
-            f"[{target['date']}] "
-            f"{target['sender_name']} "
-            f"(message_id={target['message_id']}):\n"
-            f"{target_text}"
+            f"message_id={reply_to_id} "
+            "(پیام هدف خارج از Timeline فعلی است)"
         )
 
         return result
+
 
     def get_timeline_context(
         self,
