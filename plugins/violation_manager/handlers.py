@@ -36,12 +36,17 @@ async def _display_name(event, user_id: int) -> str:
 
 
 async def _notify(event, text: str) -> None:
-    # پیام اصلی ممکنه پاک شده باشه، برای همین ریپلای نمی‌کنیم.
+    # ترجیحاً ریپلای می‌کنیم؛ حتی اگه پیام اصلی پاک شده باشه معمولاً
+    # مشکلی نیست، فقط پیش‌نمایش پیام اصلی نشون داده نمی‌شه. این
+    # ریپلای باعث می‌شه تو Timeline بوبی هم این پیام سیستمی به همون
+    # پیام حذف‌شده وصل بشه.
     try:
-        await event.respond(text)
-    except Exception as e:
-        print(f"⚠️ نتونستم پیام تخلف رو ارسال کنم: {e}")
-
+        await event.reply(text)
+    except Exception:
+        try:
+            await event.respond(text)
+        except Exception as e:
+            print(f"⚠️ نتونستم پیام تخلف رو ارسال کنم: {e}")
 
 
 @command(

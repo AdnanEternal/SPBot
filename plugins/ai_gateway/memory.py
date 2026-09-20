@@ -45,6 +45,15 @@ class AIMemoryManager:
             dict[int, str],
         ] = {}
 
+
+        # group_id -> {message_id: reason}
+        # پیام‌هایی که یه پلاگین دیگه گفته حذف شدن ولی هنوز تو
+        # Timeline ثبت نشده بودن (ترتیب اجرای پلاگین‌ها تضمین‌شده
+        # نیست). با mark_deleted() پر می‌شه، با record_event() خالی.
+        self._pending_deletions: dict[
+            int,
+            dict[int, str],
+        ] = {}
     # =========================================================
     # Existing memory system
     # =========================================================
@@ -590,28 +599,38 @@ class AIMemoryManager:
         if message_id in seen:
             return False
 
-        raw_text = (
-            getattr(
-                event,
-                "raw_text",
-                None,
+                # اگه یه پلاگین دیگه (content_filter، spam_filter و ...) قبلاً
+        # گفته بود این پیام حذف شده، به‌جای متن واقعیِ پیام همون دلیل
+        # حذف رو تو Timeline می‌ذاریم.
+        pending_reason = self._pending_deletions.get(
+            group_id, {}
+        ).pop(message_id, None)
+
+        if pending_reason is not None:
+            text = f"[پیام حذف شده: {pending_reason}]"
+        else:
+            raw_text = (
+                getattr(
+                    event,
+                    "raw_text",
+                    None,
+                )
+                or getattr(
+                    event,
+                    "message",
+                    None,
+                )
+                or ""
             )
-            or getattr(
-                event,
-                "message",
-                None,
-            )
-            or ""
-        )
 
-        text = str(raw_text).strip()
+            text = str(raw_text).strip()
 
-        # کامندها را ثبت نکن
-        if text.startswith("!"):
-            return False
+            # کامندها را ثبت نکن
+            if text.startswith("!"):
+                return False
 
-        if not text:
-            text = "[پیام بدون متن یا رسانه]"
+            if not text:
+                text = "[پیام بدون متن یا رسانه]"
 
         sender_id = getattr(
             event,
@@ -691,24 +710,45 @@ class AIMemoryManager:
 
         return True
 
+
+    def mark_deleted(self, group_id: int, event, reason: str) -> None:
+        """
+        وقتی یه پیام به دلیل تخلف (فیلتر کلمه، اسپم و ...) حذف می‌شه،
+        این متد صدا زده می‌شه. اگه پیام از قبل تو Timeline ثبت شده،
+        متنش رو عوض می‌کنه؛ اگه هنوز ثبت نشده، دلیل رو موقت نگه
+        می‌داره تا record_event بعداً خودش جایگزینش کنه.
+
+        این‌جوری بوبی به‌جای دیدن متن واقعیِ پیامِ حذف‌شده (که ممکنه
+        فحش/تبلیغ باشه)، فقط می‌فهمه این پیام حذف شده و چرا.
+        """
+        if group_id not in self._timelines:
+            return
+
+        message_id = self._extract_message_id(event)
+
+        if message_id is None:
+            return
+
+        placeholder = f"[پیام حذف شده: {reason}]"
+
+        for record in self._timelines[group_id]:
+            if record["message_id"] == message_id:
+                record["text"] = placeholder
+                return
+
+        # پیام هنوز تو Timeline نیست؛ دلیل رو موقت نگه دار.
+        self._pending_deletions.setdefault(group_id, {})[message_id] = reason
+
+
     def clear_timeline(
         self,
         group_id: int,
     ) -> None:
-        self._timelines.pop(
-            group_id,
-            None,
-        )
-
-        self._timeline_seen.pop(
-            group_id,
-            None,
-        )
-
-        self._timeline_sender_cache.pop(
-            group_id,
-            None,
-        )
+        
+        self._timelines.pop(group_id, None)
+        self._timeline_seen.pop(group_id, None)
+        self._timeline_sender_cache.pop(group_id, None)
+        self._pending_deletions.pop(group_id, None)
 
     def clear_all_timelines(self) -> None:
         self._timelines.clear()

@@ -1,8 +1,7 @@
 from splusthon import events
-from core.decorators import command, on_event
+from core.decorators import command, on_bus_event, on_event
 from .gateway import AIGatewayError
 from .trigger import extract_trigger_text
-
 
 import traceback
 
@@ -770,6 +769,70 @@ async def timeline_toggle(
     )
 
 
+
+
+
+
+
+
+@command(
+    name="نمایش تایم لاین",
+    permission="owner",
+    chat_type="group",
+    description="محتوای فعلی Timeline این گروه رو (همونی که بوبی می‌بینه) نشون می‌ده - برای دیباگ.",
+)
+async def show_timeline(self, event) -> None:
+    context = self.memory.get_timeline_context(event.chat_id)
+
+    if not context:
+        await event.reply(
+            "🧭 Timeline این گروه خالیه یا لود نشده.\n"
+            "با !تاریخچه {عدد} لودش کن."
+        )
+        return
+
+    # همون الگوی تقسیم پیام که تو "کلید مدل ها پینگ" هست، که وسط یه
+    # خط قطع نشه و به محدودیت طول پیام هم نخوریم.
+    lines = context.split("\n")
+    chunk_size = 3000
+    chunks = []
+    current = ""
+
+    for line in lines:
+        if len(current) + len(line) + 1 > chunk_size:
+            if current:
+                chunks.append(current)
+            current = line
+        else:
+            if current:
+                current += "\n"
+            current += line
+
+    if current:
+        chunks.append(current)
+
+    for chunk in chunks:
+        try:
+            await event.reply(chunk)
+        except Exception as exc:
+            print(f"❌ خطا در ارسال Timeline: {exc}")
+            break
+
+
+@command(
+    name="پاک تایم لاین",
+    permission="owner",
+    chat_type="group",
+    description="Timeline این گروه رو کامل از RAM پاک می‌کنه - برای دیباگ.",
+)
+async def clear_timeline_command(self, event) -> None:
+    self.memory.clear_timeline(event.chat_id)
+    await event.reply("🧹 Timeline این گروه پاک شد.")
+
+
+
+
+
 @command(
     name="تاریخچه",
     permission="owner",
@@ -1036,3 +1099,22 @@ async def on_message(self, event):
             )
         except Exception:
             pass
+
+
+
+@on_bus_event("violation")
+async def on_violation_deleted(
+    self,
+    event,
+    group_id: int,
+    user_id: int,
+    reason: str,
+) -> None:
+    """
+    وقتی یه پلاگین دیگه یه پیام رو به‌خاطر تخلف پاک می‌کنه، فقط
+    Timeline رو آپدیت می‌کنیم - نه چیز دیگه‌ای.
+    """
+    if not self.timeline_enabled:
+        return
+
+    self.memory.mark_deleted(group_id, event, reason)
