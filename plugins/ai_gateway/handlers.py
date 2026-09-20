@@ -706,15 +706,21 @@ async def bot_name(self, event):
     chat_type="all",
     description="خاموش یا روشن کردن سراسری Timeline هوش مصنوعی",
 )
+@command(
+    name="تایم لاین",
+    permission="owner",
+    chat_type="all",
+    description="تنظیم سراسری Timeline هوش مصنوعی",
+)
 async def timeline_toggle(
     self,
     event,
 ):
-    value = (
+    raw = (
         event.args_text or ""
-    ).strip().lower()
+    ).strip()
 
-    if not value:
+    if not raw:
         status = (
             "🟢 فعال"
             if self.timeline_enabled
@@ -722,28 +728,67 @@ async def timeline_toggle(
         )
 
         await event.reply(
-            f"🧭 وضعیت Timeline سراسری: {status}\n\n"
+            f"🧭 وضعیت Timeline سراسری: {status}\n"
+            f"📦 سقف هر گروه: {self.timeline_limit} پیام\n\n"
             "روشن کردن:\n"
-            "!تایم لاین روشن\n\n"
+            "!تایم لاین روشن 200\n\n"
             "خاموش کردن:\n"
             "!تایم لاین خاموش"
         )
         return
 
-    if value in {
+    parts = raw.split()
+
+    action = parts[0].lower()
+
+    if action in {
         "روشن",
         "on",
         "1",
         "فعال",
     }:
+        limit = self.timeline_limit
+
+        if len(parts) >= 2:
+            if not parts[1].isdigit():
+                await event.reply(
+                    "❌ مقدار تعداد پیام نامعتبر است.\n"
+                    "مثال:\n"
+                    "!تایم لاین روشن 200"
+                )
+                return
+
+            limit = int(parts[1])
+
+        if limit < 10:
+            await event.reply(
+                "❌ حداقل تعداد پیام 10 است."
+            )
+            return
+
+        if limit > self.memory.MAX_TIMELINE_MESSAGES:
+            await event.reply(
+                f"❌ حداکثر تعداد پیام "
+                f"{self.memory.MAX_TIMELINE_MESSAGES} است."
+            )
+            return
+
         self.timeline_enabled = True
+        self.timeline_limit = limit
+
+        await self.store.timeline.set(
+            enabled=True,
+            message_limit=limit,
+        )
 
         await event.reply(
-            "✅ Timeline سراسری روشن شد."
+            "✅ Timeline سراسری روشن شد.\n"
+            f"📦 سقف هر گروه: {limit} پیام\n"
+            "💾 این تنظیم در دیتابیس ذخیره شد."
         )
         return
 
-    if value in {
+    if action in {
         "خاموش",
         "off",
         "0",
@@ -751,23 +796,27 @@ async def timeline_toggle(
     }:
         self.timeline_enabled = False
 
-        # چون دیگر استفاده‌ای از Timelineها نداریم،
-        # RAM را هم آزاد می‌کنیم.
+        await self.store.timeline.set(
+            enabled=False,
+            message_limit=self.timeline_limit,
+        )
+
         self.memory.clear_all_timelines()
 
         await event.reply(
-            "🛑 Timeline سراسری خاموش شد و "
-            "Timelineهای موجود از RAM پاک شدند."
+            "🛑 Timeline سراسری خاموش شد.\n"
+            "🧹 Timelineهای RAM پاک شدند.\n"
+            "💾 وضعیت خاموش در دیتابیس ذخیره شد."
         )
         return
 
     await event.reply(
-        "❌ مقدار نامعتبر.\n\n"
-        "استفاده:\n"
-        "!تایم لاین روشن\n"
+        "❌ استفاده نادرست.\n\n"
+        "برای روشن کردن:\n"
+        "!تایم لاین روشن 200\n\n"
+        "برای خاموش کردن:\n"
         "!تایم لاین خاموش"
     )
-
 
 
 
@@ -915,6 +964,12 @@ async def on_timeline_incoming(
         if not event.is_group:
             return
 
+        await self.memory.ensure_timeline(
+            self.client,
+            event.chat_id,
+            self.timeline_limit,
+        )
+
         await self.memory.record_event(
             event
         )
@@ -935,9 +990,17 @@ async def on_timeline_outgoing(
         if not event.is_group:
             return
 
+
+        await self.memory.ensure_timeline(
+            self.client,
+            event.chat_id,
+            self.timeline_limit,
+        )
+
         await self.memory.record_event(
             event
         )
+
 
     except Exception:
         traceback.print_exc()

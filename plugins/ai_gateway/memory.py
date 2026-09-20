@@ -59,6 +59,33 @@ class AIMemoryManager:
     # =========================================================
 
 
+
+
+    async def ensure_timeline(
+        self,
+        client,
+        group_id: int,
+        limit: int,
+    ) -> bool:
+        """
+        اگر Timeline این گروه هنوز ساخته نشده باشد،
+        تاریخچه را خودکار Load می‌کند.
+        """
+
+        if group_id in self._timelines:
+            return False
+
+        await self.load_timeline(
+            client,
+            group_id,
+            limit,
+        )
+
+        return True
+
+
+
+
     async def get_current_reply_context(
         self,
         event,
@@ -741,10 +768,10 @@ class AIMemoryManager:
 
 
     def mark_deleted_message(
-    self,
-    group_id: int,
-    message_id: int,
-    reason: str = "این پیام حذف شده است",
+        self,
+        group_id: int,
+        message_id: int,
+        reason: str = "این پیام حذف شده است",
 ) -> bool:
         """
         یک پیام موجود در Timeline را به‌عنوان حذف‌شده علامت می‌زند.

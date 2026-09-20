@@ -906,6 +906,82 @@ class AIAPIKeyStore:
         )
 
         return cursor.rowcount > 0
+
+
+
+
+class AITimelineSettingsStore:
+    TABLE = "ai_timeline_settings"
+
+    DEFAULT_ENABLED = True
+    DEFAULT_MESSAGE_LIMIT = 200
+
+    def __init__(self, db: DatabaseManager) -> None:
+        self.db = db
+
+    async def create_table(self) -> None:
+        await self.db.create_table(
+            self.TABLE,
+            columns={
+                "id": "INTEGER PRIMARY KEY",
+                "enabled": (
+                    f"INTEGER NOT NULL DEFAULT "
+                    f"{1 if self.DEFAULT_ENABLED else 0}"
+                ),
+                "message_limit": (
+                    f"INTEGER NOT NULL DEFAULT "
+                    f"{self.DEFAULT_MESSAGE_LIMIT}"
+                ),
+                "updated_at": (
+                    "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                ),
+            },
+        )
+
+        await self.db.insert(
+            self.TABLE,
+            {
+                "id": 1,
+            },
+            or_ignore=True,
+        )
+
+    async def get(self) -> dict:
+        await self.create_table()
+
+        row = await self.db.select_one(
+            self.TABLE,
+            where={
+                "id": 1,
+            },
+        )
+
+        return {
+            "enabled": bool(row["enabled"]),
+            "message_limit": int(row["message_limit"]),
+        }
+
+    async def set(
+        self,
+        enabled: bool,
+        message_limit: int,
+    ) -> None:
+        await self.db.execute(
+            f"""
+            UPDATE {self.TABLE}
+            SET enabled = ?,
+                message_limit = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = 1
+            """,
+            (
+                1 if enabled else 0,
+                message_limit,
+            ),
+        )
+
+
+
 class AIGatewayStore:
     def __init__(self, db: DatabaseManager) -> None:
         self.models = AIModelStore(db)
@@ -913,6 +989,7 @@ class AIGatewayStore:
         self.memory = AIMemoryStore(db)
         self.memory_settings = AIMemorySettingsStore(db)
         self.api_keys = AIAPIKeyStore(db)
+        self.timeline = AITimelineSettingsStore(db)
 
     async def create_tables(self) -> None:
         await self.models.create_table()
@@ -920,3 +997,4 @@ class AIGatewayStore:
         await self.memory.create_tables()
         await self.memory_settings.create_table()
         await self.api_keys.create_table()
+        await self.timeline.create_table()
