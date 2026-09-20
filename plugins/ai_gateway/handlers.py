@@ -1265,6 +1265,7 @@ async def on_timeline_system_message(
         await self.memory.record_generated_message(
             group_id,
             message,
+            message_type="moderation_event",
         )
 
     except Exception:

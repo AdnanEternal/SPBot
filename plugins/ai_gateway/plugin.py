@@ -10,7 +10,7 @@ from .store import AIGatewayStore
 
 class AIGatewayPlugin(BasePlugin):
     name = "AI Gateway"
-    version = "2.12.6"
+    version = "2.13.0"
 
     def __init__(self, client, command_manager, db, event_bus):
         super().__init__(
@@ -66,6 +66,9 @@ class AIGatewayPlugin(BasePlugin):
             None,
         )
 
+        self.memory.set_bot_user_id(
+            self.bot_user_id
+        )
     # -------------------------
     # Model management
     # -------------------------
