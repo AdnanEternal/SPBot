@@ -850,10 +850,10 @@ class AIMemoryManager:
 
 
     def mark_deleted(
-    self,
-    group_id: int,
-    event,
-    reason: str,
+        self,
+        group_id: int,
+        event,
+        reason: str,
 ) -> None:
         """
         وقتی یک پلاگین پیام را به دلیل تخلف حذف می‌کند،
@@ -900,22 +900,37 @@ class AIMemoryManager:
             {},
         )[message_id] = reason
 
-    def mark_deleted_message(
+    def mark_deleted(
         self,
-        message_id: int,
-        reason: str = "این پیام حذف شده است",
-    ) -> bool:
+        group_id: int,
+        event,
+        reason: str,
+) -> None:
         """
-        پیام حذف‌شده را با حفظ sender/date/reply در Timeline علامت می‌زند.
+        وقتی یک پلاگین پیام را به دلیل تخلف حذف می‌کند،
+        متن آن را در Timeline با placeholder جایگزین می‌کند.
 
-        چون MessageDeleted ممکن است در گروه‌های کوچک chat_id نداشته باشد،
-        در تمام Timelineهای فعال جستجو می‌کنیم.
+        اگر پیام هنوز وارد Timeline نشده باشد،
+        دلیل حذف موقتاً نگه داشته می‌شود تا record_event
+        هنگام ثبت پیام از آن استفاده کند.
         """
 
-        placeholder = f"[{reason}]"
-        changed = False
+        message_id = self._extract_message_id(
+            event
+        )
 
-        for timeline in self._timelines.values():
+        if message_id is None:
+            return
+
+        placeholder = (
+            f"[پیام حذف شده: {reason}]"
+        )
+
+        timeline = self._timelines.get(
+            group_id
+        )
+
+        if timeline:
             for record in timeline:
                 try:
                     current_id = int(
@@ -927,13 +942,14 @@ class AIMemoryManager:
                 ):
                     continue
 
-                if current_id != message_id:
-                    continue
+                if current_id == message_id:
+                    record["text"] = placeholder
+                    return
 
-                record["text"] = placeholder
-                changed = True
-
-        return changed
+        self._pending_deletions.setdefault(
+            group_id,
+            {},
+        )[message_id] = reason
 
 
     def clear_timeline(

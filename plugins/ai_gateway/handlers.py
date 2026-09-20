@@ -979,7 +979,6 @@ async def on_timeline_incoming(
 
 
 
-
 @on_event(events.MessageDeleted)
 async def on_timeline_message_deleted(
     self,
@@ -998,6 +997,12 @@ async def on_timeline_message_deleted(
         if not deleted_ids:
             return
 
+        group_id = getattr(
+            event,
+            "chat_id",
+            None,
+        )
+
         for raw_message_id in deleted_ids:
             try:
                 message_id = int(
@@ -1010,7 +1015,8 @@ async def on_timeline_message_deleted(
                 continue
 
             self.memory.mark_deleted_message(
-                message_id,
+                message_id=message_id,
+                group_id=group_id,
                 reason="این پیام حذف شده است",
             )
 
