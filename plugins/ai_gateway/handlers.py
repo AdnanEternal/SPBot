@@ -978,36 +978,6 @@ async def on_timeline_incoming(
         traceback.print_exc()
 
 
-@on_event(events.NewMessage(outgoing=True))
-async def on_timeline_outgoing(
-    self,
-    event,
-):
-    try:
-        if not self.timeline_enabled:
-            return
-
-        if not event.is_group:
-            return
-
-
-        await self.memory.ensure_timeline(
-            self.client,
-            event.chat_id,
-            self.timeline_limit,
-        )
-
-        await self.memory.record_event(
-            event
-        )
-
-
-    except Exception:
-        traceback.print_exc()
-
-
-
-
 
 
 @on_event(events.MessageDeleted)
@@ -1019,48 +989,33 @@ async def on_timeline_message_deleted(
         if not self.timeline_enabled:
             return
 
-        group_id = getattr(
+        deleted_ids = getattr(
             event,
-            "chat_id",
+            "deleted_ids",
             None,
         )
 
-        if group_id is None:
+        if not deleted_ids:
             return
 
-        message_ids = getattr(
-            event,
-            "message_id",
-            None,
-        )
-
-        if message_ids is None:
-            return
-
-        # برای اطمینان اگر نسخه‌ای لیست برگرداند
-        # هر دو حالت را پشتیبانی می‌کنیم.
-        if isinstance(
-            message_ids,
-            (list, tuple, set),
-        ):
-            ids = message_ids
-        else:
-            ids = [message_ids]
-
-        for message_id in ids:
+        for raw_message_id in deleted_ids:
             try:
-                message_id = int(message_id)
-            except (TypeError, ValueError):
+                message_id = int(
+                    raw_message_id
+                )
+            except (
+                TypeError,
+                ValueError,
+            ):
                 continue
 
             self.memory.mark_deleted_message(
-                group_id,
                 message_id,
+                reason="این پیام حذف شده است",
             )
 
     except Exception:
         traceback.print_exc()
-
 
 @on_event(events.NewMessage(incoming=True))
 async def on_message(self, event):
@@ -1181,9 +1136,26 @@ async def on_message(self, event):
             answer,
         )
 
-        await event.reply(
+        sent = await event.reply(
             answer[:4000]
         )
+
+        if self.timeline_enabled:
+            try:
+                await self.memory.ensure_timeline(
+                    self.client,
+                    event.chat_id,
+                    self.timeline_limit,
+                )
+
+                if sent is not None:
+                    await self.memory.record_generated_message(
+                        event.chat_id,
+                        sent,
+                    )
+
+            except Exception:
+                traceback.print_exc()
 
     except AIGatewayError as exc:
         print(

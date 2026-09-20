@@ -738,60 +738,202 @@ class AIMemoryManager:
         return True
 
 
-    def mark_deleted(self, group_id: int, event, reason: str) -> None:
+    async def record_generated_message(
+        self,
+        group_id: int,
+        message,
+    ) -> bool:
         """
-        وقتی یه پیام به دلیل تخلف (فیلتر کلمه، اسپم و ...) حذف می‌شه،
-        این متد صدا زده می‌شه. اگه پیام از قبل تو Timeline ثبت شده،
-        متنش رو عوض می‌کنه؛ اگه هنوز ثبت نشده، دلیل رو موقت نگه
-        می‌داره تا record_event بعداً خودش جایگزینش کنه.
+        پیام تولیدشده توسط خود بوبی (AI / system) را
+        مستقیماً در Timeline ثبت می‌کند.
 
-        این‌جوری بوبی به‌جای دیدن متن واقعیِ پیامِ حذف‌شده (که ممکنه
-        فحش/تبلیغ باشه)، فقط می‌فهمه این پیام حذف شده و چرا.
+        برخلاف record_event، این متد پیام‌های شروع‌شده با ! را
+        فیلتر نمی‌کند؛ چون اینجا دقیقاً می‌دانیم پیام خروجیِ
+        یک عملیات معتبر بوده است.
         """
+
         if group_id not in self._timelines:
-            return
+            return False
 
-        message_id = self._extract_message_id(event)
+        message_id = self._extract_message_id(message)
+
+        if message_id is None:
+            return False
+
+        seen = self._timeline_seen.setdefault(
+            group_id,
+            set(),
+        )
+
+        if message_id in seen:
+            return False
+
+        sender_id = getattr(
+            message,
+            "sender_id",
+            None,
+        )
+
+        if sender_id is not None:
+            try:
+                sender_id = int(sender_id)
+            except Exception:
+                sender_id = None
+
+        sender_name = await self._resolve_sender_name(
+            group_id,
+            message,
+            sender_id,
+        )
+
+        raw_text = (
+            getattr(
+                message,
+                "raw_text",
+                None,
+            )
+            or getattr(
+                message,
+                "message",
+                None,
+            )
+            or ""
+        )
+
+        text = str(raw_text).strip()
+
+        if not text:
+            text = "[پیام بدون متن یا رسانه]"
+
+        reply_to_id = await self._extract_reply_id(
+            message
+        )
+
+        record = {
+            "message_id": message_id,
+            "group_id": group_id,
+            "sender_id": sender_id,
+            "sender_name": sender_name,
+            "text": text,
+            "date": self._format_date(
+                getattr(
+                    message,
+                    "date",
+                    None,
+                )
+            ),
+            "reply_to_id": reply_to_id,
+        }
+
+        timeline = self._timelines[group_id]
+
+        if timeline.maxlen is None:
+            return False
+
+        if len(timeline) >= timeline.maxlen:
+            old = timeline.popleft()
+
+            try:
+                seen.discard(
+                    int(old["message_id"])
+                )
+            except Exception:
+                pass
+
+        timeline.append(record)
+        seen.add(message_id)
+
+        return True
+
+
+
+
+
+    def mark_deleted(
+    self,
+    group_id: int,
+    event,
+    reason: str,
+) -> None:
+        """
+        وقتی یک پلاگین پیام را به دلیل تخلف حذف می‌کند،
+        متن آن را در Timeline با placeholder جایگزین می‌کند.
+
+        اگر پیام هنوز وارد Timeline نشده باشد،
+        دلیل حذف موقتاً نگه داشته می‌شود تا record_event
+        هنگام ثبت پیام از آن استفاده کند.
+        """
+
+        message_id = self._extract_message_id(
+            event
+        )
 
         if message_id is None:
             return
 
-        placeholder = f"[پیام حذف شده: {reason}]"
+        placeholder = (
+            f"[پیام حذف شده: {reason}]"
+        )
 
-        for record in self._timelines[group_id]:
-            if record["message_id"] == message_id:
-                record["text"] = placeholder
-                return
+        timeline = self._timelines.get(
+            group_id
+        )
 
-        # پیام هنوز تو Timeline نیست؛ دلیل رو موقت نگه دار.
-        self._pending_deletions.setdefault(group_id, {})[message_id] = reason
+        if timeline:
+            for record in timeline:
+                try:
+                    current_id = int(
+                        record["message_id"]
+                    )
+                except (
+                    TypeError,
+                    ValueError,
+                ):
+                    continue
 
+                if current_id == message_id:
+                    record["text"] = placeholder
+                    return
+
+        self._pending_deletions.setdefault(
+            group_id,
+            {},
+        )[message_id] = reason
 
     def mark_deleted_message(
         self,
-        group_id: int,
         message_id: int,
         reason: str = "این پیام حذف شده است",
-) -> bool:
+    ) -> bool:
         """
-        یک پیام موجود در Timeline را به‌عنوان حذف‌شده علامت می‌زند.
-        اطلاعات هویتی، زمان و Reply دست‌نخورده می‌مانند.
+        پیام حذف‌شده را با حفظ sender/date/reply در Timeline علامت می‌زند.
+
+        چون MessageDeleted ممکن است در گروه‌های کوچک chat_id نداشته باشد،
+        در تمام Timelineهای فعال جستجو می‌کنیم.
         """
-
-        timeline = self._timelines.get(group_id)
-
-        if not timeline:
-            return False
 
         placeholder = f"[{reason}]"
+        changed = False
 
-        for record in timeline:
-            if record["message_id"] == message_id:
+        for timeline in self._timelines.values():
+            for record in timeline:
+                try:
+                    current_id = int(
+                        record["message_id"]
+                    )
+                except (
+                    TypeError,
+                    ValueError,
+                ):
+                    continue
+
+                if current_id != message_id:
+                    continue
+
                 record["text"] = placeholder
-                return True
+                changed = True
 
-        return False
-
+        return changed
 
 
     def clear_timeline(
@@ -808,6 +950,7 @@ class AIMemoryManager:
         self._timelines.clear()
         self._timeline_seen.clear()
         self._timeline_sender_cache.clear()
+        self._pending_deletions.clear()
 
     def has_timeline(
         self,
