@@ -254,7 +254,6 @@ class BasePlugin:
                 self.command_manager.add_invocation_hook(
                     member,
                     priority=priority,
-                    commands=getattr(member, "_command_invocation_commands", None)
                 )
 
                 self._command_invocation_hooks.append(
@@ -415,7 +414,7 @@ class BasePlugin:
         self.command_manager.remove_plugin_commands(
             self
         )
-        self.command_manager.scheduler.cancel_owner(self)
+        
 
     # =========================================================
     # Lifecycle

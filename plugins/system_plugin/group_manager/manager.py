@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from core.execution import ExecutionEvent, Output
+from core.execution import ExecutionEvent
 
 
 _GROUP_TARGET_PATTERN = re.compile(
@@ -130,7 +130,6 @@ class GroupManager:
                     else ""
                 )
             ),
-            output=Output.origin(),
         )
 
         # آرگومان واقعی Command

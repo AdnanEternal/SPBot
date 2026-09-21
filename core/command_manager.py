@@ -22,15 +22,10 @@ from splusthon.events import StopPropagation
 from core.command_invocation import (
     CommandInvocation,
 )
-from core.execution import (
-    ExecutionEvent,
-    Output,
-)
 from core.permissions import (
     is_chat_admin,
     is_owner,
 )
-from core.scheduler import Scheduler
 
 
 EventHandler = Callable[
@@ -42,13 +37,6 @@ InvocationHook = Callable[
     [CommandInvocation],
     Awaitable[Any] | Any,
 ]
-
-# ترتیب سطح دسترسی‌ها (برای level=...)
-_LEVELS = {
-    "everyone": 0,
-    "admin": 1,
-    "owner": 2,
-}
 
 
 @dataclass
@@ -66,13 +54,14 @@ class _InvocationHookRegistration:
     priority: int
     order: int
     callback: InvocationHook
-    # None = برای همه‌ی کامندها؛ وگرنه فقط برای این نام‌ها
-    commands: frozenset[str] | None = None
 
 
 class CommandManager:
     def __init__(self) -> None:
-        self.commands: dict[str, Command] = {}
+        self.commands: dict[
+            str,
+            Command,
+        ] = {}
 
         self.prefix = "!"
 
@@ -83,10 +72,6 @@ class CommandManager:
         ] = []
 
         self._hook_order = itertools.count()
-
-        # زمان‌بندی اجرای کامند. روی CommandManager است تا همه‌ی
-        # پلاگین‌ها بدون تغییر امضای BasePlugin بهش دسترسی داشته باشند.
-        self.scheduler = Scheduler(self)
 
     # =========================================================
     # Command Registration
@@ -175,18 +160,9 @@ class CommandManager:
         hook: InvocationHook,
         *,
         priority: int = 0,
-        commands: Iterable[str] | None = None,
     ) -> None:
         """
-        Hook را برای Invocation ثبت می‌کند.
-
         priority کمتر = زودتر اجرا شدن.
-
-        commands: اگر مشخص شود، Hook فقط برای همین کامندها
-        (با نام دقیق) صدا زده می‌شود.
-
-        اگر همان Hook قبلاً ثبت شده باشد،
-        دوباره ثبت نمی‌شود.
         """
 
         for registration in (
@@ -205,11 +181,6 @@ class CommandManager:
                     self._hook_order
                 ),
                 callback=hook,
-                commands=(
-                    frozenset(commands)
-                    if commands
-                    else None
-                ),
             )
         )
 
@@ -242,26 +213,17 @@ class CommandManager:
         invocation: CommandInvocation,
     ) -> None:
 
-        if not self._invocation_hooks:
-            return
-
         for registration in list(
             self._invocation_hooks
         ):
             if invocation.stop_hooks:
                 break
 
-            if (
-                registration.commands
-                is not None
-                and invocation.command_name
-                not in registration.commands
-            ):
-                continue
-
             try:
-                result = registration.callback(
-                    invocation
+                result = (
+                    registration.callback(
+                        invocation
+                    )
                 )
 
                 if inspect.isawaitable(
@@ -271,17 +233,14 @@ class CommandManager:
 
             except Exception:
                 print(
-                    "\n❌ خطا در Command Invocation Hook"
+                    "\n❌ خطا در Command "
+                    "Invocation Hook"
                 )
 
                 traceback.print_exc()
 
-                # بسیار مهم:
-                # Hookی که در کنترل Command خطا بدهد،
-                # نباید باعث اجرای ناخواسته‌ی Command شود.
-                #
-                # بنابراین فقط همین Invocation
-                # fail-closed می‌شود؛ کل Bot نه.
+                # Hook خراب نباید باعث
+                # اجرای ناخواسته‌ی Command شود.
                 invocation.block(
                     "Invocation Hook failed."
                 )
@@ -294,10 +253,6 @@ class CommandManager:
     def _check_context(
         invocation: CommandInvocation,
     ) -> bool:
-        """
-        chat_type یک محدودیتِ «محیط اجراست»، نه Authorization؛
-        پس حتی برای اجرای trusted/pre-authorized هم بررسی می‌شود.
-        """
 
         command = invocation.command
         event = invocation.event
@@ -321,47 +276,23 @@ class CommandManager:
         invocation: CommandInvocation,
     ) -> bool:
 
-        command = (
-            invocation.command
-        )
+        command = invocation.command
+        event = invocation.event
 
-        # سطح دسترسیِ اعطاشده (level=...) — فقط بالا می‌برد، پایین نمی‌آورد.
-        if (
-            invocation.granted_level
-            is not None
-            and _LEVELS.get(
-                invocation.granted_level,
-                -1,
-            )
-            >= _LEVELS.get(
-                command.permission,
-                len(_LEVELS),
-            )
-        ):
-            return True
-
-        # هویت Authorization همیشه از Event اصلی می‌آید.
-        #
-        # این باعث می‌شود یک Hook نتواند فقط با
-        # replace_event() هویت کاربر را عوض کند
-        # و Permission را دور بزند.
-        original_event = (
-            invocation.original_event
-        )
-
+        # هویت Authorization همیشه
+        # از Event اصلی می‌آید.
         sender_id = (
-            original_event.sender_id
+            invocation.original_event.sender_id
         )
 
         if command.permission == "admin":
-
-            chat = await invocation.event.get_chat()
-
             if self._client is None:
                 raise RuntimeError(
                     "CommandManager client "
                     "has not been initialized."
                 )
+
+            chat = await event.get_chat()
 
             return await is_chat_admin(
                 self._client,
@@ -370,7 +301,6 @@ class CommandManager:
             )
 
         if command.permission == "owner":
-
             return is_owner(
                 sender_id
             )
@@ -392,17 +322,7 @@ class CommandManager:
             dict[str, Any]
         ] = None,
         pre_authorized: bool = False,
-        level: str | None = None,
     ) -> CommandInvocation | None:
-        """
-        یک Command را از هر منبعی اجرا می‌کند.
-
-        این متد هسته‌ی عمومی Command Execution است.
-
-        مهم:
-        این متد هیچ چیزی درباره‌ی Group Manager یا
-        Remote Command نمی‌داند.
-        """
 
         command = self.get_command(
             command_name
@@ -418,8 +338,8 @@ class CommandManager:
                 args_text or ""
             ).strip(),
             args=(
-                args_text.split()
-                if args_text
+                (args_text or "").split()
+                if (args_text or "").strip()
                 else []
             ),
             source=source,
@@ -428,11 +348,9 @@ class CommandManager:
                 if metadata
                 else {}
             ),
-            client=self._client,
-            granted_level=level,
         )
 
-        # Context مربوط به آرگومان‌های Command.
+        # همگام‌سازی Context Event
         invocation.event.args_text = (
             invocation.args_text
         )
@@ -454,17 +372,18 @@ class CommandManager:
         if invocation.handled:
             return invocation
 
-        # محیط اجرا (گروه/خصوصی) — مستقل از Authorization
+        # Context گروه/PV همیشه بررسی می‌شود.
         if not self._check_context(
             invocation
         ):
             invocation.deny_access(
-                "Command is not available in this chat type."
+                "Command is not available "
+                "in this chat type."
             )
 
             return invocation
 
-        # Authorization طبیعی Command
+        # Authorization طبیعی
         if (
             invocation.access_granted
             is None
@@ -489,9 +408,7 @@ class CommandManager:
 
             return invocation
 
-        handler = (
-            invocation.handler
-        )
+        handler = invocation.handler
 
         if handler is None:
             invocation.block(
@@ -510,94 +427,9 @@ class CommandManager:
         if inspect.isawaitable(
             result
         ):
-            result = await result
-
-        invocation.result = result
+            await result
 
         return invocation
-
-    # =========================================================
-    # Programmatic Execution (بدون پیامِ کاربر)
-    # =========================================================
-
-    async def run(
-        self,
-        command_name: str,
-        args_text: str = "",
-        *,
-        chat_id: int | None = None,
-        is_group: bool | None = None,
-        as_user: int | None = None,
-        level: str | None = None,
-        trusted: bool = False,
-        output: Output | None = None,
-        event: Any = None,
-        source: str = "programmatic",
-        metadata: Optional[
-            dict[str, Any]
-        ] = None,
-    ) -> CommandInvocation | None:
-        """
-        handler یک کامند را از داخل کد اجرا می‌کند؛ لازم نیست کسی چیزی تایپ کرده باشد.
-
-        chat_id : handler فکر می‌کند در این چت اجرا می‌شود (event.chat_id، get_chat ...).
-        is_group: نوع همان چت. اگر chat_id داده شود و is_group نه، گروه فرض می‌شود.
-        as_user : هویت فرستنده (event.sender_id) — Authorization هم با همین سنجیده می‌شود.
-        level   : "everyone" | "admin" | "owner"؛ کامندهای با این سطح یا پایین‌تر
-                  بدون بررسی کاربر مجازند.
-        trusted : اگر True، Authorization کلاً رد می‌شود (فقط برای کدِ خودت!).
-        output  : مقصد event.reply؛ پیش‌فرض: event اصلی، وگرنه chat_id.
-                  (Output.chat / owners / capture / silent / custom)
-        event   : (اختیاری) event واقعی به‌عنوان base؛ مقدارهای override‌نشده از آن خوانده می‌شوند.
-
-        بدون هیچ‌کدام از trusted/level/as_user (با مجوز)، کامندهای admin/owner رد می‌شوند.
-        خروجی: CommandInvocation (.executed، .result، .block_reason ...) یا None اگر کامند نبود.
-        خطای handler بالا می‌آید (Scheduler خودش لاگ می‌کند).
-        """
-
-        if self._client is None:
-            raise RuntimeError(
-                "CommandManager client "
-                "has not been initialized."
-            )
-
-        if (
-            level is not None
-            and level not in _LEVELS
-        ):
-            raise ValueError(
-                f"level نامعتبر: '{level}' "
-                f"(یکی از {', '.join(_LEVELS)})"
-            )
-
-        if is_group is None and chat_id is not None:
-            is_group = True
-
-        args_text = (args_text or "").strip()
-
-        execution_event = ExecutionEvent(
-            self._client,
-            base=event,
-            chat_id=chat_id,
-            sender_id=as_user,
-            is_group=is_group,
-            args_text=args_text,
-            raw_text=(
-                f"{self.prefix}{command_name} "
-                f"{args_text}"
-            ).strip(),
-            output=output,
-        )
-
-        return await self.invoke(
-            command_name,
-            execution_event,
-            args_text=args_text,
-            source=source,
-            metadata=metadata,
-            pre_authorized=trusted,
-            level=level,
-        )
 
     # =========================================================
     # Command Matching
@@ -681,10 +513,11 @@ class CommandManager:
                 if not body:
                     return
 
-                matched_name, args_text = (
-                    self._match_command(
-                        body
-                    )
+                (
+                    matched_name,
+                    args_text,
+                ) = self._match_command(
+                    body
                 )
 
                 if matched_name is None:
@@ -692,11 +525,13 @@ class CommandManager:
 
                 command_name = matched_name
 
-                invocation = await self.invoke(
-                    command_name,
-                    event,
-                    args_text=args_text,
-                    source="message",
+                invocation = (
+                    await self.invoke(
+                        command_name,
+                        event,
+                        args_text=args_text,
+                        source="message",
+                    )
                 )
 
                 if invocation is None:
@@ -712,7 +547,8 @@ class CommandManager:
 
             except Exception:
                 print(
-                    "\n❌ خطای بحرانی در Command Dispatcher "
+                    "\n❌ خطای بحرانی در "
+                    "Command Dispatcher "
                     f"'{command_name}'"
                 )
 
@@ -720,13 +556,12 @@ class CommandManager:
 
                 try:
                     await event.reply(
-                        "❌ هنگام پردازش این دستور خطایی رخ داد."
+                        "❌ هنگام پردازش "
+                        "این دستور خطایی رخ داد."
                     )
                 except Exception:
                     pass
 
-                # چون این پیام Command معتبر بوده،
-                # همچنان نباید به Handlerهای بعدی برسد.
                 raise StopPropagation
 
         self._dispatcher = dispatcher
