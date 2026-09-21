@@ -7,7 +7,7 @@ class MessageManagerPlugin(BasePlugin):
 
     name = "Message manager"
 
-    version = "1.2.0"
+    version = "1.2.1"
 
     clear_message = handlers.clear_messages
     meow_trigger = handlers.meow_trigger

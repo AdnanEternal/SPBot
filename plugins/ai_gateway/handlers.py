@@ -704,12 +704,6 @@ async def bot_name(self, event):
     name="تایم لاین",
     permission="owner",
     chat_type="all",
-    description="خاموش یا روشن کردن سراسری Timeline هوش مصنوعی",
-)
-@command(
-    name="تایم لاین",
-    permission="owner",
-    chat_type="all",
     description="تنظیم سراسری Timeline هوش مصنوعی",
 )
 async def timeline_toggle(

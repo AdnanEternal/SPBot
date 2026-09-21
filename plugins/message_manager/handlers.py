@@ -9,7 +9,7 @@ from core.decorators import command, on_event
 if TYPE_CHECKING:
     from .plugin import MessageManagerPlugin
 
-MAX_CLEAR_COUNT = 15000
+MAX_CLEAR_COUNT = 400
 
 MEOW_RESPONSES = [
     "😺",
