@@ -32,11 +32,12 @@ class BasePlugin:
 
         self._event_handlers: list[tuple[Callable, Any]] = []
         self._bus_listeners: list[tuple[str, Callable]] = []
+        self._command_invocation_hooks: list[Callable] = []
 
     def _wrap_event_handler(
         self,
         handler: Callable,
-) -> Callable:
+    ) -> Callable:
         async def wrapped(event):
             try:
                 result = handler(event)
@@ -118,6 +119,20 @@ class BasePlugin:
                 self.event_bus.on(bus_event_name, member)
                 self._bus_listeners.append(
                     (bus_event_name, member)
+                )
+            invocation_hook = getattr(
+                member,
+                "_command_invocation_hook",
+                False,
+            )
+
+            if invocation_hook:
+                self.command_manager.add_invocation_hook(
+                    member
+                )
+
+                self._command_invocation_hooks.append(
+                    member
                 )
 
     async def enable(self) -> None:
@@ -201,7 +216,19 @@ class BasePlugin:
 
         self._bus_listeners.clear()
 
+        for hook in self._command_invocation_hooks:
+            try:
+                self.command_manager.remove_invocation_hook(
+                    hook
+                )
+            except Exception:
+                traceback.print_exc()
+
+        self._command_invocation_hooks.clear()
+
         self.command_manager.remove_plugin_commands(self)
+
+
 
     async def on_load(self) -> None:
         pass

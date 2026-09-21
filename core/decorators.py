@@ -86,3 +86,20 @@ def on_bus_event(event_name: str) -> Callable[[F], F]:
         return func
 
     return decorator
+
+def on_command_invocation(
+    func: F,
+) -> F:
+    """
+    متد را به‌عنوان Hook اجرای Command علامت‌گذاری می‌کند.
+
+    Hook قبل از اجرای handler اصلی فراخوانی می‌شود و می‌تواند
+    Invocation را بررسی یا تغییر دهد.
+
+    این قابلیت عمداً عمومی است و هیچ مفهومی از Plugin خاص،
+    Group Manager یا Remote Command ندارد.
+    """
+
+    func._command_invocation_hook = True
+
+    return func
