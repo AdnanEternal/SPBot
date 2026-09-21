@@ -411,7 +411,7 @@ class CommandManager:
                 return invocation
 
         elif not invocation.access_granted:
-            invocation.block(
+            invocation.deny_access(
                 "Authorization denied."
             )
 
@@ -429,6 +429,7 @@ class CommandManager:
             return invocation
 
         invocation.executed = True
+        invocation.consumed = True
 
         result = handler(
             invocation.event
@@ -544,9 +545,10 @@ class CommandManager:
                 if invocation is None:
                     return
 
-                # هر Command شناخته‌شده، چه اجرا شده باشد
-                # چه Block/Denied شده باشد، مصرف‌شده است.
-                raise StopPropagation
+                if invocation.consumed:
+                    raise StopPropagation
+
+                return
 
             except StopPropagation:
                 raise

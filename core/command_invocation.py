@@ -68,6 +68,9 @@ class CommandInvocation:
 
     block_reason: str | None = None
 
+    # آیا پیام واقعاً توسط سیستم Command مصرف شده؟
+    consumed: bool = False
+
     def __post_init__(self) -> None:
         if self.event is None:
             self.event = self.original_event
@@ -175,11 +178,13 @@ class CommandInvocation:
         reason: str | None = None,
     ) -> None:
         """
-        Authorization را رد می‌کند و زنجیره Hookها را متوقف می‌کند.
+        دسترسی این Invocation رد شده است.
+
+        رد شدن Permission به‌تنهایی به معنی مصرف شدن پیام نیست؛
+        بنابراین پیام می‌تواند به Handlerهای دیگر برسد.
         """
 
         self.access_granted = False
-        self.blocked = True
         self.stop_hooks = True
 
         if reason:
@@ -198,6 +203,7 @@ class CommandInvocation:
 
         self.blocked = True
         self.stop_hooks = True
+        self.consumed = True
 
         if reason:
             self.block_reason = reason
@@ -210,3 +216,4 @@ class CommandInvocation:
 
         self.handled = True
         self.stop_hooks = True
+        self.consumed = True
