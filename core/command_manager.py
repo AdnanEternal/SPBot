@@ -22,10 +22,15 @@ from splusthon.events import StopPropagation
 from core.command_invocation import (
     CommandInvocation,
 )
+from core.execution import (
+    ExecutionEvent,
+    Output,
+)
 from core.permissions import (
     is_chat_admin,
     is_owner,
 )
+from core.scheduler import Scheduler
 
 
 EventHandler = Callable[
@@ -37,6 +42,13 @@ InvocationHook = Callable[
     [CommandInvocation],
     Awaitable[Any] | Any,
 ]
+
+# ترتیب سطح دسترسی‌ها (برای level=...)
+_LEVELS = {
+    "everyone": 0,
+    "admin": 1,
+    "owner": 2,
+}
 
 
 @dataclass
@@ -54,6 +66,8 @@ class _InvocationHookRegistration:
     priority: int
     order: int
     callback: InvocationHook
+    # None = برای همه‌ی کامندها؛ وگرنه فقط برای این نام‌ها
+    commands: frozenset[str] | None = None
 
 
 class CommandManager:
@@ -69,6 +83,10 @@ class CommandManager:
         ] = []
 
         self._hook_order = itertools.count()
+
+        # زمان‌بندی اجرای کامند. روی CommandManager است تا همه‌ی
+        # پلاگین‌ها بدون تغییر امضای BasePlugin بهش دسترسی داشته باشند.
+        self.scheduler = Scheduler(self)
 
     # =========================================================
     # Command Registration
@@ -157,11 +175,15 @@ class CommandManager:
         hook: InvocationHook,
         *,
         priority: int = 0,
+        commands: Iterable[str] | None = None,
     ) -> None:
         """
         Hook را برای Invocation ثبت می‌کند.
 
         priority کمتر = زودتر اجرا شدن.
+
+        commands: اگر مشخص شود، Hook فقط برای همین کامندها
+        (با نام دقیق) صدا زده می‌شود.
 
         اگر همان Hook قبلاً ثبت شده باشد،
         دوباره ثبت نمی‌شود.
@@ -183,6 +205,11 @@ class CommandManager:
                     self._hook_order
                 ),
                 callback=hook,
+                commands=(
+                    frozenset(commands)
+                    if commands
+                    else None
+                ),
             )
         )
 
@@ -224,6 +251,14 @@ class CommandManager:
             if invocation.stop_hooks:
                 break
 
+            if (
+                registration.commands
+                is not None
+                and invocation.command_name
+                not in registration.commands
+            ):
+                continue
+
             try:
                 result = registration.callback(
                     invocation
@@ -252,8 +287,34 @@ class CommandManager:
                 )
 
     # =========================================================
-    # Authorization
+    # Context / Authorization
     # =========================================================
+
+    @staticmethod
+    def _check_context(
+        invocation: CommandInvocation,
+    ) -> bool:
+        """
+        chat_type یک محدودیتِ «محیط اجراست»، نه Authorization؛
+        پس حتی برای اجرای trusted/pre-authorized هم بررسی می‌شود.
+        """
+
+        command = invocation.command
+        event = invocation.event
+
+        if (
+            command.chat_type == "group"
+            and not event.is_group
+        ):
+            return False
+
+        if (
+            command.chat_type == "private"
+            and not event.is_private
+        ):
+            return False
+
+        return True
 
     async def _check_access(
         self,
@@ -264,22 +325,20 @@ class CommandManager:
             invocation.command
         )
 
-        event = invocation.event
-
-        # chat_type مربوط به Context فعلی است.
+        # سطح دسترسیِ اعطاشده (level=...) — فقط بالا می‌برد، پایین نمی‌آورد.
         if (
-            command.chat_type
-            == "group"
-            and not event.is_group
+            invocation.granted_level
+            is not None
+            and _LEVELS.get(
+                invocation.granted_level,
+                -1,
+            )
+            >= _LEVELS.get(
+                command.permission,
+                len(_LEVELS),
+            )
         ):
-            return False
-
-        if (
-            command.chat_type
-            == "private"
-            and not event.is_private
-        ):
-            return False
+            return True
 
         # هویت Authorization همیشه از Event اصلی می‌آید.
         #
@@ -296,7 +355,7 @@ class CommandManager:
 
         if command.permission == "admin":
 
-            chat = await event.get_chat()
+            chat = await invocation.event.get_chat()
 
             if self._client is None:
                 raise RuntimeError(
@@ -333,6 +392,7 @@ class CommandManager:
             dict[str, Any]
         ] = None,
         pre_authorized: bool = False,
+        level: str | None = None,
     ) -> CommandInvocation | None:
         """
         یک Command را از هر منبعی اجرا می‌کند.
@@ -368,6 +428,8 @@ class CommandManager:
                 if metadata
                 else {}
             ),
+            client=self._client,
+            granted_level=level,
         )
 
         # Context مربوط به آرگومان‌های Command.
@@ -390,6 +452,16 @@ class CommandManager:
             return invocation
 
         if invocation.handled:
+            return invocation
+
+        # محیط اجرا (گروه/خصوصی) — مستقل از Authorization
+        if not self._check_context(
+            invocation
+        ):
+            invocation.deny_access(
+                "Command is not available in this chat type."
+            )
+
             return invocation
 
         # Authorization طبیعی Command
@@ -438,9 +510,94 @@ class CommandManager:
         if inspect.isawaitable(
             result
         ):
-            await result
+            result = await result
+
+        invocation.result = result
 
         return invocation
+
+    # =========================================================
+    # Programmatic Execution (بدون پیامِ کاربر)
+    # =========================================================
+
+    async def run(
+        self,
+        command_name: str,
+        args_text: str = "",
+        *,
+        chat_id: int | None = None,
+        is_group: bool | None = None,
+        as_user: int | None = None,
+        level: str | None = None,
+        trusted: bool = False,
+        output: Output | None = None,
+        event: Any = None,
+        source: str = "programmatic",
+        metadata: Optional[
+            dict[str, Any]
+        ] = None,
+    ) -> CommandInvocation | None:
+        """
+        handler یک کامند را از داخل کد اجرا می‌کند؛ لازم نیست کسی چیزی تایپ کرده باشد.
+
+        chat_id : handler فکر می‌کند در این چت اجرا می‌شود (event.chat_id، get_chat ...).
+        is_group: نوع همان چت. اگر chat_id داده شود و is_group نه، گروه فرض می‌شود.
+        as_user : هویت فرستنده (event.sender_id) — Authorization هم با همین سنجیده می‌شود.
+        level   : "everyone" | "admin" | "owner"؛ کامندهای با این سطح یا پایین‌تر
+                  بدون بررسی کاربر مجازند.
+        trusted : اگر True، Authorization کلاً رد می‌شود (فقط برای کدِ خودت!).
+        output  : مقصد event.reply؛ پیش‌فرض: event اصلی، وگرنه chat_id.
+                  (Output.chat / owners / capture / silent / custom)
+        event   : (اختیاری) event واقعی به‌عنوان base؛ مقدارهای override‌نشده از آن خوانده می‌شوند.
+
+        بدون هیچ‌کدام از trusted/level/as_user (با مجوز)، کامندهای admin/owner رد می‌شوند.
+        خروجی: CommandInvocation (.executed، .result، .block_reason ...) یا None اگر کامند نبود.
+        خطای handler بالا می‌آید (Scheduler خودش لاگ می‌کند).
+        """
+
+        if self._client is None:
+            raise RuntimeError(
+                "CommandManager client "
+                "has not been initialized."
+            )
+
+        if (
+            level is not None
+            and level not in _LEVELS
+        ):
+            raise ValueError(
+                f"level نامعتبر: '{level}' "
+                f"(یکی از {', '.join(_LEVELS)})"
+            )
+
+        if is_group is None and chat_id is not None:
+            is_group = True
+
+        args_text = (args_text or "").strip()
+
+        execution_event = ExecutionEvent(
+            self._client,
+            base=event,
+            chat_id=chat_id,
+            sender_id=as_user,
+            is_group=is_group,
+            args_text=args_text,
+            raw_text=(
+                f"{self.prefix}{command_name} "
+                f"{args_text}"
+            ).strip(),
+            output=output,
+        )
+
+        return await self.invoke(
+            command_name,
+            execution_event,
+            args_text=args_text,
+            source=source,
+            metadata=metadata,
+            pre_authorized=trusted,
+            level=level,
+        )
 
     # =========================================================
     # Command Matching

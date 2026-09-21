@@ -179,25 +179,9 @@ async def is_chat_admin(
 
         return False
 
+def owner_ids() -> frozenset[int]:
+    raw = config.get("BOT_OWNERS_ID", "")
+    return frozenset(int(x.strip()) for x in raw.split(",") if x.strip().isdigit())
 
-def is_owner(
-    sender_id: int,
-) -> bool:
-    if sender_id is None:
-        return False
-
-    owner_id = config.get(
-        "BOT_OWNERS_ID",
-        "",
-    )
-
-    if not owner_id:
-        return False
-
-    owner_ids = {
-        int(user_id.strip())
-        for user_id in owner_id.split(",")
-        if user_id.strip().isdigit()
-    }
-
-    return sender_id in owner_ids
+def is_owner(sender_id: int) -> bool:
+    return sender_id is not None and sender_id in owner_ids()

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, TYPE_CHECKING
+
+from core.execution import ExecutionEvent, Output
 
 if TYPE_CHECKING:
     from core.command_manager import Command
@@ -10,6 +13,12 @@ if TYPE_CHECKING:
 EventHandler = Callable[
     [Any],
     Awaitable[Any],
+]
+
+# around(call_next, event): call_next(event=None) → handler بعدی/اصلی را اجرا می‌کند.
+AroundHandler = Callable[
+    [Callable[..., Awaitable[Any]], Any],
+    Awaitable[Any] | Any,
 ]
 
 
@@ -27,6 +36,9 @@ class CommandInvocation:
     - Scheduler
     - پنل مدیریتی
     - سیستم داخلی دیگر
+
+    Hookها (@on_command_invocation) هر چیزی را می‌توانند عوض کنند:
+    آرگومان‌ها، event، مقصد پاسخ، سطح دسترسی، یا کل handler.
     """
 
     command: "Command"
@@ -70,6 +82,16 @@ class CommandInvocation:
 
     # آیا پیام واقعاً توسط سیستم Command مصرف شده؟
     consumed: bool = False
+
+    # client ربات (برای redirect_output و ساخت eventهای جدید)
+    client: Any = None
+
+    # سطح دسترسیِ اعطاشده: "everyone" | "admin" | "owner"
+    # (کامندهایی که سطحشان ≤ این مقدار است، بدون بررسی کاربر مجاز می‌شوند.)
+    granted_level: str | None = None
+
+    # مقدار برگشتیِ handler (بعد از اجرا)
+    result: Any = None
 
     def __post_init__(self) -> None:
         if self.event is None:
@@ -122,6 +144,48 @@ class CommandInvocation:
 
         self.handler = handler
 
+    def wrap_handler(
+        self,
+        around: AroundHandler,
+    ) -> None:
+        """
+        دور handler فعلی یک لایه می‌پیچد (قبل/بعد از اجرا، try/except، تایمر، ...).
+
+            async def around(call_next, event):
+                await event.reply("شروع شد")
+                result = await call_next()          # یا call_next(event_دیگر)
+                return result
+
+            invocation.wrap_handler(around)
+        """
+
+        if not callable(around):
+            raise TypeError(
+                "CommandInvocation wrapper must be callable."
+            )
+
+        inner = self.handler
+
+        async def wrapped(event: Any) -> Any:
+            async def call_next(new_event: Any = None) -> Any:
+                result = inner(
+                    event if new_event is None else new_event
+                )
+
+                if inspect.isawaitable(result):
+                    result = await result
+
+                return result
+
+            result = around(call_next, event)
+
+            if inspect.isawaitable(result):
+                result = await result
+
+            return result
+
+        self.handler = wrapped
+
     def replace_event(
         self,
         event: Any,
@@ -139,6 +203,27 @@ class CommandInvocation:
             )
 
         self.event = event
+
+    def redirect_output(
+        self,
+        output: Output,
+    ) -> None:
+        """
+        هر event.reply / event.respond داخل handler به `output` می‌رود؛
+        کد handler دست نمی‌خورد.
+
+            invocation.redirect_output(Output.owners())
+            invocation.redirect_output(Output.chat(group_id))
+            invocation.redirect_output(Output.custom(my_sender))
+        """
+
+        self.replace_event(
+            ExecutionEvent(
+                self.client,
+                base=self.event,
+                output=output,
+            )
+        )
 
     def set_args(
         self,
@@ -172,6 +257,21 @@ class CommandInvocation:
         """
 
         self.access_granted = True
+
+    def grant_level(
+        self,
+        level: str,
+    ) -> None:
+        """
+        این Invocation با سطح دسترسی `level` اجرا شود
+        ("everyone" | "admin" | "owner").
+
+        برخلاف grant_access() که کل Authorization را رد می‌کند،
+        اینجا فقط کامندهایی مجاز می‌شوند که سطحشان ≤ level باشد؛
+        بقیه همچنان بررسی عادیِ کاربر را طی می‌کنند.
+        """
+
+        self.granted_level = level
 
     def deny_access(
         self,

@@ -9,6 +9,8 @@ from typing import (
     Any,
     Callable,
     TypeVar,
+    Iterable,
+    Optional
 )
 
 
@@ -80,31 +82,10 @@ def on_bus_event(
 
     return decorator
 
-
-def on_command_invocation(
-    *,
-    priority: int = 0,
-) -> Callable[[F], F]:
-    """
-    متد را به‌عنوان Hook عمومی Command Invocation
-    علامت‌گذاری می‌کند.
-
-    priority کمتر = اجرای زودتر.
-
-    این Decorator عمداً هیچ اطلاعی از Plugin خاص،
-    Group Manager، AI Gateway و ... ندارد.
-    """
-
-    def decorator(
-        func: F,
-    ) -> F:
-
+def on_command_invocation(*, priority: int = 0, commands: Optional[Iterable[str]] = None):
+    def decorator(func):
         func._command_invocation_hook = True
-
-        func._command_invocation_priority = (
-            priority
-        )
-
+        func._command_invocation_priority = priority
+        func._command_invocation_commands = frozenset(commands) if commands else None
         return func
-
     return decorator

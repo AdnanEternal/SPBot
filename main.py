@@ -103,6 +103,10 @@ async def run_bot(
     finally:
         if plugin_manager is not None:
             try:
+                await plugin_manager.command_manager.scheduler.stop()
+            except Exception:
+                traceback.print_exc()
+            try:
                 await plugin_manager.disable_all_plugins()
             except Exception:
                 traceback.print_exc()
