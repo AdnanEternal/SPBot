@@ -1,15 +1,29 @@
-# core/base_plugin.py
-
 import inspect
 import traceback
-from typing import Any, Callable, Optional
 
-from splusthon import SoroushClient
-from splusthon.events import StopPropagation
+from typing import (
+    Any,
+    Callable,
+    Optional,
+)
+
+from splusthon import (
+    SoroushClient,
+)
+from splusthon.events import (
+    StopPropagation,
+)
+
 from config import config
-from core.command_manager import CommandManager
-from core.database_manager import DatabaseManager
-from core.event_bus import EventBus
+from core.command_manager import (
+    CommandManager,
+)
+from core.database_manager import (
+    DatabaseManager,
+)
+from core.event_bus import (
+    EventBus,
+)
 
 
 class BasePlugin:
@@ -23,26 +37,50 @@ class BasePlugin:
         db: DatabaseManager,
         event_bus: EventBus,
     ) -> None:
+
         self.client = client
-        self.command_manager = command_manager
+        self.command_manager = (
+            command_manager
+        )
         self.db = db
         self.event_bus = event_bus
+
         self.enabled = False
         self.config = config
 
-        self._event_handlers: list[tuple[Callable, Any]] = []
-        self._bus_listeners: list[tuple[str, Callable]] = []
-        self._command_invocation_hooks: list[Callable] = []
+        self._event_handlers: list[
+            tuple[Callable, Any]
+        ] = []
+
+        self._bus_listeners: list[
+            tuple[str, Callable]
+        ] = []
+
+        self._command_invocation_hooks: list[
+            Callable
+        ] = []
+
+    # =========================================================
+    # Event Wrapper
+    # =========================================================
 
     def _wrap_event_handler(
         self,
         handler: Callable,
     ) -> Callable:
-        async def wrapped(event):
-            try:
-                result = handler(event)
 
-                if inspect.isawaitable(result):
+        async def wrapped(
+            event,
+        ):
+
+            try:
+                result = handler(
+                    event
+                )
+
+                if inspect.isawaitable(
+                    result
+                ):
                     await result
 
             except StopPropagation:
@@ -54,6 +92,7 @@ class BasePlugin:
                     f"'{self.name}' "
                     f"({getattr(handler, '__name__', 'unknown')})"
                 )
+
                 traceback.print_exc()
 
         wrapped.__name__ = getattr(
@@ -64,14 +103,24 @@ class BasePlugin:
 
         return wrapped
 
+    # =========================================================
+    # Manual Event Listener
+    # =========================================================
 
     def listen(
         self,
         event_type: Any,
-) -> Callable[[Callable], Callable]:
+    ) -> Callable[[Callable], Callable]:
 
-        def decorator(func: Callable) -> Callable:
-            wrapped = self._wrap_event_handler(func)
+        def decorator(
+            func: Callable,
+        ) -> Callable:
+
+            wrapped = (
+                self._wrap_event_handler(
+                    func
+                )
+            )
 
             self.client.add_event_handler(
                 wrapped,
@@ -79,31 +128,74 @@ class BasePlugin:
             )
 
             self._event_handlers.append(
-                (wrapped, event_type)
+                (
+                    wrapped,
+                    event_type,
+                )
             )
 
             return func
 
         return decorator
 
-    def _register_decorated(self) -> None:
-        for _, member in inspect.getmembers(self, predicate=inspect.ismethod):
-            command_info = getattr(member, "_command_info", None)
+    # =========================================================
+    # Decorator Registration
+    # =========================================================
+
+    def _register_decorated(
+        self,
+    ) -> None:
+
+        for _, member in inspect.getmembers(
+            self,
+            predicate=inspect.ismethod,
+        ):
+
+            # -------------------------------------------------
+            # Command
+            # -------------------------------------------------
+
+            command_info = getattr(
+                member,
+                "_command_info",
+                None,
+            )
 
             if command_info:
+
                 self.command_manager.add_command(
                     name=command_info["name"],
                     handler=member,
-                    permission=command_info["permission"],
-                    chat_type=command_info["chat_type"],
-                    description=command_info.get("description", ""),
+                    permission=command_info[
+                        "permission"
+                    ],
+                    chat_type=command_info[
+                        "chat_type"
+                    ],
+                    description=command_info.get(
+                        "description",
+                        "",
+                    ),
                     plugin=self,
                 )
 
-            event_type = getattr(member, "_event_type", None)
+            # -------------------------------------------------
+            # SPlusthon Event
+            # -------------------------------------------------
+
+            event_type = getattr(
+                member,
+                "_event_type",
+                None,
+            )
 
             if event_type is not None:
-                wrapped = self._wrap_event_handler(member)
+
+                wrapped = (
+                    self._wrap_event_handler(
+                        member
+                    )
+                )
 
                 self.client.add_event_handler(
                     wrapped,
@@ -111,133 +203,246 @@ class BasePlugin:
                 )
 
                 self._event_handlers.append(
-                    (wrapped, event_type)
+                    (
+                        wrapped,
+                        event_type,
+                    )
                 )
-            bus_event_name = getattr(member, "_bus_event_name", None)
+
+            # -------------------------------------------------
+            # Event Bus
+            # -------------------------------------------------
+
+            bus_event_name = getattr(
+                member,
+                "_bus_event_name",
+                None,
+            )
 
             if bus_event_name is not None:
-                self.event_bus.on(bus_event_name, member)
-                self._bus_listeners.append(
-                    (bus_event_name, member)
+
+                self.event_bus.on(
+                    bus_event_name,
+                    member,
                 )
-            invocation_hook = getattr(
+
+                self._bus_listeners.append(
+                    (
+                        bus_event_name,
+                        member,
+                    )
+                )
+
+            # -------------------------------------------------
+            # Command Invocation Hook
+            # -------------------------------------------------
+
+            is_invocation_hook = getattr(
                 member,
                 "_command_invocation_hook",
                 False,
             )
 
-            if invocation_hook:
+            if is_invocation_hook:
+
+                priority = getattr(
+                    member,
+                    "_command_invocation_priority",
+                    0,
+                )
+
                 self.command_manager.add_invocation_hook(
-                    member
+                    member,
+                    priority=priority,
                 )
 
                 self._command_invocation_hooks.append(
                     member
                 )
 
-    async def enable(self) -> None:
+    # =========================================================
+    # Enable / Disable
+    # =========================================================
+
+    async def enable(
+        self,
+    ) -> None:
+
         if self.enabled:
             return
+
         try:
+
             self._register_decorated()
 
             result = self.on_enable()
 
-            if inspect.isawaitable(result):
+            if inspect.isawaitable(
+                result
+            ):
                 await result
 
             self.enabled = True
 
         except Exception:
+
             print(
                 f"\n❌ خطا هنگام فعال‌سازی پلاگین "
                 f"'{self.name}'"
             )
+
             traceback.print_exc()
 
             try:
                 await self.cleanup()
+
             except Exception:
+
                 print(
                     f"⚠️ خطا هنگام پاک‌سازی پلاگین "
                     f"'{self.name}'"
                 )
+
                 traceback.print_exc()
 
             self.enabled = False
+
             raise
 
-    async def disable(self) -> None:
+    async def disable(
+        self,
+    ) -> None:
+
         try:
+
             result = self.on_disable()
 
-            if inspect.isawaitable(result):
+            if inspect.isawaitable(
+                result
+            ):
                 await result
 
         except Exception:
+
             print(
                 f"\n❌ خطا در on_disable پلاگین "
                 f"'{self.name}'"
             )
+
             traceback.print_exc()
 
         finally:
+
             try:
                 await self.cleanup()
+
             except Exception:
+
                 print(
                     f"\n❌ خطا در cleanup پلاگین "
                     f"'{self.name}'"
                 )
+
                 traceback.print_exc()
 
             self.enabled = False
 
-    async def cleanup(self) -> None:
-        for func, event_type in self._event_handlers:
+    # =========================================================
+    # Cleanup
+    # =========================================================
+
+    async def cleanup(
+        self,
+    ) -> None:
+
+        # SPlusthon events
+        for (
+            func,
+            event_type,
+        ) in self._event_handlers:
+
             try:
+
                 self.client.remove_event_handler(
                     func,
                     event_type,
                 )
+
             except Exception:
+
                 traceback.print_exc()
 
         self._event_handlers.clear()
 
-        for event_name, func in self._bus_listeners:
+        # Event Bus
+        for (
+            event_name,
+            func,
+        ) in self._bus_listeners:
+
             try:
+
                 self.event_bus.off(
                     event_name,
                     func,
                 )
+
             except Exception:
+
                 traceback.print_exc()
 
         self._bus_listeners.clear()
 
-        for hook in self._command_invocation_hooks:
+        # Command Invocation Hooks
+        for hook in (
+            self._command_invocation_hooks
+        ):
+
             try:
+
                 self.command_manager.remove_invocation_hook(
                     hook
                 )
+
             except Exception:
+
                 traceback.print_exc()
 
         self._command_invocation_hooks.clear()
 
-        self.command_manager.remove_plugin_commands(self)
+        # Commands
+        self.command_manager.remove_plugin_commands(
+            self
+        )
 
+    # =========================================================
+    # Lifecycle
+    # =========================================================
 
-
-    async def on_load(self) -> None:
+    async def on_load(
+        self,
+    ) -> None:
         pass
 
-    async def on_enable(self) -> None:
+    async def on_enable(
+        self,
+    ) -> None:
         pass
 
-    async def on_disable(self) -> None:
+    async def on_disable(
+        self,
+    ) -> None:
         pass
 
-    def __repr__(self) -> str:
-        return f"<Plugin {self.name} v{self.version}>"
+    # =========================================================
+    # Debug
+    # =========================================================
+
+    def __repr__(
+        self,
+    ) -> str:
+
+        return (
+            f"<Plugin {self.name} "
+            f"v{self.version}>"
+        )
