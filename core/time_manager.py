@@ -15,14 +15,6 @@ FALLBACK_TIMEZONE_NAME = "UTC"
 def _resolve_timezone(
     timezone_name: str,
 ) -> ZoneInfo:
-    """
-    یک timezone معتبر IANA برمی‌گرداند.
-
-    این تابع فقط برای timezoneهای صریح استفاده می‌شود.
-    اگر timezone نامعتبر باشد، خطا می‌دهد تا اشتباه
-    برنامه‌نویس پنهان نشود.
-    """
-
     try:
         return ZoneInfo(timezone_name)
 
@@ -35,12 +27,11 @@ def _resolve_timezone(
 
 def _load_project_timezone() -> tuple[str, ZoneInfo]:
     """
-    timezone اصلی پروژه را تعیین می‌کند.
+    ترتیب انتخاب timezone:
 
-    ترتیب:
-    1. PROJECT_TIMEZONE از config/.env
-    2. اگر تنظیم نشده بود: Asia/Tehran
-    3. اگر timezone انتخاب‌شده قابل بارگذاری نبود: UTC
+    1. PROJECT_TIMEZONE
+    2. Asia/Tehran
+    3. در صورت شکست کامل: UTC
     """
 
     timezone_name = str(
@@ -68,13 +59,11 @@ def _load_project_timezone() -> tuple[str, ZoneInfo]:
             f"🌍 استفاده از {FALLBACK_TIMEZONE_NAME}"
         )
 
-        fallback = _resolve_timezone(
-            FALLBACK_TIMEZONE_NAME
-        )
-
         return (
             FALLBACK_TIMEZONE_NAME,
-            fallback,
+            _resolve_timezone(
+                FALLBACK_TIMEZONE_NAME
+            ),
         )
 
 
@@ -84,32 +73,19 @@ PROJECT_TIMEZONE_NAME, PROJECT_TIMEZONE = (
 
 
 def get_project_timezone_name() -> str:
-    """
-    نام timezone اصلی پروژه را برمی‌گرداند.
-
-    مثال:
-        Asia/Tehran
-    """
-
     return PROJECT_TIMEZONE_NAME
 
 
 def get_project_timezone() -> ZoneInfo:
-    """
-    timezone اصلی پروژه را برمی‌گرداند.
-    """
-
     return PROJECT_TIMEZONE
 
 
-def now():
+def now() -> datetime:
     """
-    زمان فعلی پروژه را برمی‌گرداند.
+    زمان فعلی پروژه.
 
-    زمان مبنا همیشه UTC است و سپس به timezone
-    پروژه تبدیل می‌شود.
-
-    خروجی timezone-aware است.
+    مثال:
+        Asia/Tehran
     """
 
     return datetime.now(
@@ -119,11 +95,9 @@ def now():
     )
 
 
-def now_utc():
+def now_utc() -> datetime:
     """
     زمان فعلی UTC.
-
-    خروجی timezone-aware است.
     """
 
     return datetime.now(
@@ -133,16 +107,13 @@ def now_utc():
 
 def now_in(
     timezone_name: str,
-):
+) -> datetime:
     """
-    زمان فعلی را در timezone دلخواه برمی‌گرداند.
+    زمان فعلی در timezone دلخواه.
 
     مثال:
         now_in("Asia/Baku")
         now_in("Europe/London")
-        now_in("America/New_York")
-
-    اگر timezone نامعتبر باشد، ValueError می‌دهد.
     """
 
     target_timezone = _resolve_timezone(
@@ -154,3 +125,35 @@ def now_in(
     ).astimezone(
         target_timezone
     )
+
+
+def to_project_timezone(
+    value: datetime,
+) -> datetime:
+    """
+    یک datetime موجود را به timezone پروژه تبدیل می‌کند.
+
+    اگر datetime بدون timezone باشد، UTC فرض می‌شود.
+    """
+
+    if value.tzinfo is None:
+        value = value.replace(
+            tzinfo=timezone.utc
+        )
+
+    return value.astimezone(
+        PROJECT_TIMEZONE
+    )
+
+
+def format_project_time(
+    value: datetime,
+    fmt: str = "%Y-%m-%d %H:%M:%S",
+) -> str:
+    """
+    datetime را با timezone پروژه به رشته تبدیل می‌کند.
+    """
+
+    return to_project_timezone(
+        value
+    ).strftime(fmt)

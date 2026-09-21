@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime
+from core.time_manager import now
 
 from core.base_plugin import BasePlugin
 
@@ -12,7 +12,7 @@ from plugins.system_plugin.github_manager.manager import (
 
 class AntiSleepPlugin(BasePlugin):
     name = "Anti Sleep"
-    version = "1.0.0"
+    version = "1.0.1"
 
     def __init__(
         self,
@@ -122,7 +122,7 @@ class AntiSleepPlugin(BasePlugin):
                         f"GitHub heartbeat failed: {exc}"
                     )
 
-                timestamp = datetime.now().strftime(
+                timestamp = now().strftime(
                     "%Y-%m-%d %H:%M:%S"
                 )
 

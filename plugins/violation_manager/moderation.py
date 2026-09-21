@@ -10,8 +10,10 @@ SoroushClient، StringSession، functions.messages.* و ...). اگه اسم یا
 عوض بشن؛ بقیه‌ی پلاگین (handlers.py، store.py) اصلاً کاری بهشون نداره.
 """
 
-from datetime import datetime, timedelta
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
+
+from core.time_manager import now_utc
+
 from typing import Any, Optional
 
 
@@ -45,7 +47,7 @@ async def mute_user(
     hours: Optional[int] = None,
 ) -> None:
     until_date = (
-        datetime.now(timezone.utc) + timedelta(hours=hours)
+        now_utc() + timedelta(hours=hours)
         if hours
         else None
     )

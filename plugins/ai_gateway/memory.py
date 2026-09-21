@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from core.time_manager import format_project_time
+
 import asyncio
 import html
 from collections import defaultdict, deque
@@ -392,8 +394,8 @@ message.
             return "زمان نامشخص"
 
         try:
-            return value.strftime(
-                "%Y-%m-%d %H:%M:%S"
+            return format_project_time(
+                value
             )
         except Exception:
             return str(value)
