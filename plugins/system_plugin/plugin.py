@@ -1,4 +1,12 @@
 from . import handlers
+from .group_manager import (
+    GroupManager,
+)
+from .group_manager import (
+    handlers as group_manager_handlers,
+)
+
+
 import asyncio
 from core.base_plugin import BasePlugin
 
@@ -33,9 +41,13 @@ class SystemPlugin(BasePlugin):
 
         self.runtime_update_lock = asyncio.Lock()
 
+        self.group_manager = GroupManager(
+            self.client
+        )
+
 
     name = "System"
-    version = "2.8.6"
+    version = "2.9.0"
 
     show_help = handlers.show_help
     github_check = handlers.github_check
@@ -45,3 +57,4 @@ class SystemPlugin(BasePlugin):
     plugin_update_check = handlers.plugin_update_check
     plugin_install = handlers.plugin_install
     plugin_update = handlers.plugin_update
+    group_manager_hook = group_manager_handlers.remote_group_invocation
