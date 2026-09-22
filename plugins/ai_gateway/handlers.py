@@ -892,33 +892,69 @@ async def clear_timeline_command(self, event) -> None:
 @command(
     name="تاریخچه",
     permission="owner",
-    chat_type="group",
-    description="تعداد مشخصی از پیام‌های اخیر را در Timeline RAM آماده می‌کند.",
+    chat_type="all",
+    description="تعداد مشخصی از پیام‌های اخیر را در Timeline آماده می‌کند.",
 )
 async def load_timeline(
     self,
     event,
 ):
+    args_text = (event.args_text or "").strip()
+
+    target_group = None
+
+    if event.is_private:
+        parts = args_text.split()
+
+        if not parts:
+            await event.reply(
+                "مثال:\n"
+                "!تاریخچه 200 group_target=-10024473944"
+            )
+            return
+
+        target = parts[-1]
+
+        if not target.startswith("group_target="):
+            await event.reply(
+                "❌ در PV باید گروه هدف مشخص شود.\n"
+                "مثال:\n"
+                "!تاریخچه 200 group_target=-10024473944"
+            )
+            return
+
+        try:
+            target_group = int(
+                target.split("=", 1)[1]
+            )
+        except ValueError:
+            await event.reply(
+                "❌ شناسه گروه نامعتبر است."
+            )
+            return
+
+        args_text = " ".join(parts[:-1])
+
+    elif event.is_group:
+        target_group = event.chat_id
+
+    else:
+        return
+
     if not self.timeline_enabled:
         await event.reply(
-            "🛑 Timeline در حال حاضر خاموش است.\n"
-            "اول بزن:\n"
-            "!تایم لاین روشن"
+            "🛑 Timeline در حال حاضر خاموش است."
         )
         return
 
-    value = (
-        event.args_text or ""
-    ).strip()
-
-    if not value.isdigit():
+    if not args_text.isdigit():
         await event.reply(
             "مثال:\n"
             "!تاریخچه 200"
         )
         return
 
-    limit = int(value)
+    limit = int(args_text)
 
     if limit < 10:
         await event.reply(
@@ -936,7 +972,7 @@ async def load_timeline(
     try:
         count = await self.memory.load_timeline(
             self.client,
-            event.chat_id,
+            target_group,
             limit,
         )
 
@@ -954,11 +990,8 @@ async def load_timeline(
     await event.reply(
         f"🧭 Timeline آماده شد.\n"
         f"📦 {count} پیام در RAM نگه داشته می‌شود.\n\n"
-        f"از این لحظه پیام‌های جدید هم "
-        f"به‌صورت خودکار ثبت می‌شوند."
+        f"گروه هدف: {target_group}"
     )
-
-
 @on_event(events.NewMessage(incoming=True))
 async def on_timeline_incoming(
     self,
