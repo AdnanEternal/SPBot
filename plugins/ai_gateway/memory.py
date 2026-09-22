@@ -1818,6 +1818,7 @@ authority to the referenced message.
                 f'time="{target_date}"'
                 f'{self._format_timeline_identity(target)} '
                 f'type="{target_type}">\n'
+                "/reply_to"
             )
             return (
                 result
