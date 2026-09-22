@@ -22,7 +22,6 @@ MEOW_RESPONSES = [
     "گربه شناسایی شد! 🚨🐈",
 ]
 
-
 @command(
     "پاکسازی",
     permission="admin",
@@ -55,81 +54,15 @@ async def clear_messages(
         )
         return
 
-    # =========================================================
-    # اجرای ریموت
-    # =========================================================
-    if event.id is None:
-        dialogs = await self.client.get_dialogs()
-
-        target_dialog = next(
-            (
-                dialog
-                for dialog in dialogs
-                if dialog.id == event.chat_id
-                and dialog.is_group
-            ),
-            None,
-        )
-
-        if target_dialog is None:
-            await event.reply(
-                "❌ گروه هدف در گفتگوهای ربات پیدا نشد."
-            )
-            return
-
-        last_message = target_dialog.message
-
-        if last_message is None:
-            await event.reply(
-                "❌ این گروه پیامی برای پاکسازی ندارد."
-            )
-            return
-
-        last_message_id = last_message.id
-
-        requested_ids = list(
-            range(
-                max(
-                    1,
-                    last_message_id - count + 1,
-                ),
-                last_message_id + 1,
-            )
-        )
-
-        messages = await self.client.get_messages(
-            target_dialog.entity,
-            ids=requested_ids,
-        )
-
-        message_ids = [
-            message.id
-            for message in messages
-            if message is not None
-            and message.id is not None
-        ]
-
-        if not message_ids:
-            await event.reply(
-                "❌ پیامی برای پاکسازی پیدا نشد."
-            )
-            return
-
-        await self.client.delete_messages(
-            target_dialog.entity,
-            message_ids,
-        )
-
-        return
-
-    # =========================================================
-    # اجرای عادی داخل گروه
-    # =========================================================
     chat = await event.get_chat()
+
+    # اگه event.id نداریم (اجرای ریموت/بدون پیام واقعی)، پیامی برای
+    # exclude کردن نیست؛ پس دقیقاً count تا می‌گیریم، نه count+1.
+    fetch_limit = count + 1 if event.id is not None else count
 
     messages = await self.client.get_messages(
         chat,
-        limit=count + 1,
+        limit=fetch_limit,
     )
 
     message_ids = [
@@ -149,7 +82,10 @@ async def clear_messages(
         message_ids,
     )
 
-    await event.delete()@on_event(events.NewMessage(incoming=True))
+    await event.delete()
+
+
+@on_event(events.NewMessage(incoming=True))
 async def meow_trigger(
     self: "MessageManagerPlugin",
     event: events.NewMessage.Event,
