@@ -16,6 +16,13 @@ _GROUP_TARGET_FLAG_PATTERN = re.compile(
 )
 
 
+# Commandهایی که System Plugin اجازه می‌دهد
+# با group_target به گروه دیگری Remote شوند.
+_REMOTE_COMMANDS = {
+    "نمایش تایم لاین",
+}
+
+
 class GroupManager:
     """
     مدیریت اجرای Remote Command برای یک گروه مشخص.
@@ -28,18 +35,6 @@ class GroupManager:
     def extract_group_target(
         args_text: str,
     ) -> tuple[str, int | None, bool]:
-        """
-        group_target را از انتهای آرگومان‌ها جدا می‌کند.
-
-        پشتیبانی می‌شود:
-
-            group_target=123456789
-
-        و:
-
-            --group-target 123456789
-        """
-
         text = (args_text or "").strip()
 
         if not text:
@@ -49,7 +44,6 @@ class GroupManager:
 
         if match:
             group_id = int(match.group(1))
-
             clean = text[:match.start()].strip()
 
             return clean, group_id, True
@@ -58,7 +52,6 @@ class GroupManager:
 
         if match:
             group_id = int(match.group(1))
-
             clean = text[:match.start()].strip()
 
             return clean, group_id, True
@@ -69,20 +62,16 @@ class GroupManager:
         self,
         invocation,
     ) -> None:
-        event = invocation.original_event
-
-        # فقط از PV
-        if not getattr(
-            event,
-            "is_private",
-            False,
-        ):
+        # فقط Commandهای مجاز به Remote
+        if invocation.command_name not in _REMOTE_COMMANDS:
             return
 
         # فقط Owner
         from core.permissions import is_owner
 
-        if not is_owner(event.sender_id):
+        if not is_owner(
+            invocation.original_event.sender_id
+        ):
             return
 
         clean_args, group_id, found = (
@@ -91,14 +80,12 @@ class GroupManager:
             )
         )
 
-        # target نداریم؛ اجرای عادی
+        # group_target نداریم؛ اجرای عادی
         if not found:
             return
 
-        # Commandهای private-only را نمی‌توان
-        # روی گروه اجرا کرد.
         if invocation.command.chat_type == "private":
-            await event.reply(
+            await invocation.original_event.reply(
                 "❌ این کامند مخصوص PV است "
                 "و نمی‌تواند روی گروه اجرا شود."
             )
@@ -107,18 +94,16 @@ class GroupManager:
             return
 
         if group_id is None:
-            await event.reply(
+            await invocation.original_event.reply(
                 "❌ شناسه گروه نامعتبر است."
             )
 
             invocation.mark_handled()
             return
 
-        # ساخت Execution Event جدید برای اجرای
-        # Command در گروه هدف
         remote_event = ExecutionEvent(
             self.client,
-            base=event,
+            base=invocation.original_event,
             chat_id=group_id,
             is_group=True,
             args_text=clean_args,
@@ -132,18 +117,14 @@ class GroupManager:
             ),
         )
 
-        # آرگومان واقعی Command
-        # بدون group_target
         invocation.set_args(
             clean_args
         )
 
-        # Context اجرای Command را عوض می‌کنیم
         invocation.replace_event(
             remote_event
         )
 
-        # Owner قبلاً بررسی شده
         invocation.grant_access()
 
         invocation.source = "group_manager"
