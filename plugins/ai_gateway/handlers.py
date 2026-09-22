@@ -816,52 +816,119 @@ async def timeline_toggle(
 
 
 
-
-
 @command(
     name="نمایش تایم لاین",
     permission="owner",
-    chat_type="group",
-    description="محتوای فعلی Timeline این گروه رو (همونی که بوبی می‌بینه) نشون می‌ده - برای دیباگ.",
+    chat_type="all",
+    description="Timeline گروه را نمایش می‌دهد.",
 )
-async def show_timeline(self, event) -> None:
-    if not self.timeline_enabled:
-        await event.reply(
-            "🛑 Timeline سراسری خاموش است."
+async def show_timeline(
+    self,
+    event,
+) -> None:
+    raw = (
+        event.args_text or ""
+    ).strip()
+
+    parts = raw.split()
+
+    target_group = None
+    clean_args = []
+
+    for part in parts:
+        if part.lower().startswith("group_target="):
+            value = part.split(
+                "=",
+                1,
+            )[1].strip()
+
+            try:
+                target_group = int(value)
+            except ValueError:
+                await event.reply(
+                    "❌ شناسه گروه نامعتبر است."
+                )
+                return
+
+            continue
+
+        clean_args.append(part)
+
+    # -------------------------------------------------
+    # حالت Remote
+    # group_target داده شده => فقط RAM
+    # -------------------------------------------------
+    if target_group is not None:
+        if not self.timeline_enabled:
+            await event.reply(
+                "🛑 Timeline سراسری خاموش است."
+            )
+            return
+
+        context = self.memory.get_timeline_context(
+            target_group
         )
-        return
 
-    await self.memory.ensure_timeline(
-        self.client,
-        event.chat_id,
-        self.timeline_limit,
-    )
+        if not context:
+            await event.reply(
+                "❌ Timeline مورد نظر لود نشده!"
+            )
+            return
 
+    # -------------------------------------------------
+    # حالت عادی
+    # فقط وقتی داخل گروه هستیم
+    # -------------------------------------------------
+    else:
+        if not event.is_group:
+            return
 
-    context = self.memory.get_timeline_context(
-        event.chat_id
-    )
-    if not context:
-        await event.reply(
-            "🧭 هنوز پیام قابل‌نمایشی در Timeline این گروه وجود ندارد."
+        if not self.timeline_enabled:
+            await event.reply(
+                "🛑 Timeline سراسری خاموش است."
+            )
+            return
+
+        await self.memory.ensure_timeline(
+            self.client,
+            event.chat_id,
+            self.timeline_limit,
         )
-        return
 
-    # همون الگوی تقسیم پیام که تو "کلید مدل ها پینگ" هست، که وسط یه
-    # خط قطع نشه و به محدودیت طول پیام هم نخوریم.
+        context = self.memory.get_timeline_context(
+            event.chat_id
+        )
+
+        if not context:
+            await event.reply(
+                "🧭 هنوز پیام قابل‌نمایشی در Timeline این گروه وجود ندارد."
+            )
+            return
+
+    # -------------------------------------------------
+    # ارسال Timeline
+    # -------------------------------------------------
     lines = context.split("\n")
+
     chunk_size = 3000
     chunks = []
     current = ""
 
     for line in lines:
-        if len(current) + len(line) + 1 > chunk_size:
+        if (
+            len(current)
+            + len(line)
+            + 1
+            > chunk_size
+        ):
             if current:
                 chunks.append(current)
+
             current = line
         else:
             if current:
                 current += "\n"
+
             current += line
 
     if current:
@@ -871,9 +938,10 @@ async def show_timeline(self, event) -> None:
         try:
             await event.reply(chunk)
         except Exception as exc:
-            print(f"❌ خطا در ارسال Timeline: {exc}")
+            print(
+                f"❌ خطا در ارسال Timeline: {exc}"
+            )
             break
-
 
 @command(
     name="پاک تایم لاین",
