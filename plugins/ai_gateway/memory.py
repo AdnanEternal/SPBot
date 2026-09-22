@@ -43,8 +43,16 @@ The message identifier within the current group.
 time:
 The message timestamp.
 
-sender:
-The display identity of the message author.
+nick_name:
+The user's display name, normally first_name plus last_name.
+Only present when a display name is available.
+
+user_name:
+The user's username.
+This attribute is omitted when the user has no username.
+
+user_id:
+The numeric identifier of the message author.
 
 type:
 The semantic source of the message.
@@ -122,7 +130,7 @@ message.
             set[int],
         ] = {}
 
-        # group_id -> {user_id: display_name}
+        # group_id -> {user_id: sender identity}
         self._timeline_sender_cache: dict[
             int,
             dict[int, str],
@@ -399,34 +407,38 @@ message.
             )
         except Exception:
             return str(value)
-
     @staticmethod
-    def _display_name(
+    def _get_sender_identity(
         entity: Any,
-        fallback: Any,
-    ) -> str:
+        user_id: int | None,
+    ) -> dict[str, Any]:
+        identity: dict[str, Any] = {}
+
+        if user_id is not None:
+            identity["user_id"] = int(user_id)
+
         if entity is None:
-            return str(fallback)
+            return identity
 
-        username = getattr(
-            entity,
-            "username",
-            None,
-        )
+        first_name = (
+            getattr(
+                entity,
+                "first_name",
+                None,
+            )
+            or ""
+        ).strip()
 
-        first_name = getattr(
-            entity,
-            "first_name",
-            None,
-        )
+        last_name = (
+            getattr(
+                entity,
+                "last_name",
+                None,
+            )
+            or ""
+        ).strip()
 
-        last_name = getattr(
-            entity,
-            "last_name",
-            None,
-        )
-
-        full_name = " ".join(
+        nick_name = " ".join(
             part
             for part in (
                 first_name,
@@ -435,12 +447,22 @@ message.
             if part
         ).strip()
 
-        return (
-            username
-            or full_name
-            or str(fallback)
-        )
+        if nick_name:
+            identity["nick_name"] = nick_name
 
+        username = (
+            getattr(
+                entity,
+                "username",
+                None,
+            )
+            or ""
+        ).strip().lstrip("@")
+
+        if username:
+            identity["user_name"] = username
+
+        return identity
     @staticmethod
     def _extract_message_id(message: Any) -> int | None:
         value = getattr(
@@ -593,7 +615,7 @@ message.
             except Exception:
                 sender_id = None
 
-        sender_name = await self._resolve_sender_name(
+        sender_identity = await self._resolve_sender_identity(
             group_id,
             target,
             sender_id,
@@ -620,8 +642,7 @@ message.
 
         return {
             "message_id": message_id,
-            "sender_id": sender_id,
-            "sender_name": sender_name,
+            **sender_identity,
             "type": self._get_timeline_message_type(
                 sender_id
             ),
@@ -634,7 +655,6 @@ message.
                 )
             ),
         }
-
 
 
 
@@ -698,18 +718,15 @@ message.
         }
 
 
-
-
-
-    async def _resolve_sender_name(
+    async def _resolve_sender_identity(
         self,
         group_id: int,
         message: Any,
         sender_id: int | None,
-    ) -> str:
+    ) -> dict[str, Any]:
 
         if sender_id is None:
-            return "نامشخص"
+            return {}
 
         cache = self._timeline_sender_cache.setdefault(
             group_id,
@@ -718,8 +735,8 @@ message.
 
         cached = cache.get(sender_id)
 
-        if cached:
-            return cached
+        if cached is not None:
+            return dict(cached)
 
         sender = None
 
@@ -738,14 +755,16 @@ message.
             except Exception:
                 sender = None
 
-        name = self._display_name(
+        identity = self._get_sender_identity(
             sender,
             sender_id,
         )
 
-        cache[sender_id] = name
+        cache[sender_id] = identity
 
-        return name
+        return dict(identity)
+
+
     async def load_timeline(
         self,
         client,
@@ -854,7 +873,7 @@ message.
                 except Exception:
                     sender_id = None
 
-            sender_name = await self._resolve_sender_name(
+            sender_identity = await self._resolve_sender_identity(
                 group_id,
                 message,
                 sender_id,
@@ -867,8 +886,7 @@ message.
             record = {
                 "message_id": message_id,
                 "group_id": group_id,
-                "sender_id": sender_id,
-                "sender_name": sender_name,
+                **sender_identity,
                 "type": self._get_timeline_message_type(
                     sender_id
                 ),
@@ -1178,7 +1196,7 @@ message.
             except Exception:
                 sender_id = None
 
-        sender_name = await self._resolve_sender_name(
+        sender_identity = await self._resolve_sender_identity(
             group_id,
             message,
             sender_id,
@@ -1234,8 +1252,7 @@ message.
         record = {
             "message_id": message_id,
             "group_id": group_id,
-            "sender_id": sender_id,
-            "sender_name": sender_name,
+            **sender_identity,
             "type": message_type,
             "text": text,
             "date": self._format_date(
@@ -1492,9 +1509,41 @@ message.
 
         attributes = (
             f'id="{message_id}" '
-            f'time="{date}" '
-            f'sender="{sender}" '
-            f'type="{message_type}"'
+            f'time="{date}"'
+        )
+
+        nick_name = record.get(
+            "nick_name"
+        )
+
+        user_name = record.get(
+            "user_name"
+        )
+
+        user_id = record.get(
+            "user_id"
+        )
+
+        if nick_name:
+            attributes += (
+                f' nick_name="'
+                f'{self._timeline_attribute(nick_name)}"'
+            )
+
+        if user_name:
+            attributes += (
+                f' user_name="'
+                f'{self._timeline_attribute(user_name)}"'
+            )
+
+        if user_id is not None:
+            attributes += (
+                f' user_id="'
+                f'{self._timeline_attribute(user_id)}"'
+            )
+
+        attributes += (
+            f' type="{message_type}"'
         )
 
         if status:
@@ -1550,9 +1599,7 @@ message.
                 target["date"]
             )
 
-            target_sender = self._timeline_attribute(
-                target["sender_name"]
-            )
+
 
             target_type = self._timeline_attribute(
                 target.get("type", "user")
@@ -1565,11 +1612,44 @@ message.
                 )
             )
 
+            target_identity = ""
+
+            target_nick_name = target.get(
+                "nick_name"
+            )
+
+            target_user_name = target.get(
+                "user_name"
+            )
+
+            target_user_id = target.get(
+                "user_id"
+            )
+
+            if target_nick_name:
+                target_identity += (
+                    f' nick_name="'
+                    f'{self._timeline_attribute(target_nick_name)}"'
+                )
+
+            if target_user_name:
+                target_identity += (
+                    f' user_name="'
+                    f'{self._timeline_attribute(target_user_name)}"'
+                )
+
+            if target_user_id is not None:
+                target_identity += (
+                    f' user_id="'
+                    f'{self._timeline_attribute(target_user_id)}"'
+                )
+
+
             result += (
                 "\n<reply_to "
                 f'id="{target_id}" '
                 f'time="{target_date}" '
-                f'sender="{target_sender}" '
+                f"{target_identity}"
                 f'type="{target_type}">\n'
                 "<text>\n"
                 f"{target_text}\n"
