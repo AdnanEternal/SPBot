@@ -165,7 +165,6 @@ class ExecutionEvent:
     # =========================================================
     # Event API
     # =========================================================
-
     async def get_chat(self) -> Any:
         same_chat = (
             self.base is not None
@@ -188,7 +187,7 @@ class ExecutionEvent:
             and self.chat_id is not None
         ):
             self._chat_cache = (
-                await self.client.get_entity(
+                await self.client.get_input_entity(
                     self.chat_id
                 )
             )
