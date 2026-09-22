@@ -18,9 +18,7 @@ _GROUP_TARGET_FLAG_PATTERN = re.compile(
 
 # Commandهایی که System Plugin اجازه می‌دهد
 # با group_target به گروه دیگری Remote شوند.
-_REMOTE_COMMANDS = {
-    "نمایش تایم لاین",
-}
+
 
 
 class GroupManager:
@@ -59,19 +57,20 @@ class GroupManager:
         return text, None, False
 
     async def handle_invocation(
-        self,
-        invocation,
-    ) -> None:
-        # فقط Commandهای مجاز به Remote
-        if invocation.command_name not in _REMOTE_COMMANDS:
-            return
+    self,
+    invocation,
+) -> None:
+        event = invocation.original_event
 
-        # فقط Owner
+        # فقط Owner می‌تواند از Remote Group Manager استفاده کند.
         from core.permissions import is_owner
 
-        if not is_owner(
-            invocation.original_event.sender_id
-        ):
+        if not is_owner(event.sender_id):
+            return
+
+        # فقط Commandهای گروهی قابلیت Remote شدن دارند.
+        # Commandهای all/private عمداً Remote نمی‌شوند.
+        if invocation.command.chat_type != "group":
             return
 
         clean_args, group_id, found = (
@@ -80,21 +79,12 @@ class GroupManager:
             )
         )
 
-        # group_target نداریم؛ اجرای عادی
+        # group_target نداریم؛ اجرای عادی.
         if not found:
             return
 
-        if invocation.command.chat_type == "private":
-            await invocation.original_event.reply(
-                "❌ این کامند مخصوص PV است "
-                "و نمی‌تواند روی گروه اجرا شود."
-            )
-
-            invocation.mark_handled()
-            return
-
         if group_id is None:
-            await invocation.original_event.reply(
+            await event.reply(
                 "❌ شناسه گروه نامعتبر است."
             )
 
@@ -103,7 +93,7 @@ class GroupManager:
 
         remote_event = ExecutionEvent(
             self.client,
-            base=invocation.original_event,
+            base=event,
             chat_id=group_id,
             is_group=True,
             args_text=clean_args,
@@ -125,6 +115,7 @@ class GroupManager:
             remote_event
         )
 
+        # Owner قبلاً بررسی شده.
         invocation.grant_access()
 
         invocation.source = "group_manager"
