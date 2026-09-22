@@ -82,6 +82,17 @@ was deleted and its original content is no longer available.
 
 <text> contains the message's actual textual content.
 
+<media> indicates the message contains a real media attachment
+(photo, video, gif, sticker, voice, audio, file, contact, location,
+poll, or link preview). Its type attribute names the kind.
+This element is emitted only when actual media was attached — never
+when a user merely typed text resembling a media description (for
+example the literal characters "[GIF]"), which always stays inside
+<text> untouched.
+
+A message may have <media> alone (media with no caption), <text>
+alone (a normal text message), both, or in rare cases neither.
+
 <reply_to> means the message is explicitly replying to the referenced
 message. This is a factual relationship and must not be guessed.
 
@@ -276,8 +287,12 @@ authority to the referenced message.
                 else "نامشخص"
             )
         )
+        text, media_type = self._extract_message_content(replied)
 
-        text = self._extract_timeline_text(replied)
+        if media_type and text:
+            text = f"[پیوست رسانه: {media_type}]\n{text}"
+        elif media_type:
+            text = f"[پیوست رسانه: {media_type}] (بدون متن)"
 
         if len(text) > 1200:
             text = text[:1200] + "..."
@@ -393,6 +408,28 @@ authority to the referenced message.
     # Timeline helpers
     # =========================================================
 
+
+
+
+
+    def _format_content_block(
+        self,
+        text: str,
+        media_type: str | None,
+    ) -> str:
+        parts = []
+
+        if media_type:
+            parts.append(
+                f'<media type="{self._timeline_attribute(media_type)}" />'
+            )
+
+        if text:
+            parts.append(f"<text>\n{text}\n</text>")
+
+        return "\n".join(parts)
+
+
     @staticmethod
     def _is_command_message(
         message: Any,
@@ -456,237 +493,95 @@ authority to the referenced message.
         return message
 
     
-    
     @staticmethod
-    def _extract_timeline_text(
+    def _extract_message_content(
         message: Any,
-    ) -> str:
+    ) -> tuple[str, str | None]:
         """
-        متن مناسب برای Timeline را از یک Message/Event استخراج می‌کند.
-
-        اول Message واقعی را پیدا می‌کند.
-        بعد رسانه را بررسی می‌کند.
-        هیچ‌وقت خود object پیام را به‌عنوان متن برنمی‌گرداند.
+        (text, media_type) را جدا برمی‌گرداند.
+        media_type فقط وقتی مقدار دارد که پیام واقعاً رسانه داشته باشد؛
+        متنی که خودِ کاربر تایپ کرده هیچ‌وقت media_type نمی‌گیرد.
         """
 
-        message = AIMemoryManager._unwrap_message(
-            message
-        )
+        message = AIMemoryManager._unwrap_message(message)
 
-        # -----------------------------------------
-        # متن واقعی / کپشن
-        # -----------------------------------------
-
-        text = getattr(
-            message,
-            "message",
-            None,
-        )
-
+        text = getattr(message, "message", None)
         if not isinstance(text, str):
             text = ""
-
         text = text.strip()
 
-        # -----------------------------------------
-        # رسانه
-        # -----------------------------------------
-
-        media = getattr(
-            message,
-            "media",
-            None,
+        media = getattr(message, "media", None)
+        media_type = (
+            AIMemoryManager._get_media_type(media)
+            if media is not None
+            else None
         )
 
-        if media is not None:
-            media_label = (
-                AIMemoryManager._get_media_label(
-                    media
-                )
-            )
+        if media_type is None and not text:
+            text = "[پیام بدون متن یا رسانه]"
 
-            # رسانه + کپشن
-            if text:
-                if media_label:
-                    return (
-                        f"{media_label}\n"
-                        f"{text}"
-                    )
-
-                return text
-
-            # رسانه بدون کپشن
-            if media_label:
-                return media_label
-
-            return "[رسانه]"
-
-        # -----------------------------------------
-        # پیام متنی معمولی
-        # -----------------------------------------
-
-        if text:
-            return text
-
-        return "[پیام بدون متن یا رسانه]"
-
-
-
+        return text, media_type
+    
     @staticmethod
-    def _get_media_label(
-        media: Any,
-    ) -> str | None:
+    def _get_media_type(media: Any) -> str | None:
         if media is None:
             return None
 
-        media_name = (
-            type(media).__name__
-            .lower()
-        )
-
-        # -----------------------------------------
-        # Photo
-        # -----------------------------------------
+        media_name = type(media).__name__.lower()
 
         if "photo" in media_name:
-            return "[تصویر]"
-
-        # -----------------------------------------
-        # سایر mediaهای غیر-document
-        # -----------------------------------------
+            return "photo"
 
         if "document" not in media_name:
             if "contact" in media_name:
-                return "[مخاطب]"
-
+                return "contact"
             if "geo" in media_name:
-                return "[موقعیت مکانی]"
-
+                return "location"
             if "poll" in media_name:
-                return "[نظرسنجی]"
-
+                return "poll"
             if "webpage" in media_name:
-                return "[لینک]"
+                return "link"
+            return "media"
 
-            return "[رسانه]"
-
-        # -----------------------------------------
-        # Document
-        # -----------------------------------------
-
-        document = getattr(
-            media,
-            "document",
-            None,
-        )
+        document = getattr(media, "document", None)
 
         if document is None:
-            return "[فایل]"
+            return "file"
 
-        mime_type = (
-            getattr(
-                document,
-                "mime_type",
-                None,
-            )
-            or ""
-        ).lower()
+        mime_type = (getattr(document, "mime_type", None) or "").lower()
+        attributes = getattr(document, "attributes", None) or []
+        attribute_names = {type(a).__name__.lower() for a in attributes}
 
-        attributes = (
-            getattr(
-                document,
-                "attributes",
-                None,
-            )
-            or []
-        )
+        if any("sticker" in name for name in attribute_names):
+            return "sticker"
 
-        attribute_names = {
-            type(attribute).__name__.lower()
-            for attribute in attributes
-        }
-
-        # -----------------------------------------
-        # Sticker
-        # -----------------------------------------
-
-        if any(
-            "sticker" in name
-            for name in attribute_names
-        ):
-            return "[استیکر]"
-
-        # -----------------------------------------
-        # Audio / Voice
-        # -----------------------------------------
-
-        if any(
-            "audio" in name
-            for name in attribute_names
-        ):
+        if any("audio" in name for name in attribute_names):
             for attribute in attributes:
-                if (
-                    "audio"
-                    in type(attribute)
-                    .__name__
-                    .lower()
-                ):
-                    if getattr(
-                        attribute,
-                        "voice",
-                        False,
-                    ):
-                        return "[ویس]"
-
-            return "[صدا]"
-
-        # -----------------------------------------
-        # GIF
-        # -----------------------------------------
+                if "audio" in type(attribute).__name__.lower():
+                    if getattr(attribute, "voice", False):
+                        return "voice"
+            return "audio"
 
         if (
-            mime_type in {
-                "image/gif",
-                "video/gif",
-            }
+            mime_type in {"image/gif", "video/gif"}
             or (
-                any(
-                    "animated" in name
-                    for name in attribute_names
-                )
-                and mime_type.startswith(
-                    "video/"
-                )
+                any("animated" in name for name in attribute_names)
+                and mime_type.startswith("video/")
             )
         ):
-            return "[GIF]"
+            return "gif"
 
-        # -----------------------------------------
-        # Video
-        # -----------------------------------------
-
-        if any(
-            "video" in name
-            for name in attribute_names
-        ):
-            return "[ویدیو]"
-
-        # -----------------------------------------
-        # MIME fallback
-        # -----------------------------------------
+        if any("video" in name for name in attribute_names):
+            return "video"
 
         if mime_type.startswith("image/"):
-            return "[تصویر]"
-
+            return "photo"
         if mime_type.startswith("video/"):
-            return "[ویدیو]"
-
+            return "video"
         if mime_type.startswith("audio/"):
-            return "[صدا]"
+            return "audio"
 
-        return "[فایل]"
-
-
+        return "file"
 
     @staticmethod
     def _format_date(value: Any) -> str:
@@ -913,7 +808,7 @@ authority to the referenced message.
             sender_id,
         )
 
-        text = self._extract_timeline_text(target)
+        text, media_type = self._extract_message_content(target)
 
         return {
             "message_id": message_id,
@@ -922,6 +817,7 @@ authority to the referenced message.
                 sender_id
             ),
             "text": text,
+            "media": media_type,
             "date": self._format_date(
                 getattr(
                     target,
@@ -1116,9 +1012,7 @@ authority to the referenced message.
             if self._is_command_message(message):
                 continue
 
-            text = self._extract_timeline_text(
-                message
-            )
+            text, media_type = self._extract_message_content(message)
 
             sender_id = getattr(
                 message,
@@ -1150,6 +1044,7 @@ authority to the referenced message.
                     sender_id
                 ),
                 "text": text,
+                "media": media_type,
                 "date": self._format_date(
                     getattr(
                         message,
@@ -1242,6 +1137,7 @@ authority to the referenced message.
         )
 
         return len(records)
+    
     async def record_event(
         self,
         event,
@@ -1294,8 +1190,9 @@ authority to the referenced message.
 
         if pending_reason is not None:
             text = f"[پیام حذف شده: {pending_reason}]"
+            media_type = None
         else:
-            text = self._extract_timeline_text(message)
+            text, media_type = self._extract_message_content(message)
 
         sender_id = getattr(
             message,
@@ -1357,6 +1254,7 @@ authority to the referenced message.
             **sender_identity,
             "type": "user",
             "text": text,
+            "media": media_type,
             "date": self._format_date(
                 getattr(
                     message,
@@ -1426,7 +1324,7 @@ authority to the referenced message.
             sender_id,
 
         )
-        text = self._extract_timeline_text(message)
+        text, media_type = self._extract_message_content(message)
 
         reply_to_id = await self._extract_reply_id(
             message
@@ -1462,6 +1360,7 @@ authority to the referenced message.
             **sender_identity,
             "type": message_type,
             "text": text,
+            "media": media_type,
             "date": self._format_date(
                 getattr(
                     message,
@@ -1530,6 +1429,7 @@ authority to the referenced message.
 
                 if current_id == message_id:
                     record["text"] = placeholder
+                    record["media"] = None
                     return
 
         self._pending_deletions.setdefault(
@@ -1582,6 +1482,7 @@ authority to the referenced message.
                     continue
 
                 record["text"] = placeholder
+                record["media"] = None
                 return True
 
             return False
@@ -1628,6 +1529,7 @@ authority to the referenced message.
         _, record = matches[0]
 
         record["text"] = placeholder
+        record["media"] = None
         return True
 
     def clear_timeline(
@@ -1724,21 +1626,10 @@ authority to the referenced message.
         by_id: dict[int, dict[str, Any]],
     ) -> str:
 
-        message_id = self._timeline_attribute(
-            record["message_id"]
-        )
-
-        date = self._timeline_attribute(
-            record["date"]
-        )
-
-        message_type = self._timeline_attribute(
-            record.get("type", "user")
-        )
-
-        status = record.get(
-            "status"
-        )
+        message_id = self._timeline_attribute(record["message_id"])
+        date = self._timeline_attribute(record["date"])
+        message_type = self._timeline_attribute(record.get("type", "user"))
+        status = record.get("status")
 
         attributes = (
             f'id="{message_id}" '
@@ -1747,69 +1638,37 @@ authority to the referenced message.
             f'type="{message_type}"'
         )
         if status:
-            attributes += (
-                f' status="{self._timeline_attribute(status)}"'
-            )
+            attributes += f' status="{self._timeline_attribute(status)}"'
 
-        text = str(
-            record.get(
-                "text",
-                "",
-            )
+        content = self._format_content_block(
+            str(record.get("text", "")),
+            record.get("media"),
         )
 
-        result = (
-            f"<message {attributes}>\n"
-            "<text>\n"
-            f"{text}\n"
-            "</text>"
-        )
+        result = f"<message {attributes}>"
+        if content:
+            result += "\n" + content
 
-        reply_to_id = record.get(
-            "reply_to_id"
-        )
+        reply_to_id = record.get("reply_to_id")
 
         if reply_to_id is None:
-            return (
-                result
-                + "\n</message>"
-            )
+            return result + "\n</message>"
 
         try:
-            reply_to_id = int(
-                reply_to_id
-            )
+            reply_to_id = int(reply_to_id)
         except Exception:
-            return (
-                result
-                + "\n</message>"
-            )
+            return result + "\n</message>"
 
-        target = by_id.get(
-            reply_to_id
-        )
+        target = by_id.get(reply_to_id)
 
-        # target داخل Timeline است.
         if target is not None:
-            target_id = self._timeline_attribute(
-                target["message_id"]
-            )
+            target_id = self._timeline_attribute(target["message_id"])
+            target_date = self._timeline_attribute(target["date"])
+            target_type = self._timeline_attribute(target.get("type", "user"))
 
-            target_date = self._timeline_attribute(
-                target["date"]
-            )
-
-
-
-            target_type = self._timeline_attribute(
-                target.get("type", "user")
-            )
-
-            target_text = str(
-                target.get(
-                    "text",
-                    "",
-                )
+            target_content = self._format_content_block(
+                str(target.get("text", "")),
+                target.get("media"),
             )
 
             result += (
@@ -1817,85 +1676,53 @@ authority to the referenced message.
                 f'id="{target_id}" '
                 f'time="{target_date}"'
                 f'{self._format_timeline_identity(target)} '
-                f'type="{target_type}">\n'
-                "</reply_to>"
+                f'type="{target_type}">'
             )
-            return (
-                result
-                + "\n</message>"
-            )
+            if target_content:
+                result += "\n" + target_content
+            result += "\n</reply_to>"
 
-        # target داخل Timeline نیست،
-        # ولی snapshot آن را داریم.
-        reply_preview = record.get(
-            "reply_preview"
-        )
+            return result + "\n</message>"
+
+        reply_preview = record.get("reply_preview")
 
         if reply_preview is not None:
             preview_id = self._timeline_attribute(
-                reply_preview.get(
-                    "message_id",
-                    reply_to_id,
-                )
+                reply_preview.get("message_id", reply_to_id)
             )
-
             preview_date = self._timeline_attribute(
-                reply_preview.get(
-                    "date",
-                    "unknown",
-                )
+                reply_preview.get("date", "unknown")
             )
-
-            preview_identity = (
-                self._format_timeline_identity(
-                    reply_preview
-                )
-            )
-
             preview_type = self._timeline_attribute(
-                reply_preview.get(
-                    "type",
-                    "user",
-                )
+                reply_preview.get("type", "user")
             )
 
-            preview_text = str(
-                reply_preview.get(
-                    "text",
-                    "",
-                )
+            preview_content = self._format_content_block(
+                str(reply_preview.get("text", "")),
+                reply_preview.get("media"),
             )
 
             result += (
                 "\n<reply_to "
                 f'id="{preview_id}" '
                 f'time="{preview_date}"'
-                f'{preview_identity} '
+                f'{self._format_timeline_identity(reply_preview)} '
                 f'type="{preview_type}" '
-                'source="snapshot">\n'
-                "<text>\n"
-                f"{preview_text}\n"
-                "</text>\n"
-                "</reply_to>"
+                'source="snapshot">'
             )
+            if preview_content:
+                result += "\n" + preview_content
+            result += "\n</reply_to>"
 
-            return (
-                result
-                + "\n</message>"
-            )
+            return result + "\n</message>"
 
-        # رابطه مشخص است، ولی متن target در دسترس نیست.
         result += (
             "\n<reply_to "
             f'id="{self._timeline_attribute(reply_to_id)}" '
             'source="unavailable" />'
         )
 
-        return (
-            result
-            + "\n</message>"
-        )
-    
+        return result + "\n</message>"    
     def get_timeline_context(
         self,
         group_id: int,
