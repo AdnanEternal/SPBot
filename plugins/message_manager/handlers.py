@@ -47,14 +47,41 @@ async def clear_messages(
     if count <= 0:
         await event.reply("❌ تعداد پیام‌ها باید بیشتر از صفر باشد.")
         return
-    
+
     if count > MAX_CLEAR_COUNT:
         await event.reply(
             f"❌ حداکثر تعداد پاکسازی در هر بار {MAX_CLEAR_COUNT} پیام است."
         )
         return
+
     chat = await event.get_chat()
 
+    # اجرای ریموت:
+    # در گروه پیام فیزیکیِ کامند وجود ندارد، پس N پیام آخر را پاک می‌کنیم.
+    if event.id is None:
+        messages = await self.client.get_messages(
+            chat,
+            limit=count,
+        )
+
+        message_ids = [
+            message.id
+            for message in messages
+            if message.id is not None
+        ]
+
+        if not message_ids:
+            await event.reply("❌ پیامی برای پاکسازی پیدا نشد.")
+            return
+
+        await self.client.delete_messages(
+            chat,
+            message_ids,
+        )
+
+        return
+
+    # اجرای عادی داخل گروه:
     messages = await self.client.get_messages(
         chat,
         limit=count + 1,
@@ -75,6 +102,7 @@ async def clear_messages(
         message_ids,
     )
 
+    # خود پیام کامند هم حذف شود.
     await event.delete()
 
 
