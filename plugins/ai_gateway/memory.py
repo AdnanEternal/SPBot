@@ -277,24 +277,7 @@ authority to the referenced message.
             )
         )
 
-        raw_text = (
-            getattr(
-                replied,
-                "raw_text",
-                None,
-            )
-            or getattr(
-                replied,
-                "message",
-                None,
-            )
-            or ""
-        )
-
-        text = str(raw_text).strip()
-
-        if not text:
-            text = "[پیام بدون متن یا رسانه]"
+        text = self._extract_timeline_text(replied)
 
         if len(text) > 1200:
             text = text[:1200] + "..."
@@ -409,6 +392,183 @@ authority to the referenced message.
     # =========================================================
     # Timeline helpers
     # =========================================================
+
+
+
+    @staticmethod
+    def _extract_timeline_text(
+        message: Any,
+    ) -> str:
+        raw_text = getattr(
+            message,
+            "raw_text",
+            None,
+        )
+
+        if isinstance(raw_text, str):
+            raw_text = raw_text.strip()
+
+            if raw_text:
+                media = getattr(
+                    message,
+                    "media",
+                    None,
+                )
+
+                if media is not None:
+                    media_label = (
+                        AIMemoryManager._get_media_label(
+                            media
+                        )
+                    )
+
+                    if media_label:
+                        return (
+                            f"{media_label}\n"
+                            f"{raw_text}"
+                        )
+
+                return raw_text
+
+        message_text = getattr(
+            message,
+            "message",
+            None,
+        )
+
+        if isinstance(message_text, str):
+            message_text = message_text.strip()
+
+            if message_text:
+                return message_text
+
+        media = getattr(
+            message,
+            "media",
+            None,
+        )
+
+        if media is not None:
+            media_label = (
+                AIMemoryManager._get_media_label(
+                    media
+                )
+            )
+
+            if media_label:
+                return media_label
+
+        return "[پیام بدون متن یا رسانه]"
+
+
+    @staticmethod
+    def _get_media_label(
+        media: Any,
+    ) -> str | None:
+        if media is None:
+            return None
+
+        media_name = (
+            type(media).__name__
+            .lower()
+        )
+
+        if "photo" in media_name:
+            return "[تصویر]"
+
+        if "document" not in media_name:
+            if "contact" in media_name:
+                return "[مخاطب]"
+
+            if "geo" in media_name:
+                return "[موقعیت مکانی]"
+
+            if "poll" in media_name:
+                return "[نظرسنجی]"
+
+            if "webpage" in media_name:
+                return "[لینک]"
+
+            return "[رسانه]"
+
+        document = getattr(
+            media,
+            "document",
+            None,
+        )
+
+        if document is None:
+            return "[فایل]"
+
+        mime_type = (
+            getattr(
+                document,
+                "mime_type",
+                None,
+            )
+            or ""
+        ).lower()
+
+        attributes = getattr(
+            document,
+            "attributes",
+            None,
+        ) or []
+
+        attribute_names = {
+            type(attribute).__name__.lower()
+            for attribute in attributes
+        }
+
+        if any(
+            "sticker" in name
+            for name in attribute_names
+        ):
+            return "[استیکر]"
+
+        if any(
+            "audio" in name
+            for name in attribute_names
+        ):
+            for attribute in attributes:
+                if "audio" in type(attribute).__name__.lower():
+                    if getattr(
+                        attribute,
+                        "voice",
+                        False,
+                    ):
+                        return "[ویس]"
+
+            return "[صدا]"
+
+        if (
+            "animated" in attribute_names
+            and (
+                "video" in mime_type
+                or "gif" in mime_type
+            )
+        ):
+            return "[GIF]"
+
+        if any(
+            "video" in name
+            for name in attribute_names
+        ):
+            return "[ویدیو]"
+
+        if mime_type.startswith("image/"):
+            return "[تصویر]"
+
+        if mime_type.startswith("video/"):
+            return "[ویدیو]"
+
+        if mime_type.startswith("audio/"):
+            return "[صدا]"
+
+        return "[فایل]"
+
+
+
 
     @staticmethod
     def _format_date(value: Any) -> str:
@@ -635,24 +795,7 @@ authority to the referenced message.
             sender_id,
         )
 
-        raw_text = (
-            getattr(
-                target,
-                "raw_text",
-                None,
-            )
-            or getattr(
-                target,
-                "message",
-                None,
-            )
-            or ""
-        )
-
-        text = str(raw_text).strip()
-
-        if not text:
-            text = "[پیام بدون متن یا رسانه]"
+        text = self._extract_timeline_text(target)
 
         return {
             "message_id": message_id,
@@ -852,28 +995,7 @@ authority to the referenced message.
             if message_id is None:
                 continue
 
-            raw_text = (
-                getattr(
-                    message,
-                    "raw_text",
-                    None,
-                )
-                or getattr(
-                    message,
-                    "message",
-                    None,
-                )
-                or ""
-            )
-
-            text = str(raw_text).strip()
-
-            # خود Command وارد Timeline نمی‌شود.
-            if text.startswith("!"):
-                continue
-
-            if not text:
-                text = "[پیام بدون متن یا رسانه]"
+            text = self._extract_timeline_text(message)
 
             sender_id = getattr(
                 message,
@@ -1044,28 +1166,7 @@ authority to the referenced message.
         if pending_reason is not None:
             text = f"[پیام حذف شده: {pending_reason}]"
         else:
-            raw_text = (
-                getattr(
-                    event,
-                    "raw_text",
-                    None,
-                )
-                or getattr(
-                    event,
-                    "message",
-                    None,
-                )
-                or ""
-            )
-
-            text = str(raw_text).strip()
-
-            # کامندها را ثبت نکن
-            if text.startswith("!"):
-                return False
-
-            if not text:
-                text = "[پیام بدون متن یا رسانه]"
+            text = self._extract_timeline_text(event)
 
         sender_id = getattr(
             event,
@@ -1194,26 +1295,9 @@ authority to the referenced message.
             group_id,
             message,
             sender_id,
+
         )
-
-        raw_text = (
-            getattr(
-                message,
-                "raw_text",
-                None,
-            )
-            or getattr(
-                message,
-                "message",
-                None,
-            )
-            or ""
-        )
-
-        text = str(raw_text).strip()
-
-        if not text:
-            text = "[پیام بدون متن یا رسانه]"
+        text = self._extract_timeline_text(message)
 
         reply_to_id = await self._extract_reply_id(
             message
