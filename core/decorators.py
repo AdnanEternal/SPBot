@@ -1,15 +1,11 @@
 """
 دکوریتورهای کمکی برای نوشتن پلاگین‌ها.
 
-این‌ها فقط «برچسب» روی متد می‌گذارند.
-ثبت واقعی توسط BasePlugin انجام می‌شود.
+این‌ها فقط یه «برچسب» روی متد پلاگین می‌ذارن؛ ثبت واقعی توسط
+BasePlugin انجام می‌شه.
 """
 
-from typing import (
-    Any,
-    Callable,
-    TypeVar,
-)
+from typing import Any, Callable, TypeVar
 
 
 F = TypeVar(
@@ -24,9 +20,6 @@ def command(
     chat_type: str = "all",
     description: str = "",
 ) -> Callable[[F], F]:
-    """
-    متد را به‌عنوان Handler یک Command علامت‌گذاری می‌کند.
-    """
 
     def decorator(
         func: F,
@@ -47,9 +40,6 @@ def command(
 def on_event(
     event_type: Any,
 ) -> Callable[[F], F]:
-    """
-    متد را به‌عنوان Event Handler علامت‌گذاری می‌کند.
-    """
 
     def decorator(
         func: F,
@@ -65,10 +55,6 @@ def on_event(
 def on_bus_event(
     event_name: str,
 ) -> Callable[[F], F]:
-    """
-    متد را به‌عنوان Listener یک EventBus event
-    علامت‌گذاری می‌کند.
-    """
 
     def decorator(
         func: F,
@@ -76,19 +62,6 @@ def on_bus_event(
 
         func._bus_event_name = event_name
 
-        return func
-
-    return decorator
-
-def on_command_invocation(
-    *,
-    priority: int = 0,
-):
-    def decorator(
-        func: F,
-    ) -> F:
-        func._command_invocation_hook = True
-        func._command_invocation_priority = priority
         return func
 
     return decorator
