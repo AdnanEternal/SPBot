@@ -4,7 +4,6 @@ from typing import TYPE_CHECKING
 
 from splusthon import events
 
-
 from core.decorators import command, on_event
 
 if TYPE_CHECKING:
@@ -21,6 +20,7 @@ MEOW_RESPONSES = [
     "میو؟ 🤨",
     "گربه شناسایی شد! 🚨🐈",
 ]
+
 
 @command(
     "پاکسازی",
@@ -47,7 +47,7 @@ async def clear_messages(
     if count <= 0:
         await event.reply("❌ تعداد پیام‌ها باید بیشتر از صفر باشد.")
         return
-
+    
     if count > MAX_CLEAR_COUNT:
         await event.reply(
             f"❌ حداکثر تعداد پاکسازی در هر بار {MAX_CLEAR_COUNT} پیام است."
@@ -56,13 +56,9 @@ async def clear_messages(
 
     chat = await event.get_chat()
 
-    # اگه event.id نداریم (اجرای ریموت/بدون پیام واقعی)، پیامی برای
-    # exclude کردن نیست؛ پس دقیقاً count تا می‌گیریم، نه count+1.
-    fetch_limit = count + 1 if event.id is not None else count
-
     messages = await self.client.get_messages(
         chat,
-        limit=fetch_limit,
+        limit=count + 1,
     )
 
     message_ids = [
@@ -72,9 +68,7 @@ async def clear_messages(
     ]
 
     if not message_ids:
-        await event.reply(
-            "❌ پیامی برای پاکسازی پیدا نشد."
-        )
+        await event.reply("❌ پیامی برای پاکسازی پیدا نشد.")
         return
 
     await self.client.delete_messages(
