@@ -890,6 +890,64 @@ async def clear_timeline_command(self, event) -> None:
 
 
 @command(
+    name="تایم لاین های RAM",
+    permission="owner",
+    chat_type="all",
+    description="Timelineهای موجود در RAM را نشان می‌دهد.",
+)
+async def show_cached_timelines(
+    self,
+    event,
+):
+    timelines = self.memory.get_cached_timeline_stats()
+
+    if not timelines:
+        await event.reply(
+            "🧭 هیچ Timelineای در RAM کش نشده است."
+        )
+        return
+
+    lines = [
+        "🧭 Timelineهای موجود در RAM:",
+        "",
+    ]
+
+    total_messages = 0
+
+    for index, (
+        group_id,
+        message_count,
+    ) in enumerate(
+        timelines,
+        start=1,
+    ):
+        lines.append(
+            f"{index}. گروه `{group_id}` — "
+            f"{message_count} پیام"
+        )
+
+        total_messages += message_count
+
+    lines.extend(
+        [
+            "",
+            f"📦 تعداد Timelineها: {len(timelines)}",
+            f"💾 مجموع پیام‌های کش‌شده: {total_messages}",
+        ]
+    )
+
+    await event.reply(
+        "\n".join(lines)
+    )
+
+
+
+
+
+
+
+
+@command(
     name="تاریخچه",
     permission="owner",
     chat_type="all",

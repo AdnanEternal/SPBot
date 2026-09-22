@@ -1422,6 +1422,28 @@ message.
         self._timeline_sender_cache.clear()
         self._pending_deletions.clear()
 
+
+    def get_cached_timeline_stats(
+        self,
+    ) -> list[tuple[int, int]]:
+        """
+        اطلاعات Timelineهای موجود در RAM را برمی‌گرداند.
+
+        هیچ درخواست شبکه‌ای انجام نمی‌دهد.
+        خروجی:
+            [(group_id, message_count), ...]
+        """
+
+        return sorted(
+            (
+                group_id,
+                len(timeline),
+            )
+            for group_id, timeline
+            in self._timelines.items()
+        )
+
+
     def has_timeline(
         self,
         group_id: int,
