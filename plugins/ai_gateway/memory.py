@@ -430,8 +430,9 @@ authority to the referenced message.
         message: Any,
     ) -> Any:
         """
-        بعضی Eventها ممکن است پیام خام را داخل message نگه دارند.
-        اگر چنین حالتی بود، خود Message واقعی را برمی‌گردانیم.
+        اگر ورودی یک SPlusthon NewMessage.Event باشد،
+        Message واقعی داخل event.message قرار دارد.
+        اگر خود Message داده شده باشد، همان را برمی‌گردانیم.
         """
 
         nested = getattr(
@@ -440,41 +441,57 @@ authority to the referenced message.
             None,
         )
 
+        # NewMessage.Event -> Message
         if (
             nested is not None
             and not isinstance(nested, str)
             and (
-                hasattr(nested, "raw_text")
+                hasattr(nested, "id")
                 or hasattr(nested, "media")
-                or hasattr(nested, "id")
+                or hasattr(nested, "raw_text")
             )
         ):
             return nested
 
         return message
 
-
+    
+    
     @staticmethod
     def _extract_timeline_text(
         message: Any,
     ) -> str:
+        """
+        متن مناسب برای Timeline را از یک Message/Event استخراج می‌کند.
+
+        اول Message واقعی را پیدا می‌کند.
+        بعد رسانه را بررسی می‌کند.
+        هیچ‌وقت خود object پیام را به‌عنوان متن برنمی‌گرداند.
+        """
+
         message = AIMemoryManager._unwrap_message(
             message
         )
 
+        # -----------------------------------------
         # متن واقعی / کپشن
-        raw_text = getattr(
+        # -----------------------------------------
+
+        text = getattr(
             message,
-            "raw_text",
+            "message",
             None,
         )
 
-        if isinstance(raw_text, str):
-            raw_text = raw_text.strip()
-        else:
-            raw_text = ""
+        if not isinstance(text, str):
+            text = ""
 
-        # رسانه را قبل از fallback به `.message` بررسی می‌کنیم.
+        text = text.strip()
+
+        # -----------------------------------------
+        # رسانه
+        # -----------------------------------------
+
         media = getattr(
             message,
             "media",
@@ -489,14 +506,14 @@ authority to the referenced message.
             )
 
             # رسانه + کپشن
-            if raw_text:
+            if text:
                 if media_label:
                     return (
                         f"{media_label}\n"
-                        f"{raw_text}"
+                        f"{text}"
                     )
 
-                return raw_text
+                return text
 
             # رسانه بدون کپشن
             if media_label:
@@ -504,24 +521,16 @@ authority to the referenced message.
 
             return "[رسانه]"
 
+        # -----------------------------------------
         # پیام متنی معمولی
-        if raw_text:
-            return raw_text
+        # -----------------------------------------
 
-        # fallback برای objectهایی که raw_text ندارند
-        message_text = getattr(
-            message,
-            "message",
-            None,
-        )
-
-        if isinstance(message_text, str):
-            message_text = message_text.strip()
-
-            if message_text:
-                return message_text
+        if text:
+            return text
 
         return "[پیام بدون متن یا رسانه]"
+
+
 
     @staticmethod
     def _get_media_label(
@@ -535,8 +544,16 @@ authority to the referenced message.
             .lower()
         )
 
+        # -----------------------------------------
+        # Photo
+        # -----------------------------------------
+
         if "photo" in media_name:
             return "[تصویر]"
+
+        # -----------------------------------------
+        # سایر mediaهای غیر-document
+        # -----------------------------------------
 
         if "document" not in media_name:
             if "contact" in media_name:
@@ -552,6 +569,10 @@ authority to the referenced message.
                 return "[لینک]"
 
             return "[رسانه]"
+
+        # -----------------------------------------
+        # Document
+        # -----------------------------------------
 
         document = getattr(
             media,
@@ -585,14 +606,20 @@ authority to the referenced message.
             for attribute in attributes
         }
 
+        # -----------------------------------------
         # Sticker
+        # -----------------------------------------
+
         if any(
             "sticker" in name
             for name in attribute_names
         ):
             return "[استیکر]"
 
+        # -----------------------------------------
         # Audio / Voice
+        # -----------------------------------------
+
         if any(
             "audio" in name
             for name in attribute_names
@@ -600,7 +627,9 @@ authority to the referenced message.
             for attribute in attributes:
                 if (
                     "audio"
-                    in type(attribute).__name__.lower()
+                    in type(attribute)
+                    .__name__
+                    .lower()
                 ):
                     if getattr(
                         attribute,
@@ -611,7 +640,10 @@ authority to the referenced message.
 
             return "[صدا]"
 
-        # GIF واقعی یا GIFهای MP4
+        # -----------------------------------------
+        # GIF
+        # -----------------------------------------
+
         if (
             mime_type in {
                 "image/gif",
@@ -629,14 +661,20 @@ authority to the referenced message.
         ):
             return "[GIF]"
 
+        # -----------------------------------------
         # Video
+        # -----------------------------------------
+
         if any(
             "video" in name
             for name in attribute_names
         ):
             return "[ویدیو]"
 
+        # -----------------------------------------
         # MIME fallback
+        # -----------------------------------------
+
         if mime_type.startswith("image/"):
             return "[تصویر]"
 
@@ -647,6 +685,9 @@ authority to the referenced message.
             return "[صدا]"
 
         return "[فایل]"
+
+
+
     @staticmethod
     def _format_date(value: Any) -> str:
         if value is None:
@@ -1222,10 +1263,14 @@ authority to the referenced message.
 
         if group_id not in self._timelines:
             return False
-
-        message_id = self._extract_message_id(
+        message = self._unwrap_message(
             event
         )
+
+        message_id = self._extract_message_id(
+            message
+        )
+
 
         if message_id is None:
             return False
@@ -1250,10 +1295,10 @@ authority to the referenced message.
         if pending_reason is not None:
             text = f"[پیام حذف شده: {pending_reason}]"
         else:
-            text = self._extract_timeline_text(event)
+            text = self._extract_timeline_text(message)
 
         sender_id = getattr(
-            event,
+            message,
             "sender_id",
             None,
         )
@@ -1266,13 +1311,13 @@ authority to the referenced message.
 
         sender_identity = await self._resolve_sender_identity(
             group_id,
-            event,
+            message,
             sender_id,
         )
 
         
         reply_to_id = await self._extract_reply_id(
-            event
+            message
         )
 
         
@@ -1314,7 +1359,7 @@ authority to the referenced message.
             "text": text,
             "date": self._format_date(
                 getattr(
-                    event,
+                    message,
                     "date",
                     None,
                 )
