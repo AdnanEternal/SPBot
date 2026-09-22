@@ -5,6 +5,65 @@ from .trigger import extract_trigger_text
 
 import traceback
 
+
+
+
+def _resolve_memory_target(
+    event,
+) -> tuple[int | None, str, bool]:
+    raw = (
+        event.args_text or ""
+    ).strip()
+
+    parts = raw.split()
+
+    target_group = None
+    clean_args = []
+
+    for part in parts:
+        if part.lower().startswith(
+            "group_target="
+        ):
+            value = part.split(
+                "=",
+                1,
+            )[1].strip()
+
+            try:
+                target_group = int(value)
+            except ValueError:
+                return None, "", True
+
+            continue
+
+        clean_args.append(part)
+
+    # Remote
+    if target_group is not None:
+        return (
+            target_group,
+            " ".join(clean_args),
+            True,
+        )
+
+    # حالت عادی
+    if event.is_group:
+        return (
+            event.chat_id,
+            raw,
+            False,
+        )
+
+    # PV بدون group_target
+    return (
+        None,
+        raw,
+        False,
+    )
+
+
+
+
 def mask_secret(secret):
     if not secret: return 'تنظیم نشده'
     if len(secret) <= 8: return '••••••••'
@@ -189,35 +248,6 @@ async def api_key_models(
 
 
 
-@command(
-    name="حافظه پاک",
-    permission="owner",
-    chat_type="group",
-    description="تمام حافظه و خلاصه‌ی بوبی در این گروه را پاک می‌کند.",
-)
-async def clear_memory(
-    self,
-    event: events.NewMessage.Event,
-) -> None:
-    try:
-        await self.memory.store.clear_group(
-            event.chat_id
-        )
-
-    except Exception as exc:
-        print(
-            f"❌ خطا در پاک کردن حافظه گروه "
-            f"{event.chat_id}: {exc}"
-        )
-
-        await event.reply(
-            "❌ پاک کردن حافظه ناموفق بود."
-        )
-        return
-
-    await event.reply(
-        "🧠 حافظه‌ی بوبی در این گروه کامل پاک شد."
-    )
 
 @command(
     name="کلید مدل ها پینگ",
@@ -335,24 +365,78 @@ async def api_key_models_ping(
 
 
 @command(
+    name="حافظه پاک",
+    permission="owner",
+    chat_type="all",
+    description="تمام حافظه و خلاصه‌ی بوبی در این گروه را پاک می‌کند.",
+)
+async def clear_memory(
+    self,
+    event: events.NewMessage.Event,
+) -> None:
+    target_group, value, remote = (
+        _resolve_memory_target(event)
+    )
+
+    if target_group is None:
+        await event.reply(
+            "❌ گروه هدف مشخص نشده.\n"
+            "مثال:\n"
+            "!حافظه پاک group_target=-10024473944"
+        )
+        return
+
+    try:
+        await self.memory.store.clear_group(
+            target_group
+        )
+
+    except Exception as exc:
+        print(
+            f"❌ خطا در پاک کردن حافظه گروه "
+            f"{target_group}: {exc}"
+        )
+
+        await event.reply(
+            "❌ پاک کردن حافظه ناموفق بود."
+        )
+        return
+
+    await event.reply(
+        f"🧠 حافظه‌ی بوبی در گروه "
+        f"`{target_group}` کامل پاک شد."
+    )
+
+@command(
     name="حافظه",
     permission="owner",
-    chat_type="group",
+    chat_type="all",
     description="حداکثر تعداد توکن حافظه مکالمه این گروه را تنظیم می‌کند.",
 )
 async def memory_limit(
     self,
     event: events.NewMessage.Event,
 ) -> None:
-    value = (event.args_text or "").strip()
+    target_group, value, remote = (
+        _resolve_memory_target(event)
+    )
+
+    if target_group is None:
+        await event.reply(
+            "❌ گروه هدف مشخص نشده.\n"
+            "مثال:\n"
+            "!حافظه 8000 group_target=-10024473944"
+        )
+        return
 
     if not value:
         limit = await self.memory.settings.get_token_limit(
-            event.chat_id
+            target_group
         )
 
         await event.reply(
-            f"🧠 سقف حافظه این گروه: {limit:,} توکن"
+            f"🧠 سقف حافظه گروه `{target_group}`: "
+            f"{limit:,} توکن"
         )
         return
 
@@ -372,35 +456,47 @@ async def memory_limit(
         return
 
     await self.memory.settings.set_token_limit(
-        event.chat_id,
+        target_group,
         limit,
     )
 
     await event.reply(
-        f"✅ سقف حافظه این گروه روی "
+        f"✅ سقف حافظه گروه `{target_group}` روی "
         f"{limit:,} توکن تنظیم شد."
     )
+
 
 
 @command(
     name="حافظه پیام",
     permission="owner",
-    chat_type="group",
+    chat_type="all",
     description="حداکثر تعداد پیام ذخیره‌شده حافظه این گروه را تنظیم می‌کند.",
 )
 async def memory_message_limit(
     self,
     event: events.NewMessage.Event,
 ) -> None:
-    value = (event.args_text or "").strip()
+    target_group, value, remote = (
+        _resolve_memory_target(event)
+    )
+
+    if target_group is None:
+        await event.reply(
+            "❌ گروه هدف مشخص نشده.\n"
+            "مثال:\n"
+            "!حافظه پیام 500 group_target=-10024473944"
+        )
+        return
 
     if not value:
         limit = await self.memory.settings.get_message_limit(
-            event.chat_id
+            target_group
         )
 
         await event.reply(
-            f"🗃️ سقف پیام‌های ذخیره‌شده این گروه: {limit:,} پیام"
+            f"🗃️ سقف پیام‌های حافظه گروه "
+            f"`{target_group}`: {limit:,} پیام"
         )
         return
 
@@ -420,19 +516,18 @@ async def memory_message_limit(
         return
 
     await self.memory.settings.set_message_limit(
-        event.chat_id,
+        target_group,
         limit,
     )
 
-    # اگر مقدار جدید کمتر از تعداد فعلی باشد،
-    # همین الان حافظه اضافی حذف شود.
+    # حافظه فعلی را هم مطابق سقف جدید کوتاه کن.
     await self.memory.trim(
-        event.chat_id
+        target_group
     )
 
     await event.reply(
-        f"✅ سقف پیام‌های حافظه روی "
-        f"{limit:,} پیام تنظیم شد."
+        f"✅ سقف پیام‌های حافظه گروه "
+        f"`{target_group}` روی {limit:,} پیام تنظیم شد."
     )
 
 
