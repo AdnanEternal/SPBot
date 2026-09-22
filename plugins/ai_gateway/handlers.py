@@ -1,74 +1,150 @@
 from splusthon import events
+
 from core.decorators import command, on_bus_event, on_event
+
 from .gateway import AIGatewayError
 from .trigger import extract_trigger_text
 
 import traceback
 
 
+def _is_remote_group_id(
+    value: str,
+) -> bool:
+    """
+    شناسه گروه ریموت را تشخیص می‌دهد.
+
+    شناسه گروه‌های سروش‌پلاس معمولاً منفی هستند،
+    بنابراین فقط tokenهای منفی را به‌عنوان مقصد ریموت
+    در نظر می‌گیریم تا با آرگومان‌های عددی عادی
+    مثل تعداد توکن یا تعداد پیام تداخل نداشته باشند.
+    """
+
+    if not value:
+        return False
+
+    try:
+        return int(value) < 0
+    except ValueError:
+        return False
+
+
+def _extract_optional_group_target(
+    raw: str,
+) -> tuple[int | None, str]:
+    """
+    اگر آخرین آرگومان یک شناسه گروه منفی باشد،
+    آن را به‌عنوان مقصد ریموت جدا می‌کند.
+
+    مثال:
+
+        "8000 -100123"
+            -> (-100123, "8000")
+
+        "-100123"
+            -> (-100123, "")
+
+        "8000"
+            -> (None, "8000")
+    """
+
+    parts = raw.strip().split()
+
+    if not parts:
+        return None, ""
+
+    candidate = parts[-1]
+
+    if not _is_remote_group_id(candidate):
+        return None, raw.strip()
+
+    try:
+        target_group = int(candidate)
+    except ValueError:
+        return None, raw.strip()
+
+    return (
+        target_group,
+        " ".join(parts[:-1]).strip(),
+    )
 
 
 def _resolve_memory_target(
     event,
 ) -> tuple[int | None, str, bool]:
+    """
+    مقصد گروه را برای کامندهای حافظه مشخص می‌کند.
+
+    داخل گروه:
+
+        !حافظه 8000
+            -> گروه فعلی
+
+        !حافظه 8000 -100123
+            -> گروه ریموت
+
+    داخل PV:
+
+        !حافظه 8000 -100123
+            -> گروه ریموت
+
+        !حافظه 8000
+            -> خطا، چون مقصد مشخص نشده
+
+    مقدار bool مشخص می‌کند که مقصد ریموت بوده یا نه.
+    """
+
     raw = (
         event.args_text or ""
     ).strip()
 
-    parts = raw.split()
+    target_group, clean_args = (
+        _extract_optional_group_target(
+            raw
+        )
+    )
 
-    target_group = None
-    clean_args = []
-
-    for part in parts:
-        if part.lower().startswith(
-            "group_target="
-        ):
-            value = part.split(
-                "=",
-                1,
-            )[1].strip()
-
-            try:
-                target_group = int(value)
-            except ValueError:
-                return None, "", True
-
-            continue
-
-        clean_args.append(part)
-
-    # Remote
+    # مقصد ریموت مشخص شده.
     if target_group is not None:
         return (
             target_group,
-            " ".join(clean_args),
+            clean_args,
             True,
         )
 
-    # حالت عادی
+    # داخل گروه و بدون مقصد ریموت:
+    # مقصد = گروه فعلی
     if event.is_group:
         return (
             event.chat_id,
-            raw,
+            clean_args,
             False,
         )
 
-    # PV بدون group_target
+    # داخل PV بدون مقصد ریموت:
+    # مقصد نامشخص است.
     return (
         None,
-        raw,
+        clean_args,
         False,
     )
 
 
-
-
 def mask_secret(secret):
-    if not secret: return 'تنظیم نشده'
-    if len(secret) <= 8: return '••••••••'
-    return f'{secret[:4]}••••{secret[-4:]}'
+    if not secret:
+        return "تنظیم نشده"
 
+    if len(secret) <= 8:
+        return "••••••••"
+
+    return (
+        f"{secret[:4]}••••{secret[-4:]}"
+    )
+
+
+# =========================================================
+# API KEY MANAGEMENT
+# =========================================================
 
 
 @command(
@@ -81,7 +157,9 @@ async def add_api_key(
     self,
     event,
 ):
-    args = (event.args_text or "").strip().split()
+    args = (
+        event.args_text or ""
+    ).strip().split()
 
     if len(args) < 3:
         await event.reply(
@@ -173,7 +251,9 @@ async def delete_api_key(
     self,
     event,
 ):
-    name = (event.args_text or "").strip()
+    name = (
+        event.args_text or ""
+    ).strip()
 
     if not name:
         await event.reply(
@@ -202,7 +282,9 @@ async def api_key_models(
     self,
     event,
 ):
-    name = (event.args_text or "").strip()
+    name = (
+        event.args_text or ""
+    ).strip()
 
     if not name:
         await event.reply(
@@ -210,7 +292,9 @@ async def api_key_models(
         )
         return
 
-    api_key = await self.api_keys.get(name)
+    api_key = await self.api_keys.get(
+        name
+    )
 
     if api_key is None:
         await event.reply(
@@ -219,8 +303,10 @@ async def api_key_models(
         return
 
     try:
-        models = await self.gateway.list_remote_models(
-            api_key
+        models = (
+            await self.gateway.list_remote_models(
+                api_key
+            )
         )
 
     except AIGatewayError as exc:
@@ -247,8 +333,6 @@ async def api_key_models(
     )
 
 
-
-
 @command(
     name="کلید مدل ها پینگ",
     permission="owner",
@@ -259,7 +343,9 @@ async def api_key_models_ping(
     self,
     event,
 ):
-    name = (event.args_text or "").strip()
+    name = (
+        event.args_text or ""
+    ).strip()
 
     if not name:
         await event.reply(
@@ -267,7 +353,9 @@ async def api_key_models_ping(
         )
         return
 
-    api_key = await self.api_keys.get(name)
+    api_key = await self.api_keys.get(
+        name
+    )
 
     if api_key is None:
         await event.reply(
@@ -276,8 +364,10 @@ async def api_key_models_ping(
         return
 
     try:
-        models = await self.gateway.list_remote_models(
-            api_key
+        models = (
+            await self.gateway.list_remote_models(
+                api_key
+            )
         )
 
     except AIGatewayError as exc:
@@ -297,9 +387,11 @@ async def api_key_models_ping(
     )
 
     try:
-        results = await self.gateway.ping_remote_models(
-            api_key,
-            models,
+        results = (
+            await self.gateway.ping_remote_models(
+                api_key,
+                models,
+            )
         )
 
     except Exception as exc:
@@ -313,16 +405,25 @@ async def api_key_models_ping(
         "",
     ]
 
-    for model_id, ok, latency, error in results:
+    for (
+        model_id,
+        ok,
+        latency,
+        error,
+    ) in results:
+
         if ok:
             lines.append(
-                f"✅ `{model_id}` — {latency:.0f}ms"
+                f"✅ `{model_id}` — "
+                f"{latency:.0f}ms"
             )
+
         else:
-            error = str(error).replace(
-                "\n",
-                " ",
-            ).strip()
+            error = (
+                str(error)
+                .replace("\n", " ")
+                .strip()
+            )
 
             if len(error) > 100:
                 error = error[:97] + "..."
@@ -332,18 +433,25 @@ async def api_key_models_ping(
                 f"{latency:.0f}ms — {error}"
             )
 
-    # پیام‌ها را به چند قسمت تقسیم می‌کنیم
-    # تا از محدودیت طول پیام رد نشویم.
     chunk_size = 3000
+
     chunks = []
     current = ""
 
     for line in lines:
-        if len(current) + len(line) + 1 > chunk_size:
+        if (
+            len(current)
+            + len(line)
+            + 1
+            > chunk_size
+        ):
             if current:
-                chunks.append(current)
+                chunks.append(
+                    current
+                )
 
             current = line
+
         else:
             if current:
                 current += "\n"
@@ -356,12 +464,17 @@ async def api_key_models_ping(
     for chunk in chunks:
         try:
             await event.reply(chunk)
+
         except Exception as exc:
             print(
                 f"❌ خطا در ارسال نتیجه Ping: {exc}"
             )
             break
 
+
+# =========================================================
+# MEMORY MANAGEMENT
+# =========================================================
 
 
 @command(
@@ -374,15 +487,29 @@ async def clear_memory(
     self,
     event: events.NewMessage.Event,
 ) -> None:
-    target_group, value, remote = (
-        _resolve_memory_target(event)
+
+    (
+        target_group,
+        value,
+        remote,
+    ) = _resolve_memory_target(
+        event
     )
 
     if target_group is None:
         await event.reply(
             "❌ گروه هدف مشخص نشده.\n"
             "مثال:\n"
-            "!حافظه پاک group_target=-10024473944"
+            "!حافظه پاک -10024473944"
+        )
+        return
+
+    # برای این کامند نباید آرگومان دیگری وجود داشته باشد.
+    if value:
+        await event.reply(
+            "❌ استفاده نادرست.\n"
+            "مثال:\n"
+            "!حافظه پاک -10024473944"
         )
         return
 
@@ -407,6 +534,7 @@ async def clear_memory(
         f"`{target_group}` کامل پاک شد."
     )
 
+
 @command(
     name="حافظه",
     permission="owner",
@@ -417,25 +545,33 @@ async def memory_limit(
     self,
     event: events.NewMessage.Event,
 ) -> None:
-    target_group, value, remote = (
-        _resolve_memory_target(event)
+
+    (
+        target_group,
+        value,
+        remote,
+    ) = _resolve_memory_target(
+        event
     )
 
     if target_group is None:
         await event.reply(
             "❌ گروه هدف مشخص نشده.\n"
             "مثال:\n"
-            "!حافظه 8000 group_target=-10024473944"
+            "!حافظه 8000 -10024473944"
         )
         return
 
     if not value:
-        limit = await self.memory.settings.get_token_limit(
-            target_group
+        limit = (
+            await self.memory.settings.get_token_limit(
+                target_group
+            )
         )
 
         await event.reply(
-            f"🧠 سقف حافظه گروه `{target_group}`: "
+            f"🧠 سقف حافظه گروه "
+            f"`{target_group}`: "
             f"{limit:,} توکن"
         )
         return
@@ -443,7 +579,9 @@ async def memory_limit(
     if not value.isdigit():
         await event.reply(
             "مثال:\n"
-            "!حافظه 8000"
+            "!حافظه 8000\n"
+            "یا:\n"
+            "!حافظه 8000 -10024473944"
         )
         return
 
@@ -461,10 +599,10 @@ async def memory_limit(
     )
 
     await event.reply(
-        f"✅ سقف حافظه گروه `{target_group}` روی "
+        f"✅ سقف حافظه گروه "
+        f"`{target_group}` روی "
         f"{limit:,} توکن تنظیم شد."
     )
-
 
 
 @command(
@@ -477,33 +615,43 @@ async def memory_message_limit(
     self,
     event: events.NewMessage.Event,
 ) -> None:
-    target_group, value, remote = (
-        _resolve_memory_target(event)
+
+    (
+        target_group,
+        value,
+        remote,
+    ) = _resolve_memory_target(
+        event
     )
 
     if target_group is None:
         await event.reply(
             "❌ گروه هدف مشخص نشده.\n"
             "مثال:\n"
-            "!حافظه پیام 500 group_target=-10024473944"
+            "!حافظه پیام 500 -10024473944"
         )
         return
 
     if not value:
-        limit = await self.memory.settings.get_message_limit(
-            target_group
+        limit = (
+            await self.memory.settings.get_message_limit(
+                target_group
+            )
         )
 
         await event.reply(
             f"🗃️ سقف پیام‌های حافظه گروه "
-            f"`{target_group}`: {limit:,} پیام"
+            f"`{target_group}`: "
+            f"{limit:,} پیام"
         )
         return
 
     if not value.isdigit():
         await event.reply(
             "مثال:\n"
-            "!حافظه پیام 500"
+            "!حافظه پیام 500\n"
+            "یا:\n"
+            "!حافظه پیام 500 -10024473944"
         )
         return
 
@@ -520,17 +668,20 @@ async def memory_message_limit(
         limit,
     )
 
-    # حافظه فعلی را هم مطابق سقف جدید کوتاه کن.
     await self.memory.trim(
         target_group
     )
 
     await event.reply(
         f"✅ سقف پیام‌های حافظه گروه "
-        f"`{target_group}` روی {limit:,} پیام تنظیم شد."
+        f"`{target_group}` روی "
+        f"{limit:,} پیام تنظیم شد."
     )
 
 
+# =========================================================
+# MODEL MANAGEMENT
+# =========================================================
 
 
 @command(
@@ -555,32 +706,40 @@ async def add_model(
             "مثال:\n"
             "!مدل افزودن gpt5 zai glm-4.5\n\n"
             "🔹 وارد کردن اطلاعات کامل:\n"
-            "!مدل افزودن <نام_مدل> <provider> <model_id> <API_KEY> [BASE_URL]"
+            "!مدل افزودن <نام_مدل> <provider> "
+            "<model_id> <API_KEY> [BASE_URL]"
         )
         return
 
-    # -------------------------------------------------
-    # حالت جدید:
-    # !مدل افزودن gpt5 zai glm-4.5
-    # -------------------------------------------------
     if len(args) == 3:
         model_name = args[0]
         api_key_name = args[1]
         model_id = args[2]
 
-        api_key_data = await self.api_keys.get(
-            api_key_name
+        api_key_data = (
+            await self.api_keys.get(
+                api_key_name
+            )
         )
 
         if api_key_data is None:
             await event.reply(
-                f"❌ API Key «{api_key_name}» پیدا نشد."
+                f"❌ API Key "
+                f"«{api_key_name}» پیدا نشد."
             )
             return
 
-        provider = api_key_data["provider"]
-        api_key = api_key_data["api_key"]
-        base_url = api_key_data["base_url"]
+        provider = api_key_data[
+            "provider"
+        ]
+
+        api_key = api_key_data[
+            "api_key"
+        ]
+
+        base_url = api_key_data[
+            "base_url"
+        ]
 
         try:
             await self.models.add(
@@ -599,6 +758,7 @@ async def add_model(
 
         try:
             await event.delete()
+
         except Exception:
             pass
 
@@ -610,17 +770,16 @@ async def add_model(
 
         return
 
-    # -------------------------------------------------
-    # حالت قدیمی:
-    # !مدل افزودن gpt openai gpt-4o-mini API_KEY BASE_URL
-    # -------------------------------------------------
     if len(args) < 4:
         await event.reply(
             "❌ پارامترهای کافی وارد نشده.\n\n"
             "استفاده از API Key ذخیره‌شده:\n"
-            "!مدل افزودن <نام_مدل> <نام_API_Key> <model_id>\n\n"
+            "!مدل افزودن <نام_مدل> "
+            "<نام_API_Key> <model_id>\n\n"
             "یا اطلاعات کامل:\n"
-            "!مدل افزودن <نام_مدل> <provider> <model_id> <API_KEY> [BASE_URL]"
+            "!مدل افزودن <نام_مدل> "
+            "<provider> <model_id> "
+            "<API_KEY> [BASE_URL]"
         )
         return
 
@@ -656,6 +815,7 @@ async def add_model(
 
     try:
         await event.delete()
+
     except Exception:
         pass
 
@@ -663,136 +823,374 @@ async def add_model(
         f"✅ مدل «{model_name}» اضافه شد."
     )
 
-@command(name='مدل ها', permission='owner', chat_type='all', description='لیست مدل ها')
-async def list_models(self, event):
-    models = await self.models.get_all()
-    if not models:
-        await event.reply('📦 هیچ مدلی ثبت نشده.')
-        return
-    await event.reply('🤖 مدل ها:\n\n' + '\n'.join(f"{'🟢' if m['is_active'] else '⚪'} {m['name']} — {m['provider']}/{m['model_id']}" for m in models))
-
-
-@command(name='مدل فعال', permission='owner', chat_type='all', description='فعال کردن یا دیدن مدل فعال')
-async def activate_model(self, event):
-    name = (event.args_text or '').strip()
-    if not name:
-        m = await self.models.get_active()
-        await event.reply('ℹ️ مدل فعالی وجود ندارد.' if not m else f"🟢 {m['name']} — {m['provider']}/{m['model_id']}")
-        return
-    if not await self.models.set_active(name):
-        await event.reply(f'❌ مدل «{name}» پیدا نشد.')
-        return
-    await event.reply(f'✅ مدل «{name}» فعال شد.')
-
-
-@command(name='مدل حذف', permission='owner', chat_type='all', description='حذف مدل')
-async def delete_model(self, event):
-    name = (event.args_text or '').strip()
-    if not name:
-        await event.reply('مثال: !مدل حذف gpt')
-        return
-    if not await self.models.delete(name):
-        await event.reply(f'❌ مدل «{name}» پیدا نشد.')
-        return
-    await event.reply(f'✅ مدل «{name}» حذف شد.')
-
-
-@command(name='مدل اطلاعات', permission='owner', chat_type='all', description='جزئیات مدل')
-async def model_info(self, event):
-    name = (event.args_text or '').strip()
-    m = await self.models.get(name)
-    if not m:
-        await event.reply('❌ مدل پیدا نشد.')
-        return
-    await event.reply(f"🤖 {m['name']}\nProvider: {m['provider']}\nModel ID: {m['model_id']}\nBase URL: {m['base_url'] or 'پیش فرض'}\nAPI Key: {mask_secret(m['api_key'])}\nActive: {'بله' if m['is_active'] else 'خیر'}")
-
-
-@command(name='مدل کلید', permission='owner', chat_type='all', description='تغییر API Key')
-async def update_model_key(self, event):
-    args = (event.args_text or '').split()
-    if len(args) != 2:
-        await event.reply('مثال: !مدل کلید gpt NEW_API_KEY')
-        return
-    if not await self.models.update_api_key(args[0], None if args[1] == '-' else args[1]):
-        await event.reply('❌ مدل پیدا نشد.')
-        return
-    try: await event.delete()
-    except Exception: pass
-    await event.reply('✅ API Key بروزرسانی شد.')
-
 
 @command(
-        name='مدل پینگ', 
-        permission='owner', 
-        chat_type='all', 
-        description='تست مدل ها')
-async def ping_models(self, event):
-    target = (event.args_text or '').strip()
-    models = [await self.models.get(target)] if target else await self.models.get_all()
-    models = [m for m in models if m]
-    if not models:
-        await event.reply('📡 مدلی برای Ping وجود ندارد.')
-        return
-    lines = ['📡 نتیجه Ping:']
-    for m in models:
-        ok, latency, error = await self.gateway.ping(m)
-        line = f"{'✅' if ok else '❌'} {m['name']} — {latency:.0f}ms"
-        if not ok: line += ' — ' + error[:120].replace('\n', ' ')
-        lines.append(line)
-    await event.reply('\n'.join(lines))
-
-
-@command(
-        name='پرامپت', 
-        permission='owner', 
-        chat_type='all', 
-        description='دیدن System Prompt'
-        )
-async def show_prompt(self, event):
-    await event.reply('🧠 System Prompt:\n\n' + await self.groups.get_system_prompt(event.chat_id))
-
-
-@command(
-        name='پرامپت تنظیم', 
-        permission='owner', 
-        chat_type='all', 
-        description='تغییر System Prompt'
-        )
-async def set_prompt(self, event):
-    prompt = (event.args_text or '').strip()
-    if not prompt:
-        await event.reply('مثال: !پرامپت تنظیم تو بوبی هستی')
-        return
-    await self.groups.set_system_prompt(event.chat_id, prompt)
-    await event.reply('✅ System Prompt تغییر کرد.')
-
-
-@command(
-        name='پرامپت ریست', 
-        permission='owner', 
-        chat_type='all', 
-        description='بازگردانی System Prompt'
+    name="مدل ها",
+    permission="owner",
+    chat_type="all",
+    description="لیست مدل ها",
 )
-async def reset_prompt(self, event):
-    await self.groups.reset_system_prompt(event.chat_id)
-    await event.reply('✅ System Prompt ریست شد.')
+async def list_models(
+    self,
+    event,
+):
+    models = await self.models.get_all()
+
+    if not models:
+        await event.reply(
+            "📦 هیچ مدلی ثبت نشده."
+        )
+        return
+
+    await event.reply(
+        "🤖 مدل ها:\n\n"
+        + "\n".join(
+            (
+                f"{'🟢' if m['is_active'] else '⚪'} "
+                f"{m['name']} — "
+                f"{m['provider']}/{m['model_id']}"
+            )
+            for m in models
+        )
+    )
 
 
 @command(
-        name='نام ربات', 
-        permission='owner', 
-        chat_type='all', 
-        description='دیدن یا تغییر Trigger'
+    name="مدل فعال",
+    permission="owner",
+    chat_type="all",
+    description="فعال کردن یا دیدن مدل فعال",
+)
+async def activate_model(
+    self,
+    event,
+):
+    name = (
+        event.args_text or ""
+    ).strip()
+
+    if not name:
+        model = (
+            await self.models.get_active()
         )
-async def bot_name(self, event):
-    value = (event.args_text or '').strip()
-    if not value:
-        await event.reply(f"🏷️ Trigger: {await self.groups.get_trigger(event.chat_id, self.default_trigger)}")
+
+        await event.reply(
+            "ℹ️ مدل فعالی وجود ندارد."
+            if not model
+            else
+            f"🟢 {model['name']} — "
+            f"{model['provider']}/"
+            f"{model['model_id']}"
+        )
         return
-    await self.groups.set_trigger(event.chat_id, value)
-    await event.reply(f'✅ Trigger شد: {value}')
+
+    if not await self.models.set_active(
+        name
+    ):
+        await event.reply(
+            f"❌ مدل «{name}» پیدا نشد."
+        )
+        return
+
+    await event.reply(
+        f"✅ مدل «{name}» فعال شد."
+    )
 
 
+@command(
+    name="مدل حذف",
+    permission="owner",
+    chat_type="all",
+    description="حذف مدل",
+)
+async def delete_model(
+    self,
+    event,
+):
+    name = (
+        event.args_text or ""
+    ).strip()
+
+    if not name:
+        await event.reply(
+            "مثال: !مدل حذف gpt"
+        )
+        return
+
+    if not await self.models.delete(
+        name
+    ):
+        await event.reply(
+            f"❌ مدل «{name}» پیدا نشد."
+        )
+        return
+
+    await event.reply(
+        f"✅ مدل «{name}» حذف شد."
+    )
+
+
+@command(
+    name="مدل اطلاعات",
+    permission="owner",
+    chat_type="all",
+    description="جزئیات مدل",
+)
+async def model_info(
+    self,
+    event,
+):
+    name = (
+        event.args_text or ""
+    ).strip()
+
+    model = await self.models.get(
+        name
+    )
+
+    if not model:
+        await event.reply(
+            "❌ مدل پیدا نشد."
+        )
+        return
+
+    await event.reply(
+        f"🤖 {model['name']}\n"
+        f"Provider: {model['provider']}\n"
+        f"Model ID: {model['model_id']}\n"
+        f"Base URL: "
+        f"{model['base_url'] or 'پیش فرض'}\n"
+        f"API Key: "
+        f"{mask_secret(model['api_key'])}\n"
+        f"Active: "
+        f"{'بله' if model['is_active'] else 'خیر'}"
+    )
+
+
+@command(
+    name="مدل کلید",
+    permission="owner",
+    chat_type="all",
+    description="تغییر API Key",
+)
+async def update_model_key(
+    self,
+    event,
+):
+    args = (
+        event.args_text or ""
+    ).split()
+
+    if len(args) != 2:
+        await event.reply(
+            "مثال: !مدل کلید gpt NEW_API_KEY"
+        )
+        return
+
+    success = await self.models.update_api_key(
+        args[0],
+        None
+        if args[1] == "-"
+        else args[1],
+    )
+
+    if not success:
+        await event.reply(
+            "❌ مدل پیدا نشد."
+        )
+        return
+
+    try:
+        await event.delete()
+
+    except Exception:
+        pass
+
+    await event.reply(
+        "✅ API Key بروزرسانی شد."
+    )
+
+
+@command(
+    name="مدل پینگ",
+    permission="owner",
+    chat_type="all",
+    description="تست مدل ها",
+)
+async def ping_models(
+    self,
+    event,
+):
+    target = (
+        event.args_text or ""
+    ).strip()
+
+    if target:
+        models = [
+            await self.models.get(target)
+        ]
+
+    else:
+        models = (
+            await self.models.get_all()
+        )
+
+    models = [
+        model
+        for model in models
+        if model
+    ]
+
+    if not models:
+        await event.reply(
+            "📡 مدلی برای Ping وجود ندارد."
+        )
+        return
+
+    lines = [
+        "📡 نتیجه Ping:"
+    ]
+
+    for model in models:
+        (
+            ok,
+            latency,
+            error,
+        ) = await self.gateway.ping(
+            model
+        )
+
+        line = (
+            f"{'✅' if ok else '❌'} "
+            f"{model['name']} — "
+            f"{latency:.0f}ms"
+        )
+
+        if not ok:
+            line += (
+                " — "
+                + error[:120].replace(
+                    "\n",
+                    " ",
+                )
+            )
+
+        lines.append(line)
+
+    await event.reply(
+        "\n".join(lines)
+    )
+
+
+# =========================================================
+# PROMPT / TRIGGER
+# =========================================================
+
+
+@command(
+    name="پرامپت",
+    permission="owner",
+    chat_type="all",
+    description="دیدن System Prompt",
+)
+async def show_prompt(
+    self,
+    event,
+):
+    await event.reply(
+        "🧠 System Prompt:\n\n"
+        + await self.groups.get_system_prompt(
+            event.chat_id
+        )
+    )
+
+
+@command(
+    name="پرامپت تنظیم",
+    permission="owner",
+    chat_type="all",
+    description="تغییر System Prompt",
+)
+async def set_prompt(
+    self,
+    event,
+):
+    prompt = (
+        event.args_text or ""
+    ).strip()
+
+    if not prompt:
+        await event.reply(
+            "مثال: !پرامپت تنظیم تو بوبی هستی"
+        )
+        return
+
+    await self.groups.set_system_prompt(
+        event.chat_id,
+        prompt,
+    )
+
+    await event.reply(
+        "✅ System Prompt تغییر کرد."
+    )
+
+
+@command(
+    name="پرامپت ریست",
+    permission="owner",
+    chat_type="all",
+    description="بازگردانی System Prompt",
+)
+async def reset_prompt(
+    self,
+    event,
+):
+    await self.groups.reset_system_prompt(
+        event.chat_id
+    )
+
+    await event.reply(
+        "✅ System Prompt ریست شد."
+    )
+
+
+@command(
+    name="نام ربات",
+    permission="owner",
+    chat_type="all",
+    description="دیدن یا تغییر Trigger",
+)
+async def bot_name(
+    self,
+    event,
+):
+    value = (
+        event.args_text or ""
+    ).strip()
+
+    if not value:
+        await event.reply(
+            "🏷️ Trigger: "
+            + await self.groups.get_trigger(
+                event.chat_id,
+                self.default_trigger,
+            )
+        )
+        return
+
+    await self.groups.set_trigger(
+        event.chat_id,
+        value,
+    )
+
+    await event.reply(
+        f"✅ Trigger شد: {value}"
+    )
+
+
+# =========================================================
+# TIMELINE SETTINGS
+# =========================================================
 
 
 @command(
@@ -818,7 +1216,8 @@ async def timeline_toggle(
 
         await event.reply(
             f"🧭 وضعیت Timeline سراسری: {status}\n"
-            f"📦 سقف هر گروه: {self.timeline_limit} پیام\n\n"
+            f"📦 سقف هر گروه: "
+            f"{self.timeline_limit} پیام\n\n"
             "روشن کردن:\n"
             "!تایم لاین روشن 200\n\n"
             "خاموش کردن:\n"
@@ -836,7 +1235,9 @@ async def timeline_toggle(
         "1",
         "فعال",
     }:
-        limit = self.timeline_limit
+        limit = (
+            self.timeline_limit
+        )
 
         if len(parts) >= 2:
             if not parts[1].isdigit():
@@ -855,7 +1256,10 @@ async def timeline_toggle(
             )
             return
 
-        if limit > self.memory.MAX_TIMELINE_MESSAGES:
+        if (
+            limit
+            > self.memory.MAX_TIMELINE_MESSAGES
+        ):
             await event.reply(
                 f"❌ حداکثر تعداد پیام "
                 f"{self.memory.MAX_TIMELINE_MESSAGES} است."
@@ -908,7 +1312,9 @@ async def timeline_toggle(
     )
 
 
-
+# =========================================================
+# TIMELINE DISPLAY
+# =========================================================
 
 
 @command(
@@ -925,34 +1331,29 @@ async def show_timeline(
         event.args_text or ""
     ).strip()
 
-    parts = raw.split()
+    (
+        target_group,
+        remaining,
+    ) = _extract_optional_group_target(
+        raw
+    )
 
-    target_group = None
-    clean_args = []
-
-    for part in parts:
-        if part.lower().startswith("group_target="):
-            value = part.split(
-                "=",
-                1,
-            )[1].strip()
-
-            try:
-                target_group = int(value)
-            except ValueError:
-                await event.reply(
-                    "❌ شناسه گروه نامعتبر است."
-                )
-                return
-
-            continue
-
-        clean_args.append(part)
+    # اگر آرگومان دیگری باقی مانده،
+    # syntax نامعتبر است.
+    if remaining:
+        await event.reply(
+            "❌ استفاده نادرست.\n"
+            "داخل گروه:\n"
+            "!نمایش تایم لاین\n\n"
+            "برای گروه دیگر:\n"
+            "!نمایش تایم لاین -10024473944"
+        )
+        return
 
     # -------------------------------------------------
-    # حالت Remote
-    # group_target داده شده => فقط RAM
+    # Remote
     # -------------------------------------------------
+
     if target_group is not None:
         if not self.timeline_enabled:
             await event.reply(
@@ -960,8 +1361,10 @@ async def show_timeline(
             )
             return
 
-        context = self.memory.get_timeline_context(
-            target_group
+        context = (
+            self.memory.get_timeline_context(
+                target_group
+            )
         )
 
         if not context:
@@ -971,11 +1374,16 @@ async def show_timeline(
             return
 
     # -------------------------------------------------
-    # حالت عادی
-    # فقط وقتی داخل گروه هستیم
+    # Local
     # -------------------------------------------------
+
     else:
         if not event.is_group:
+            await event.reply(
+                "❌ در PV باید شناسه گروه را وارد کنید.\n"
+                "مثال:\n"
+                "!نمایش تایم لاین -10024473944"
+            )
             return
 
         if not self.timeline_enabled:
@@ -990,22 +1398,27 @@ async def show_timeline(
             self.timeline_limit,
         )
 
-        context = self.memory.get_timeline_context(
-            event.chat_id
+        context = (
+            self.memory.get_timeline_context(
+                event.chat_id
+            )
         )
 
         if not context:
             await event.reply(
-                "🧭 هنوز پیام قابل‌نمایشی در Timeline این گروه وجود ندارد."
+                "🧭 هنوز پیام قابل‌نمایشی "
+                "در Timeline این گروه وجود ندارد."
             )
             return
 
     # -------------------------------------------------
     # ارسال Timeline
     # -------------------------------------------------
+
     lines = context.split("\n")
 
     chunk_size = 3000
+
     chunks = []
     current = ""
 
@@ -1017,9 +1430,12 @@ async def show_timeline(
             > chunk_size
         ):
             if current:
-                chunks.append(current)
+                chunks.append(
+                    current
+                )
 
             current = line
+
         else:
             if current:
                 current += "\n"
@@ -1032,11 +1448,13 @@ async def show_timeline(
     for chunk in chunks:
         try:
             await event.reply(chunk)
+
         except Exception as exc:
             print(
                 f"❌ خطا در ارسال Timeline: {exc}"
             )
             break
+
 
 @command(
     name="پاک تایم لاین",
@@ -1052,32 +1470,27 @@ async def clear_timeline_command(
         event.args_text or ""
     ).strip()
 
-    parts = raw.split()
+    (
+        target_group,
+        remaining,
+    ) = _extract_optional_group_target(
+        raw
+    )
 
-    target_group = None
-
-    for part in parts:
-        if part.lower().startswith(
-            "group_target="
-        ):
-            value = part.split(
-                "=",
-                1,
-            )[1].strip()
-
-            try:
-                target_group = int(value)
-            except ValueError:
-                await event.reply(
-                    "❌ شناسه گروه نامعتبر است."
-                )
-                return
-
-            break
+    if remaining:
+        await event.reply(
+            "❌ استفاده نادرست.\n"
+            "داخل گروه:\n"
+            "!پاک تایم لاین\n\n"
+            "برای گروه دیگر:\n"
+            "!پاک تایم لاین -10024473944"
+        )
+        return
 
     # -------------------------------------------------
-    # حالت Remote
+    # Remote
     # -------------------------------------------------
+
     if target_group is not None:
         if not self.memory.has_timeline(
             target_group
@@ -1092,14 +1505,21 @@ async def clear_timeline_command(
         )
 
         await event.reply(
-            "🧹 Timeline گروه مورد نظر از RAM پاک شد."
+            "🧹 Timeline گروه مورد نظر "
+            "از RAM پاک شد."
         )
         return
 
     # -------------------------------------------------
-    # حالت عادی
+    # Local
     # -------------------------------------------------
+
     if not event.is_group:
+        await event.reply(
+            "❌ در PV باید شناسه گروه را وارد کنید.\n"
+            "مثال:\n"
+            "!پاک تایم لاین -10024473944"
+        )
         return
 
     if not self.memory.has_timeline(
@@ -1119,8 +1539,6 @@ async def clear_timeline_command(
     )
 
 
-
-
 @command(
     name="تایم لاین های RAM",
     permission="owner",
@@ -1131,11 +1549,14 @@ async def show_cached_timelines(
     self,
     event,
 ):
-    timelines = self.memory.get_cached_timeline_stats()
+    timelines = (
+        self.memory.get_cached_timeline_stats()
+    )
 
     if not timelines:
         await event.reply(
-            "🧭 هیچ Timelineای در RAM کش نشده است."
+            "🧭 هیچ Timelineای در RAM "
+            "کش نشده است."
         )
         return
 
@@ -1146,9 +1567,12 @@ async def show_cached_timelines(
 
     total_messages = 0
 
-    for index, (
-        group_id,
-        message_count,
+    for (
+        index,
+        (
+            group_id,
+            message_count,
+        ),
     ) in enumerate(
         timelines,
         start=1,
@@ -1163,8 +1587,10 @@ async def show_cached_timelines(
     lines.extend(
         [
             "",
-            f"📦 تعداد Timelineها: {len(timelines)}",
-            f"💾 مجموع پیام‌های کش‌شده: {total_messages}",
+            f"📦 تعداد Timelineها: "
+            f"{len(timelines)}",
+            f"💾 مجموع پیام‌های کش‌شده: "
+            f"{total_messages}",
         ]
     )
 
@@ -1173,10 +1599,9 @@ async def show_cached_timelines(
     )
 
 
-
-
-
-
+# =========================================================
+# TIMELINE LOADER
+# =========================================================
 
 
 @command(
@@ -1189,47 +1614,38 @@ async def load_timeline(
     self,
     event,
 ):
-    args_text = (event.args_text or "").strip()
+    args_text = (
+        event.args_text or ""
+    ).strip()
 
-    target_group = None
+    (
+        target_group,
+        args_text,
+    ) = _extract_optional_group_target(
+        args_text
+    )
 
-    if event.is_private:
-        parts = args_text.split()
+    # -------------------------------------------------
+    # اگر مقصد مشخص نشده:
+    # داخل گروه = گروه فعلی
+    # PV = خطا
+    # -------------------------------------------------
 
-        if not parts:
+    if target_group is None:
+        if event.is_group:
+            target_group = event.chat_id
+
+        else:
             await event.reply(
+                "❌ در PV باید شناسه گروه را وارد کنید.\n"
                 "مثال:\n"
-                "!تاریخچه 200 group_target=-10024473944"
+                "!تاریخچه 200 -10024473944"
             )
             return
 
-        target = parts[-1]
-
-        if not target.startswith("group_target="):
-            await event.reply(
-                "❌ در PV باید گروه هدف مشخص شود.\n"
-                "مثال:\n"
-                "!تاریخچه 200 group_target=-10024473944"
-            )
-            return
-
-        try:
-            target_group = int(
-                target.split("=", 1)[1]
-            )
-        except ValueError:
-            await event.reply(
-                "❌ شناسه گروه نامعتبر است."
-            )
-            return
-
-        args_text = " ".join(parts[:-1])
-
-    elif event.is_group:
-        target_group = event.chat_id
-
-    else:
-        return
+    # -------------------------------------------------
+    # فعال بودن Timeline
+    # -------------------------------------------------
 
     if not self.timeline_enabled:
         await event.reply(
@@ -1237,10 +1653,16 @@ async def load_timeline(
         )
         return
 
+    # -------------------------------------------------
+    # تعداد پیام
+    # -------------------------------------------------
+
     if not args_text.isdigit():
         await event.reply(
             "مثال:\n"
-            "!تاریخچه 200"
+            "!تاریخچه 200\n"
+            "یا:\n"
+            "!تاریخچه 200 -10024473944"
         )
         return
 
@@ -1252,18 +1674,27 @@ async def load_timeline(
         )
         return
 
-    if limit > self.memory.MAX_TIMELINE_MESSAGES:
+    if (
+        limit
+        > self.memory.MAX_TIMELINE_MESSAGES
+    ):
         await event.reply(
             f"❌ حداکثر تعداد پیام "
             f"{self.memory.MAX_TIMELINE_MESSAGES} است."
         )
         return
 
+    # -------------------------------------------------
+    # Load
+    # -------------------------------------------------
+
     try:
-        count = await self.memory.load_timeline(
-            self.client,
-            target_group,
-            limit,
+        count = (
+            await self.memory.load_timeline(
+                self.client,
+                target_group,
+                limit,
+            )
         )
 
     except Exception as exc:
@@ -1273,7 +1704,8 @@ async def load_timeline(
         )
 
         await event.reply(
-            "❌ نتونستم تاریخچه گروه را بارگذاری کنم."
+            "❌ نتونستم تاریخچه گروه "
+            "را بارگذاری کنم."
         )
         return
 
@@ -1282,7 +1714,18 @@ async def load_timeline(
         f"📦 {count} پیام در RAM نگه داشته می‌شود.\n\n"
         f"گروه هدف: {target_group}"
     )
-@on_event(events.NewMessage(incoming=True))
+
+
+# =========================================================
+# TIMELINE EVENTS
+# =========================================================
+
+
+@on_event(
+    events.NewMessage(
+        incoming=True
+    )
+)
 async def on_timeline_incoming(
     self,
     event,
@@ -1306,7 +1749,6 @@ async def on_timeline_incoming(
 
     except Exception:
         traceback.print_exc()
-
 
 
 @on_event(events.MessageDeleted)
@@ -1338,6 +1780,7 @@ async def on_timeline_message_deleted(
                 message_id = int(
                     raw_message_id
                 )
+
             except (
                 TypeError,
                 ValueError,
@@ -1353,8 +1796,21 @@ async def on_timeline_message_deleted(
     except Exception:
         traceback.print_exc()
 
-@on_event(events.NewMessage(incoming=True))
-async def on_message(self, event):
+
+# =========================================================
+# AI MESSAGE HANDLER
+# =========================================================
+
+
+@on_event(
+    events.NewMessage(
+        incoming=True
+    )
+)
+async def on_message(
+    self,
+    event,
+):
     try:
         if not event.is_group:
             return
@@ -1363,20 +1819,27 @@ async def on_message(self, event):
             event.raw_text or ""
         ).strip()
 
-        if not text or text.startswith("!"):
+        if (
+            not text
+            or text.startswith("!")
+        ):
             return
 
         if event.sender_id is None:
             return
 
-        trigger = await self.groups.get_trigger(
-            event.chat_id,
-            self.default_trigger,
+        trigger = (
+            await self.groups.get_trigger(
+                event.chat_id,
+                self.default_trigger,
+            )
         )
 
-        prompt_text = extract_trigger_text(
-            text,
-            trigger,
+        prompt_text = (
+            extract_trigger_text(
+                text,
+                trigger,
+            )
         )
 
         current_reply_context = (
@@ -1385,9 +1848,7 @@ async def on_message(self, event):
             )
         )
 
-
         if event.is_reply:
-
             try:
                 replied = (
                     await event.get_reply_message()
@@ -1407,7 +1868,9 @@ async def on_message(self, event):
             return
 
         try:
-            sender = await event.get_sender()
+            sender = (
+                await event.get_sender()
+            )
 
             name = (
                 getattr(
@@ -1420,11 +1883,15 @@ async def on_message(self, event):
                     "first_name",
                     None,
                 )
-                or str(event.sender_id)
+                or str(
+                    event.sender_id
+                )
             )
 
         except Exception:
-            name = str(event.sender_id)
+            name = str(
+                event.sender_id
+            )
 
         user_content = (
             self.memory.format_user_message(
@@ -1448,18 +1915,21 @@ async def on_message(self, event):
             event.sender_id,
         )
 
-        # حافظه را حتی اگر AI بعداً Fail شد هم محدود نگه می‌داریم.
         await self.memory.maybe_trim(
             event.chat_id
         )
 
-        context = await self.memory.build_context(
-            event.chat_id,
-            await self.groups.get_system_prompt(
-                event.chat_id
-            ),
-            self.gateway,
-            current_reply_context=current_reply_context,
+        context = (
+            await self.memory.build_context(
+                event.chat_id,
+                await self.groups.get_system_prompt(
+                    event.chat_id
+                ),
+                self.gateway,
+                current_reply_context=(
+                    current_reply_context
+                ),
+            )
         )
 
         answer = await self.gateway.chat(
@@ -1503,6 +1973,7 @@ async def on_message(self, event):
                 "❌ بوبی فعلاً نتونست پاسخ بده. "
                 "لطفاً دوباره امتحان کن."
             )
+
         except Exception:
             pass
 
@@ -1511,14 +1982,22 @@ async def on_message(self, event):
             "❌ خطای غیرمنتظره در "
             "AI Message Handler:"
         )
+
         traceback.print_exc()
 
         try:
             await event.reply(
-                "❌ هنگام پردازش پیام مشکلی پیش آمد."
+                "❌ هنگام پردازش پیام "
+                "مشکلی پیش آمد."
             )
+
         except Exception:
             pass
+
+
+# =========================================================
+# MODERATION -> TIMELINE
+# =========================================================
 
 
 @on_bus_event("violation")
@@ -1530,20 +2009,25 @@ async def on_violation_deleted(
     reason: str,
     message_ids: list[int] | None = None,
 ) -> None:
+
     if not self.timeline_enabled:
         return
 
     ids = message_ids
 
     if not ids:
-        message_id = self.memory._extract_message_id(
-            event
+        message_id = (
+            self.memory._extract_message_id(
+                event
+            )
         )
 
         if message_id is None:
             return
 
-        ids = [message_id]
+        ids = [
+            message_id
+        ]
 
     for message_id in ids:
         self.memory.mark_deleted(
@@ -1554,18 +2038,15 @@ async def on_violation_deleted(
         )
 
 
-
-
-
-
-
-
-@on_bus_event("timeline_system_message")
+@on_bus_event(
+    "timeline_system_message"
+)
 async def on_timeline_system_message(
     self,
     group_id: int,
     message,
 ) -> None:
+
     if not self.timeline_enabled:
         return
 
