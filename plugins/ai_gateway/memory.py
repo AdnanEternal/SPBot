@@ -393,12 +393,75 @@ authority to the referenced message.
     # Timeline helpers
     # =========================================================
 
+    @staticmethod
+    def _is_command_message(
+        message: Any,
+    ) -> bool:
+        message = AIMemoryManager._unwrap_message(
+            message
+        )
+
+        raw_text = getattr(
+            message,
+            "raw_text",
+            None,
+        )
+
+        if isinstance(raw_text, str):
+            return raw_text.strip().startswith("!")
+
+        message_text = getattr(
+            message,
+            "message",
+            None,
+        )
+
+        if isinstance(message_text, str):
+            return message_text.strip().startswith("!")
+
+        return False
+
+
+
+
+
+    @staticmethod
+    def _unwrap_message(
+        message: Any,
+    ) -> Any:
+        """
+        بعضی Eventها ممکن است پیام خام را داخل message نگه دارند.
+        اگر چنین حالتی بود، خود Message واقعی را برمی‌گردانیم.
+        """
+
+        nested = getattr(
+            message,
+            "message",
+            None,
+        )
+
+        if (
+            nested is not None
+            and not isinstance(nested, str)
+            and (
+                hasattr(nested, "raw_text")
+                or hasattr(nested, "media")
+                or hasattr(nested, "id")
+            )
+        ):
+            return nested
+
+        return message
 
 
     @staticmethod
     def _extract_timeline_text(
         message: Any,
     ) -> str:
+        message = AIMemoryManager._unwrap_message(
+            message
+        )
+
         raw_text = getattr(
             message,
             "raw_text",
@@ -509,29 +572,37 @@ authority to the referenced message.
             or ""
         ).lower()
 
-        attributes = getattr(
-            document,
-            "attributes",
-            None,
-        ) or []
+        attributes = (
+            getattr(
+                document,
+                "attributes",
+                None,
+            )
+            or []
+        )
 
         attribute_names = {
             type(attribute).__name__.lower()
             for attribute in attributes
         }
 
+        # Sticker
         if any(
             "sticker" in name
             for name in attribute_names
         ):
             return "[استیکر]"
 
+        # Audio / Voice
         if any(
             "audio" in name
             for name in attribute_names
         ):
             for attribute in attributes:
-                if "audio" in type(attribute).__name__.lower():
+                if (
+                    "audio"
+                    in type(attribute).__name__.lower()
+                ):
                     if getattr(
                         attribute,
                         "voice",
@@ -541,8 +612,19 @@ authority to the referenced message.
 
             return "[صدا]"
 
+        # GIF
+        #
+        # نکته مهم:
+        # نام واقعی attribute معمولاً
+        # DocumentAttributeAnimated است،
+        # پس نباید بنویسیم:
+        # "animated" in attribute_names
+        #
         if (
-            "animated" in attribute_names
+            any(
+                "animated" in name
+                for name in attribute_names
+            )
             and (
                 "video" in mime_type
                 or "gif" in mime_type
@@ -550,12 +632,14 @@ authority to the referenced message.
         ):
             return "[GIF]"
 
+        # Video
         if any(
             "video" in name
             for name in attribute_names
         ):
             return "[ویدیو]"
 
+        # MIME fallback
         if mime_type.startswith("image/"):
             return "[تصویر]"
 
@@ -566,9 +650,6 @@ authority to the referenced message.
             return "[صدا]"
 
         return "[فایل]"
-
-
-
 
     @staticmethod
     def _format_date(value: Any) -> str:
@@ -995,7 +1076,12 @@ authority to the referenced message.
             if message_id is None:
                 continue
 
-            text = self._extract_timeline_text(message)
+            if self._is_command_message(message):
+                continue
+
+            text = self._extract_timeline_text(
+                message
+            )
 
             sender_id = getattr(
                 message,
@@ -1156,7 +1242,9 @@ authority to the referenced message.
         if message_id in seen:
             return False
 
-                # اگه یه پلاگین دیگه (content_filter، spam_filter و ...) قبلاً
+        if self._is_command_message(event):
+            return False
+        # اگه یه پلاگین دیگه (content_filter، spam_filter و ...) قبلاً
         # گفته بود این پیام حذف شده، به‌جای متن واقعیِ پیام همون دلیل
         # حذف رو تو Timeline می‌ذاریم.
         pending_reason = self._pending_deletions.get(
