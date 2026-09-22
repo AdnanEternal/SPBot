@@ -62,6 +62,7 @@ async def clear_messages(
         messages = await self.client.get_messages(
             chat,
             limit=count,
+            search=""
         )
 
         message_ids = [
