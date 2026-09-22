@@ -462,6 +462,7 @@ authority to the referenced message.
             message
         )
 
+        # متن واقعی / کپشن
         raw_text = getattr(
             message,
             "raw_text",
@@ -470,41 +471,10 @@ authority to the referenced message.
 
         if isinstance(raw_text, str):
             raw_text = raw_text.strip()
+        else:
+            raw_text = ""
 
-            if raw_text:
-                media = getattr(
-                    message,
-                    "media",
-                    None,
-                )
-
-                if media is not None:
-                    media_label = (
-                        AIMemoryManager._get_media_label(
-                            media
-                        )
-                    )
-
-                    if media_label:
-                        return (
-                            f"{media_label}\n"
-                            f"{raw_text}"
-                        )
-
-                return raw_text
-
-        message_text = getattr(
-            message,
-            "message",
-            None,
-        )
-
-        if isinstance(message_text, str):
-            message_text = message_text.strip()
-
-            if message_text:
-                return message_text
-
+        # رسانه را قبل از fallback به `.message` بررسی می‌کنیم.
         media = getattr(
             message,
             "media",
@@ -518,11 +488,40 @@ authority to the referenced message.
                 )
             )
 
+            # رسانه + کپشن
+            if raw_text:
+                if media_label:
+                    return (
+                        f"{media_label}\n"
+                        f"{raw_text}"
+                    )
+
+                return raw_text
+
+            # رسانه بدون کپشن
             if media_label:
                 return media_label
 
-        return "[پیام بدون متن یا رسانه]"
+            return "[رسانه]"
 
+        # پیام متنی معمولی
+        if raw_text:
+            return raw_text
+
+        # fallback برای objectهایی که raw_text ندارند
+        message_text = getattr(
+            message,
+            "message",
+            None,
+        )
+
+        if isinstance(message_text, str):
+            message_text = message_text.strip()
+
+            if message_text:
+                return message_text
+
+        return "[پیام بدون متن یا رسانه]"
 
     @staticmethod
     def _get_media_label(
@@ -612,22 +611,20 @@ authority to the referenced message.
 
             return "[صدا]"
 
-        # GIF
-        #
-        # نکته مهم:
-        # نام واقعی attribute معمولاً
-        # DocumentAttributeAnimated است،
-        # پس نباید بنویسیم:
-        # "animated" in attribute_names
-        #
+        # GIF واقعی یا GIFهای MP4
         if (
-            any(
-                "animated" in name
-                for name in attribute_names
-            )
-            and (
-                "video" in mime_type
-                or "gif" in mime_type
+            mime_type in {
+                "image/gif",
+                "video/gif",
+            }
+            or (
+                any(
+                    "animated" in name
+                    for name in attribute_names
+                )
+                and mime_type.startswith(
+                    "video/"
+                )
             )
         ):
             return "[GIF]"
@@ -650,7 +647,6 @@ authority to the referenced message.
             return "[صدا]"
 
         return "[فایل]"
-
     @staticmethod
     def _format_date(value: Any) -> str:
         if value is None:
