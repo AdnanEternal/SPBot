@@ -3,7 +3,7 @@ import random
 from typing import TYPE_CHECKING
 
 from splusthon import events
-from splusthon.tl import types, functions
+
 
 from core.decorators import command, on_event
 
@@ -55,54 +55,50 @@ async def clear_messages(
         )
         return
 
-    chat = await event.get_chat()
-
     # =========================================================
     # اجرای ریموت
     # =========================================================
     if event.id is None:
-        # آخرین پیام گروه را از Dialog می‌گیریم.
-        # این مسیر از GetHistory/Search استفاده نمی‌کند.
-        dialog_result = await self.client(
-            functions.messages.GetPeerDialogsRequest(
-                [
-                    types.InputDialogPeer(chat)
-                ]
-            )
+        dialogs = await self.client.get_dialogs()
+
+        target_dialog = next(
+            (
+                dialog
+                for dialog in dialogs
+                if dialog.id == event.chat_id
+                and dialog.is_group
+            ),
+            None,
         )
 
-        if not dialog_result.dialogs:
+        if target_dialog is None:
             await event.reply(
-                "❌ گروه هدف در لیست گفتگوهای ربات پیدا نشد."
+                "❌ گروه هدف در گفتگوهای ربات پیدا نشد."
             )
             return
 
-        top_message_id = dialog_result.dialogs[0].top_message
+        last_message = target_dialog.message
 
-        if not top_message_id:
+        if last_message is None:
             await event.reply(
-                "❌ این گروه هنوز پیامی ندارد."
+                "❌ این گروه پیامی برای پاکسازی ندارد."
             )
             return
 
-        # آخرین N شناسه پیام
-        first_message_id = max(
-            1,
-            top_message_id - count + 1,
-        )
+        last_message_id = last_message.id
 
         requested_ids = list(
             range(
-                first_message_id,
-                top_message_id + 1,
+                max(
+                    1,
+                    last_message_id - count + 1,
+                ),
+                last_message_id + 1,
             )
         )
 
-        # چون ids داده شده، SPlusthon از
-        # GetMessagesRequest استفاده می‌کند،
-        # نه GetHistoryRequest و نه SearchRequest.
         messages = await self.client.get_messages(
-            chat,
+            target_dialog.entity,
             ids=requested_ids,
         )
 
@@ -120,7 +116,7 @@ async def clear_messages(
             return
 
         await self.client.delete_messages(
-            chat,
+            target_dialog.entity,
             message_ids,
         )
 
@@ -129,6 +125,8 @@ async def clear_messages(
     # =========================================================
     # اجرای عادی داخل گروه
     # =========================================================
+    chat = await event.get_chat()
+
     messages = await self.client.get_messages(
         chat,
         limit=count + 1,
@@ -151,9 +149,7 @@ async def clear_messages(
         message_ids,
     )
 
-    await event.delete()
-    
-@on_event(events.NewMessage(incoming=True))
+    await event.delete()@on_event(events.NewMessage(incoming=True))
 async def meow_trigger(
     self: "MessageManagerPlugin",
     event: events.NewMessage.Event,
