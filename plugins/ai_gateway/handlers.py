@@ -946,13 +946,82 @@ async def show_timeline(
 @command(
     name="پاک تایم لاین",
     permission="owner",
-    chat_type="group",
-    description="Timeline این گروه رو کامل از RAM پاک می‌کنه - برای دیباگ.",
+    chat_type="all",
+    description="Timeline گروه را از RAM پاک می‌کند.",
 )
-async def clear_timeline_command(self, event) -> None:
-    self.memory.clear_timeline(event.chat_id)
-    await event.reply("🧹 Timeline این گروه پاک شد.")
+async def clear_timeline_command(
+    self,
+    event,
+) -> None:
+    raw = (
+        event.args_text or ""
+    ).strip()
 
+    parts = raw.split()
+
+    target_group = None
+
+    for part in parts:
+        if part.lower().startswith(
+            "group_target="
+        ):
+            value = part.split(
+                "=",
+                1,
+            )[1].strip()
+
+            try:
+                target_group = int(value)
+            except ValueError:
+                await event.reply(
+                    "❌ شناسه گروه نامعتبر است."
+                )
+                return
+
+            break
+
+    # -------------------------------------------------
+    # حالت Remote
+    # -------------------------------------------------
+    if target_group is not None:
+        if not self.memory.has_timeline(
+            target_group
+        ):
+            await event.reply(
+                "❌ Timeline مورد نظر لود نشده!"
+            )
+            return
+
+        self.memory.clear_timeline(
+            target_group
+        )
+
+        await event.reply(
+            "🧹 Timeline گروه مورد نظر از RAM پاک شد."
+        )
+        return
+
+    # -------------------------------------------------
+    # حالت عادی
+    # -------------------------------------------------
+    if not event.is_group:
+        return
+
+    if not self.memory.has_timeline(
+        event.chat_id
+    ):
+        await event.reply(
+            "❌ Timeline این گروه لود نشده!"
+        )
+        return
+
+    self.memory.clear_timeline(
+        event.chat_id
+    )
+
+    await event.reply(
+        "🧹 Timeline این گروه از RAM پاک شد."
+    )
 
 
 
