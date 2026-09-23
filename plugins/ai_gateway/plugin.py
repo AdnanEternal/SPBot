@@ -10,7 +10,7 @@ from .telemetry import AITelemetryManager
 
 class AIGatewayPlugin(BasePlugin):
     name = "AI Gateway"
-    version = "2.14.0"
+    version = "2.14.1"
 
     def __init__(self, client, command_manager, db, event_bus):
         super().__init__(
@@ -108,6 +108,7 @@ class AIGatewayPlugin(BasePlugin):
                     "target_group_id"
                 ]
             )
+        await self.telemetry.start()
 
     async def on_disable(self):
         await self.telemetry.shutdown()

@@ -18,59 +18,6 @@ class AIGatewayError(Exception):
 
 
 
-@staticmethod
-def _extract_usage(
-    response,
-) -> dict[str, Any]:
-
-    usage = getattr(
-        response,
-        "usage",
-        None,
-    )
-
-    if usage is None:
-        return {}
-
-    if isinstance(
-        usage,
-        dict,
-    ):
-        return {
-            "prompt_tokens": usage.get(
-                "prompt_tokens"
-            ),
-            "completion_tokens": usage.get(
-                "completion_tokens"
-            ),
-            "total_tokens": usage.get(
-                "total_tokens"
-            ),
-        }
-
-    return {
-        "prompt_tokens": getattr(
-            usage,
-            "prompt_tokens",
-            None,
-        ),
-        "completion_tokens": getattr(
-            usage,
-            "completion_tokens",
-            None,
-        ),
-        "total_tokens": getattr(
-            usage,
-            "total_tokens",
-            None,
-        ),
-    }
-
-
-
-
-
-
 class AIGateway:
     MAX_RETRIES = 3
     RETRY_DELAYS = (1, 2, 4)
@@ -88,6 +35,55 @@ class AIGateway:
             self.AI_CONCURRENCY
         )
 
+    @staticmethod
+    def _extract_usage(
+        response,
+    ) -> dict[str, Any]:
+
+        usage = getattr(
+            response,
+            "usage",
+            None,
+        )
+
+        if usage is None:
+            return {}
+
+        if isinstance(
+            usage,
+            dict,
+        ):
+            return {
+                "prompt_tokens": usage.get(
+                    "prompt_tokens"
+                ),
+                "completion_tokens": usage.get(
+                    "completion_tokens"
+                ),
+                "total_tokens": usage.get(
+                    "total_tokens"
+                ),
+            }
+
+        return {
+            "prompt_tokens": getattr(
+                usage,
+                "prompt_tokens",
+                None,
+            ),
+            "completion_tokens": getattr(
+                usage,
+                "completion_tokens",
+                None,
+            ),
+            "total_tokens": getattr(
+                usage,
+                "total_tokens",
+                None,
+            ),
+        }
+
+    
     @staticmethod
     def _normalize_provider(provider: str) -> str:
         provider = provider.strip().lower()
@@ -395,7 +391,10 @@ class AIGateway:
         return_metadata: bool = False,
     ) -> str | tuple[str, dict[str, Any]]:
 
-        model = model or await self.models.get_active()
+        model = (
+            model
+            or await self.models.get_active()
+        )
 
         if model is None:
             raise AIGatewayError(
@@ -404,8 +403,18 @@ class AIGateway:
 
         api_key = model.get("api_key")
 
+        # -------------------------------------------------
+        # LiteLLM model identifier
+        # -------------------------------------------------
+
+        litellm_model = (
+            self._litellm_model(
+                model
+            )
+        )
+
         kwargs: dict[str, Any] = {
-            "model": self._litellm_model(model),
+            "model": litellm_model,
             "messages": messages,
             "timeout": timeout,
         }
@@ -414,16 +423,30 @@ class AIGateway:
             kwargs["api_key"] = api_key
 
         if model.get("base_url"):
-            kwargs["api_base"] = model["base_url"]
+            kwargs["api_base"] = (
+                model["base_url"]
+            )
 
         if temperature is not None:
-            kwargs["temperature"] = temperature
+            kwargs["temperature"] = (
+                temperature
+            )
+
+        # -------------------------------------------------
+        # Request
+        # -------------------------------------------------
 
         async with self._ai_semaphore:
+
             response = await self._completion(
                 kwargs,
                 api_key,
             )
+
+        # -------------------------------------------------
+        # Extract content
+        # -------------------------------------------------
+
         try:
             content = (
                 response
@@ -446,8 +469,16 @@ class AIGateway:
             content
         ).strip()
 
+        # -------------------------------------------------
+        # Normal mode
+        # -------------------------------------------------
+
         if not return_metadata:
             return content
+
+        # -------------------------------------------------
+        # Telemetry metadata
+        # -------------------------------------------------
 
         return (
             content,
@@ -467,7 +498,6 @@ class AIGateway:
                 ),
             },
         )
-
     async def ping(
         self,
         model: dict[str, Any],

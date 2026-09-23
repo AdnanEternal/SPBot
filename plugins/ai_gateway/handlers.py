@@ -1977,48 +1977,7 @@ async def on_message(
         )
 
 
-        # -------------------------------------------------
-        # AI TELEMETRY
-        #
-        # این فقط یک put_nowait داخل Queue است.
-        # هیچ Network / DB / Tokenization ندارد.
-        # -------------------------------------------------
-
-        if telemetry_enabled:
-
-            request_latency_ms = (
-                (
-                    time.perf_counter()
-                    - telemetry_request_started
-                )
-                * 1000
-            )
-
-            total_duration_ms = (
-                (
-                    time.perf_counter()
-                    - telemetry_total_started
-                )
-                * 1000
-            )
-
-            self.telemetry.emit_success(
-                event=event,
-                sender=sender,
-                group_id=event.chat_id,
-                trigger=trigger,
-                context=context,
-                answer=answer,
-                latency_ms=request_latency_ms,
-                total_duration_ms=(
-                    total_duration_ms
-                ),
-                model_info=model_info,
-            )
-
-            telemetry_emitted = True
-
-
+        
 
         # -------------------------------------------------
         # Timeline
@@ -2138,9 +2097,70 @@ async def on_message(
         # درخواست به مدل
         # -------------------------------------------------
 
-        answer = await self.gateway.chat(
-            context
-        )
+        if telemetry_enabled:
+            telemetry_request_started = (
+                time.perf_counter()
+            )
+
+            answer, model_info = (
+                await self.gateway.chat(
+                    context,
+                    return_metadata=True,
+                )
+            )
+
+        else:
+            answer = await self.gateway.chat(
+                context
+            )
+
+            model_info = {}
+
+
+
+        # -------------------------------------------------
+        # AI TELEMETRY
+        #
+        # این فقط یک put_nowait داخل Queue است.
+        # هیچ Network / DB / Tokenization ندارد.
+        # -------------------------------------------------
+
+        if telemetry_enabled:
+
+            request_latency_ms = (
+                (
+                    time.perf_counter()
+                    - telemetry_request_started
+                )
+                * 1000
+            )
+
+            total_duration_ms = (
+                (
+                    time.perf_counter()
+                    - telemetry_total_started
+                )
+                * 1000
+            )
+
+            self.telemetry.emit_success(
+                event=event,
+                sender=sender,
+                group_id=event.chat_id,
+                trigger=trigger,
+                context=context,
+                answer=answer,
+                latency_ms=request_latency_ms,
+                total_duration_ms=(
+                    total_duration_ms
+                ),
+                model_info=model_info,
+            )
+
+            telemetry_emitted = True
+
+
+
 
         # -------------------------------------------------
         # DEBUG: پاسخ دریافت شد
