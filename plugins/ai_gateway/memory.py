@@ -1680,10 +1680,17 @@ Never invent missing facts.
             group_id
         )
 
-        rows = await self.store.get_recent(
-            group_id,
-            message_limit,
-        )
+        try:
+            rows = await self.store.get_recent(
+                group_id,
+                message_limit,
+            )
+        except Exception as exc:
+            print(
+                f"⚠️ خطا در خوندن تاریخچه‌ی حافظه؛ "
+                f"با تاریخچه‌ی خالی ادامه می‌دیم: {exc}"
+            )
+            rows = []
 
         model_name = None
 

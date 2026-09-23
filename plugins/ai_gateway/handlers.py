@@ -1929,13 +1929,19 @@ async def on_message(
         # -------------------------------------------------
         # Trigger detection
         # -------------------------------------------------
-
-        trigger = (
-            await self.groups.get_trigger(
-                event.chat_id,
-                self.default_trigger,
+        try:
+            trigger = (
+                await self.groups.get_trigger(
+                    event.chat_id,
+                    self.default_trigger,
+                )
             )
-        )
+        except Exception as exc:
+            print(
+                f"⚠️ خطا در خوندن Trigger؛ "
+                f"استفاده از پیش‌فرض: {exc}"
+            )
+            trigger = self.default_trigger
 
         trigger_text = None
         reply_to_booby = False
@@ -2115,13 +2121,17 @@ async def on_message(
                 prompt_text,
             )
         )
-
-        await self.memory.store.add_message(
-            event.chat_id,
-            "user",
-            user_content,
-            event.sender_id,
-        )
+        try:
+            await self.memory.store.add_message(
+                event.chat_id,
+                "user",
+                user_content,
+                event.sender_id,
+            )
+        except Exception as exc:
+            print(
+                f"⚠️ ذخیره‌ی پیام کاربر در حافظه ناموفق بود: {exc}"
+            )
 
         await self.memory.maybe_trim(
             event.chat_id
@@ -2131,12 +2141,25 @@ async def on_message(
         # Build Context
         # -------------------------------------------------
 
+        try:
+            system_prompt = (
+                await self.groups.get_system_prompt(
+                    event.chat_id
+                )
+            )
+        except Exception as exc:
+            print(
+                f"⚠️ خطا در خوندن System Prompt؛ "
+                f"استفاده از پیش‌فرض: {exc}"
+            )
+            system_prompt = (
+                self.groups.DEFAULT_SYSTEM_PROMPT
+            )
+
         context = (
             await self.memory.build_context(
                 event.chat_id,
-                await self.groups.get_system_prompt(
-                    event.chat_id
-                ),
+                system_prompt,
                 self.gateway,
             )
         )
@@ -2167,6 +2190,11 @@ async def on_message(
         # -------------------------------------------------
         # درخواست به مدل
         # -------------------------------------------------
+        request_timeout = min(
+            180.0,
+            max(60.0, context_chars / 150),
+        )
+
 
         if telemetry_enabled:
             telemetry_request_started = (
@@ -2177,12 +2205,14 @@ async def on_message(
                 await self.gateway.chat(
                     context,
                     return_metadata=True,
+                    timeout=request_timeout
                 )
             )
 
         else:
             answer = await self.gateway.chat(
-                context
+                context,
+                timeout=request_timeout
             )
 
             model_info = {}
@@ -2242,20 +2272,47 @@ async def on_message(
             f"group={event.chat_id} | "
             f"chars={len(answer)}"
         )
-
-        await self.memory.store.add_message(
-            event.chat_id,
-            "assistant",
-            answer,
-        )
+        try:
+            await self.memory.store.add_message(
+                event.chat_id,
+                "assistant",
+                answer,
+            )
+        except Exception as exc:
+            print(
+                f"⚠️ ذخیره‌ی پیام ربات در حافظه ناموفق بود: {exc}"
+            )
 
         # -------------------------------------------------
         # ارسال پاسخ
         # -------------------------------------------------
 
-        sent = await event.reply(
-            answer[:4000]
-        )
+        sent = None
+
+        try:
+            sent = await event.reply(
+                answer[:4000]
+            )
+        except Exception:
+            try:
+                sent = await event.respond(
+                    answer[:4000]
+                )
+            except Exception as exc:
+                print(
+                    f"⚠️ ارسال پاسخ بوبی ناموفق بود: {exc}"
+                )
+
+        try:
+            await self.memory.store.add_message(
+                event.chat_id,
+                "assistant",
+                answer,
+            )
+        except Exception as exc:
+            print(
+                f"⚠️ ذخیره‌ی پاسخ بوبی در حافظه ناموفق بود: {exc}"
+            )
 
         # -------------------------------------------------
         # Timeline: پاسخ بوبی

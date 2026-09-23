@@ -15,7 +15,13 @@ class AIGatewayError(Exception):
     pass
 
 
-
+class AIGatewayContextLengthError(AIGatewayError):
+    """
+    ورودی از سقف context مدل رد شده. برخلاف AIGatewayError عادی،
+    یه بار با context بسیار کوچیک‌شده دوباره تلاش می‌شه
+    قبل از اینکه واقعاً شکست بخوریم.
+    """
+    pass
 
 
 class AIGateway:
@@ -301,6 +307,29 @@ class AIGateway:
 
         return f"{provider}/{model_id}"
 
+
+    @staticmethod
+    def _is_context_length_error(exc: Exception) -> bool:
+        error_name = exc.__class__.__name__.lower()
+
+        if (
+            "contextwindow" in error_name
+            or "context_length" in error_name
+            or "contextlength" in error_name
+        ):
+            return True
+
+        message = str(exc).lower()
+
+        return (
+            "context length" in message
+            or "context_length_exceeded" in message
+            or "maximum context" in message
+            or "too many tokens" in message
+            or "reduce the length" in message
+        )
+
+
     @staticmethod
     def _is_retryable_error(exc: Exception) -> bool:
         """
@@ -353,6 +382,11 @@ class AIGateway:
 
             except Exception as exc:
                 last_error = exc
+
+                if self._is_context_length_error(exc):
+                    raise AIGatewayContextLengthError(
+                        self._safe_error(exc, api_key)
+                    ) from exc
 
                 if not self._is_retryable_error(exc):
                     raise AIGatewayError(
@@ -436,12 +470,42 @@ class AIGateway:
         # -------------------------------------------------
 
         async with self._ai_semaphore:
+            try:
+                response = await self._completion(
+                    kwargs,
+                    api_key,
+                )
+            except AIGatewayContextLengthError:
+                shrunk_message = []
 
-            response = await self._completion(
-                kwargs,
-                api_key,
-            )
+                if messages:
+                    shrunk_message.append(messages[0])
 
+                for message in reversed(messages):
+                    if message.get("role") == "user":
+                        shrunk_message.append(message)
+                        break
+
+                if (
+                    not shrunk_message
+                    or len(shrunk_message) >= len(message)
+                ):
+                    raise AIGatewayError(
+                        "پیام حتی بعد از کوچیک‌کردن context"
+                        "هم بیش از حد مجاز مدل بود."
+                    )
+
+                print(
+                    "⚠️ Context از سقف مدل رد شد؛ "
+                    "تلاش دوباره با context بسیار کوچیک‌شده..."
+                )
+
+                kwargs["messages"] = shrunk_message
+
+                response = await self._completion(
+                    kwargs,
+                    api_key
+                )
         # -------------------------------------------------
         # Extract content
         # -------------------------------------------------
