@@ -15,6 +15,62 @@ class AIGatewayError(Exception):
     pass
 
 
+
+
+
+@staticmethod
+def _extract_usage(
+    response,
+) -> dict[str, Any]:
+
+    usage = getattr(
+        response,
+        "usage",
+        None,
+    )
+
+    if usage is None:
+        return {}
+
+    if isinstance(
+        usage,
+        dict,
+    ):
+        return {
+            "prompt_tokens": usage.get(
+                "prompt_tokens"
+            ),
+            "completion_tokens": usage.get(
+                "completion_tokens"
+            ),
+            "total_tokens": usage.get(
+                "total_tokens"
+            ),
+        }
+
+    return {
+        "prompt_tokens": getattr(
+            usage,
+            "prompt_tokens",
+            None,
+        ),
+        "completion_tokens": getattr(
+            usage,
+            "completion_tokens",
+            None,
+        ),
+        "total_tokens": getattr(
+            usage,
+            "total_tokens",
+            None,
+        ),
+    }
+
+
+
+
+
+
 class AIGateway:
     MAX_RETRIES = 3
     RETRY_DELAYS = (1, 2, 4)
@@ -336,7 +392,8 @@ class AIGateway:
         model: Optional[dict[str, Any]] = None,
         timeout: float = 60.0,
         temperature: Optional[float] = None,
-    ) -> str:
+        return_metadata: bool = False,
+    ) -> str | tuple[str, dict[str, Any]]:
 
         model = model or await self.models.get_active()
 
@@ -367,9 +424,14 @@ class AIGateway:
                 kwargs,
                 api_key,
             )
-
         try:
-            content = response.choices[0].message.content
+            content = (
+                response
+                .choices[0]
+                .message
+                .content
+            )
+
         except Exception as exc:
             raise AIGatewayError(
                 "پاسخ مدل ساختار قابل استفاده‌ای نداشت."
@@ -380,7 +442,31 @@ class AIGateway:
                 "مدل پاسخ متنی خالی برگرداند."
             )
 
-        return str(content).strip()
+        content = str(
+            content
+        ).strip()
+
+        if not return_metadata:
+            return content
+
+        return (
+            content,
+            {
+                "model": litellm_model,
+                "provider": model.get(
+                    "provider"
+                ),
+                "model_id": model.get(
+                    "model_id"
+                ),
+                "base_url": model.get(
+                    "base_url"
+                ),
+                "usage": self._extract_usage(
+                    response
+                ),
+            },
+        )
 
     async def ping(
         self,

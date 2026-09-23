@@ -982,14 +982,121 @@ class AITimelineSettingsStore:
 
 
 
+
+
+
+
+class AITelemetrySettingsStore:
+    TABLE = "ai_telemetry_settings"
+
+    def __init__(
+        self,
+        db: DatabaseManager,
+    ) -> None:
+        self.db = db
+
+    async def create_table(self) -> None:
+        await self.db.create_table(
+            self.TABLE,
+            columns={
+                "id": "INTEGER PRIMARY KEY",
+                "enabled": (
+                    "INTEGER NOT NULL DEFAULT 0"
+                ),
+                "target_group_id": "INTEGER",
+                "updated_at": (
+                    "TEXT NOT NULL "
+                    "DEFAULT CURRENT_TIMESTAMP"
+                ),
+            },
+        )
+
+        await self.db.insert(
+            self.TABLE,
+            {
+                "id": 1,
+            },
+            or_ignore=True,
+        )
+
+    async def get(self) -> dict:
+        await self.create_table()
+
+        row = await self.db.select_one(
+            self.TABLE,
+            where={
+                "id": 1,
+            },
+        )
+
+        return {
+            "enabled": bool(
+                row["enabled"]
+            ),
+            "target_group_id": (
+                int(
+                    row["target_group_id"]
+                )
+                if row["target_group_id"]
+                is not None
+                else None
+            ),
+        }
+
+    async def set_target(
+        self,
+        group_id: int,
+    ) -> None:
+
+        await self.db.execute(
+            f"""
+            UPDATE {self.TABLE}
+            SET enabled = 1,
+                target_group_id = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = 1
+            """,
+            (
+                int(group_id),
+            ),
+        )
+
+    async def clear_target(self) -> None:
+
+        await self.db.execute(
+            f"""
+            UPDATE {self.TABLE}
+            SET enabled = 0,
+                target_group_id = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = 1
+            """
+        )
+
+
+
+
+
+
+
 class AIGatewayStore:
-    def __init__(self, db: DatabaseManager) -> None:
+    def __init__(
+        self,
+        db: DatabaseManager,
+    ) -> None:
+
         self.models = AIModelStore(db)
         self.groups = AIGroupSettingsStore(db)
         self.memory = AIMemoryStore(db)
-        self.memory_settings = AIMemorySettingsStore(db)
+        self.memory_settings = (
+            AIMemorySettingsStore(db)
+        )
         self.api_keys = AIAPIKeyStore(db)
         self.timeline = AITimelineSettingsStore(db)
+
+        self.telemetry = (
+            AITelemetrySettingsStore(db)
+        )
 
     async def create_tables(self) -> None:
         await self.models.create_table()
@@ -998,3 +1105,4 @@ class AIGatewayStore:
         await self.memory_settings.create_table()
         await self.api_keys.create_table()
         await self.timeline.create_table()
+        await self.telemetry.create_table()

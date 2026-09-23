@@ -6,7 +6,7 @@ from .gateway import AIGatewayError
 from .trigger import extract_trigger_text
 
 import traceback
-
+import time
 
 def _is_remote_group_id(
     value: str,
@@ -140,6 +140,128 @@ def mask_secret(secret):
     return (
         f"{secret[:4]}••••{secret[-4:]}"
     )
+
+
+
+
+
+
+
+
+
+
+
+
+
+@command(
+    name="استریمر هوش مصنوعی",
+    permission="owner",
+    chat_type="all",
+    description="گروه فعلی را به مقصد Live Telemetry هوش مصنوعی متصل می‌کند.",
+)
+async def ai_telemetry_streamer(
+    self,
+    event,
+) -> None:
+
+    action = (
+        event.args_text or ""
+    ).strip()
+
+    # -------------------------------------------------
+    # خاموش
+    # -------------------------------------------------
+
+    if action == "خاموش":
+
+        await self.store.telemetry.clear_target()
+
+        self.telemetry.clear_target()
+
+        await event.reply(
+            "🛑 Live Telemetry هوش مصنوعی خاموش شد."
+        )
+
+        return
+
+    # -------------------------------------------------
+    # وضعیت
+    # -------------------------------------------------
+
+    if action == "وضعیت":
+
+        settings = (
+            await self.store.telemetry.get()
+        )
+
+        if (
+            not settings["enabled"]
+            or settings["target_group_id"]
+            is None
+        ):
+            await event.reply(
+                "📡 Live Telemetry هوش مصنوعی خاموش است."
+            )
+
+            return
+
+        await event.reply(
+            "📡 Live Telemetry هوش مصنوعی فعال است.\n\n"
+            f"🏠 Group ID: "
+            f"{settings['target_group_id']}"
+        )
+
+        return
+
+    # -------------------------------------------------
+    # آرگومان نامعتبر
+    # -------------------------------------------------
+
+    if action:
+
+        await event.reply(
+            "❌ استفاده نادرست.\n\n"
+            "!استریمر هوش مصنوعی\n"
+            "!استریمر هوش مصنوعی وضعیت\n"
+            "!استریمر هوش مصنوعی خاموش"
+        )
+
+        return
+
+    # -------------------------------------------------
+    # فعال‌سازی در گروه فعلی
+    # -------------------------------------------------
+
+    if not event.is_group:
+
+        await event.reply(
+            "❌ این کامند باید داخل گروه Telemetry اجرا شود."
+        )
+
+        return
+
+    group_id = int(
+        event.chat_id
+    )
+
+    await self.store.telemetry.set_target(
+        group_id
+    )
+
+    self.telemetry.set_target(
+        group_id
+    )
+
+    await event.reply(
+        "✅ Live Telemetry هوش مصنوعی فعال شد.\n\n"
+        f"🏠 Group ID: {group_id}\n\n"
+        "از این به بعد اطلاعات اجرای بوبی "
+        "در همین گروه stream می‌شود."
+    )
+
+
+
+
 
 
 # =========================================================
@@ -1827,6 +1949,21 @@ async def on_message(
         if trigger_text is None:
             return
 
+        telemetry_enabled = (
+            self.telemetry.enabled
+        )
+
+        telemetry_total_started = (
+            time.perf_counter()
+            if telemetry_enabled
+            else None
+        )
+
+        telemetry_request_started = None
+
+        telemetry_emitted = False
+
+
         # -------------------------------------------------
         # DEBUG
         # -------------------------------------------------
@@ -1838,6 +1975,50 @@ async def on_message(
             f"trigger_text={trigger_text!r} | "
             f"text={text!r}"
         )
+
+
+        # -------------------------------------------------
+        # AI TELEMETRY
+        #
+        # این فقط یک put_nowait داخل Queue است.
+        # هیچ Network / DB / Tokenization ندارد.
+        # -------------------------------------------------
+
+        if telemetry_enabled:
+
+            request_latency_ms = (
+                (
+                    time.perf_counter()
+                    - telemetry_request_started
+                )
+                * 1000
+            )
+
+            total_duration_ms = (
+                (
+                    time.perf_counter()
+                    - telemetry_total_started
+                )
+                * 1000
+            )
+
+            self.telemetry.emit_success(
+                event=event,
+                sender=sender,
+                group_id=event.chat_id,
+                trigger=trigger,
+                context=context,
+                answer=answer,
+                latency_ms=request_latency_ms,
+                total_duration_ms=(
+                    total_duration_ms
+                ),
+                model_info=model_info,
+            )
+
+            telemetry_emitted = True
+
+
 
         # -------------------------------------------------
         # Timeline
@@ -2006,6 +2187,51 @@ async def on_message(
             f"❌ AI Gateway: {exc}"
         )
 
+        if (
+            telemetry_enabled
+            and not telemetry_emitted
+        ):
+
+            request_latency_ms = None
+
+            if telemetry_request_started is not None:
+                request_latency_ms = (
+                    (
+                        time.perf_counter()
+                        - telemetry_request_started
+                    )
+                    * 1000
+                )
+
+            total_duration_ms = None
+
+            if telemetry_total_started is not None:
+                total_duration_ms = (
+                    (
+                        time.perf_counter()
+                        - telemetry_total_started
+                    )
+                    * 1000
+                )
+
+            self.telemetry.emit_failure(
+                event=event,
+                sender=sender,
+                group_id=event.chat_id,
+                trigger=trigger,
+                context=context,
+                error=exc,
+                request_latency_ms=(
+                    request_latency_ms
+                ),
+                total_duration_ms=(
+                    total_duration_ms
+                ),
+                stage="AI Gateway",
+            )
+
+            telemetry_emitted = True
+
         try:
             await event.reply(
                 "❌ بوبی فعلاً نتونست پاسخ بده. "
@@ -2015,7 +2241,9 @@ async def on_message(
         except Exception:
             pass
 
-    except Exception:
+
+
+    except Exception as exc:
 
         print(
             "❌ خطای غیرمنتظره در "
@@ -2023,6 +2251,56 @@ async def on_message(
         )
 
         traceback.print_exc()
+
+        if (
+            "telemetry_enabled" in locals()
+            and telemetry_enabled
+            and not telemetry_emitted
+        ):
+
+            request_latency_ms = None
+
+            if telemetry_request_started is not None:
+                request_latency_ms = (
+                    (
+                        time.perf_counter()
+                        - telemetry_request_started
+                    )
+                    * 1000
+                )
+
+            total_duration_ms = None
+
+            if telemetry_total_started is not None:
+                total_duration_ms = (
+                    (
+                        time.perf_counter()
+                        - telemetry_total_started
+                    )
+                    * 1000
+                )
+
+            self.telemetry.emit_failure(
+                event=event,
+                sender=sender
+                if "sender" in locals()
+                else None,
+                group_id=event.chat_id,
+                trigger=trigger
+                if "trigger" in locals()
+                else "بوبی",
+                context=context
+                if "context" in locals()
+                else None,
+                error=exc,
+                request_latency_ms=(
+                    request_latency_ms
+                ),
+                total_duration_ms=(
+                    total_duration_ms
+                ),
+                stage="AI Message Handler",
+            )
 
         try:
             await event.reply(
@@ -2032,6 +2310,7 @@ async def on_message(
 
         except Exception:
             pass
+
 # =========================================================
 # MODERATION -> TIMELINE
 # =========================================================

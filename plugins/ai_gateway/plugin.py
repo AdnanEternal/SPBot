@@ -6,11 +6,11 @@ from . import handlers
 from .gateway import AIGateway
 from .memory import AIMemoryManager
 from .store import AIGatewayStore
-
+from .telemetry import AITelemetryManager
 
 class AIGatewayPlugin(BasePlugin):
     name = "AI Gateway"
-    version = "2.13.22"
+    version = "2.14.0"
 
     def __init__(self, client, command_manager, db, event_bus):
         super().__init__(
@@ -32,6 +32,13 @@ class AIGatewayPlugin(BasePlugin):
 
         self.gateway = AIGateway(self.models)
 
+        self.telemetry = (
+            AITelemetryManager(
+                self.client
+            )
+        )
+
+
         self.bot_user_id = None
         self.default_trigger = "بوبی"
 
@@ -45,6 +52,22 @@ class AIGatewayPlugin(BasePlugin):
 
         self.timeline_enabled = timeline_settings["enabled"]
         self.timeline_limit = timeline_settings["message_limit"]
+
+        telemetry_settings = (
+        await self.store.telemetry.get()
+        )
+
+        if (
+            telemetry_settings["enabled"]
+            and telemetry_settings[
+                "target_group_id"
+            ] is not None
+        ):
+            self.telemetry.set_target(
+                telemetry_settings[
+                    "target_group_id"
+                ]
+            )
 
     async def on_enable(self):
         await self.store.create_tables()
@@ -69,6 +92,25 @@ class AIGatewayPlugin(BasePlugin):
         self.memory.set_bot_user_id(
             self.bot_user_id
         )
+
+        telemetry_settings = (
+        await self.store.telemetry.get()
+        )
+
+        if (
+            telemetry_settings["enabled"]
+            and telemetry_settings[
+                "target_group_id"
+            ] is not None
+        ):
+            self.telemetry.set_target(
+                telemetry_settings[
+                    "target_group_id"
+                ]
+            )
+
+    async def on_disable(self):
+        await self.telemetry.shutdown()
     # -------------------------
     # Model management
     # -------------------------
@@ -120,3 +162,7 @@ class AIGatewayPlugin(BasePlugin):
 
 
     show_cached_timelines = handlers.show_cached_timelines
+
+    ai_telemetry_streamer = (
+    handlers.ai_telemetry_streamer
+)
