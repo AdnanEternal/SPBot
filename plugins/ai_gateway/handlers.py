@@ -1835,12 +1835,15 @@ async def on_message(
             )
         )
 
-        prompt_text = (
-            extract_trigger_text(
-                text,
-                trigger,
-            )
+        trigger_text = extract_trigger_text(
+            text,
+            trigger,
         )
+
+        if trigger_text is None:
+            return
+
+        prompt_text = text
 
         current_reply_context = (
             await self.memory.get_current_reply_context(
