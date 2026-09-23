@@ -1913,6 +1913,9 @@ async def on_message(
         if not event.is_group:
             return
 
+        if event.sender_id is None:
+            return
+
         # -------------------------------------------------
         # متن پیام
         # -------------------------------------------------
@@ -1921,14 +1924,7 @@ async def on_message(
             event.raw_text or ""
         ).strip()
 
-        if (
-            not text
-            or text.startswith("!")
-        ):
-            return
-
-        if event.sender_id is None:
-            return
+        is_command = text.startswith("!")
 
         # -------------------------------------------------
         # Trigger detection
@@ -1941,14 +1937,107 @@ async def on_message(
             )
         )
 
-        trigger_text = extract_trigger_text(
-            text,
-            trigger,
-        )
+        trigger_text = None
+        reply_to_booby = False
 
-        if trigger_text is None:
+        # Commandها نباید بوبی را Trigger کنند.
+        # پیام خالی/رسانه‌ای هم AI را Trigger نمی‌کند،
+        # ولی همچنان باید وارد Timeline شود.
+        if text and not is_command:
+
+            trigger_text = extract_trigger_text(
+                text,
+                trigger,
+            )
+
+            # -------------------------------------------------
+            # Reply به پیام بوبی = Trigger
+            # -------------------------------------------------
+
+            if getattr(
+                event,
+                "is_reply",
+                False,
+            ):
+                try:
+                    replied = (
+                        await event.get_reply_message()
+                    )
+
+                except Exception:
+                    replied = None
+
+                replied_sender_id = (
+                    getattr(
+                        replied,
+                        "sender_id",
+                        None,
+                    )
+                    if replied is not None
+                    else None
+                )
+
+                if (
+                    replied_sender_id is not None
+                    and self.bot_user_id is not None
+                ):
+                    try:
+                        reply_to_booby = (
+                            int(replied_sender_id)
+                            == int(self.bot_user_id)
+                        )
+
+                    except (
+                        TypeError,
+                        ValueError,
+                    ):
+                        reply_to_booby = False
+
+                if reply_to_booby:
+                    # وقتی Reply به بوبی است،
+                    # خود متن کامل کاربر Prompt است.
+                    trigger_text = text
+
+        # -------------------------------------------------
+        # Timeline
+        # -------------------------------------------------
+        # Timeline مستقل از Trigger است.
+        # هر پیام گروه باید اینجا ثبت شود.
+        #
+        # record_event خودش Commandها را حذف می‌کند،
+        # بنابراین لازم نیست اینجا فیلترشان کنیم.
+
+        if self.timeline_enabled:
+            try:
+                await self.memory.ensure_timeline(
+                    self.client,
+                    event.chat_id,
+                    self.timeline_limit,
+                )
+
+                await self.memory.record_event(
+                    event
+                )
+
+            except Exception:
+                traceback.print_exc()
+
+        # -------------------------------------------------
+        # اگر پیام بوبی را Trigger نکرده، فقط Timeline
+        # ثبت شده و نباید وارد پردازش AI شویم.
+        # -------------------------------------------------
+
+        if (
+            not text
+            or is_command
+        ):
             return
 
+        if (
+            trigger_text is None
+            and not reply_to_booby
+        ):
+            return
         telemetry_enabled = (
             self.telemetry.enabled
         )
@@ -1979,24 +2068,6 @@ async def on_message(
 
         
 
-        # -------------------------------------------------
-        # Timeline
-        # -------------------------------------------------
-
-        if self.timeline_enabled:
-            try:
-                await self.memory.ensure_timeline(
-                    self.client,
-                    event.chat_id,
-                    self.timeline_limit,
-                )
-
-                await self.memory.record_event(
-                    event
-                )
-
-            except Exception:
-                traceback.print_exc()
 
         # -------------------------------------------------
         # پیام فعلی برای Memory
