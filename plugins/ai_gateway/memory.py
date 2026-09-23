@@ -1768,6 +1768,7 @@ Never invent missing facts.
         return self.settings.DEFAULT_TOKEN_LIMIT
 
     def format_user_message(
+        self,
         name: str,
         user_id: int,
         message_id: int | None,
