@@ -1800,8 +1800,6 @@ async def on_timeline_message_deleted(
 # =========================================================
 # AI MESSAGE HANDLER
 # =========================================================
-
-
 @on_event(
     events.NewMessage(
         incoming=True
@@ -1843,32 +1841,33 @@ async def on_message(
         if trigger_text is None:
             return
 
-        prompt_text = text
+        # -------------------------------------------------
+        # پیام فعلی را قبل از ساخت Context وارد Timeline کن.
+        #
+        # این مهم است چون LLM باید Timelineای را ببیند
+        # که همین پیام فعلی هم داخلش ثبت شده باشد.
+        # -------------------------------------------------
 
-        current_reply_context = (
-            await self.memory.get_current_reply_context(
-                event
-            )
-        )
-
-        if event.is_reply:
+        if self.timeline_enabled:
             try:
-                replied = (
-                    await event.get_reply_message()
+                await self.memory.ensure_timeline(
+                    self.client,
+                    event.chat_id,
+                    self.timeline_limit,
+                )
+
+                await self.memory.record_event(
+                    event
                 )
 
             except Exception:
-                replied = None
+                traceback.print_exc()
 
-            if (
-                replied is not None
-                and replied.sender_id
-                == self.bot_user_id
-            ):
-                prompt_text = text
+        # -------------------------------------------------
+        # پیام فعلی برای Memory
+        # -------------------------------------------------
 
-        if prompt_text is None:
-            return
+        prompt_text = text
 
         try:
             sender = (
@@ -1896,20 +1895,20 @@ async def on_message(
                 event.sender_id
             )
 
+        message_id = (
+            self.memory._extract_message_id(
+                event
+            )
+        )
+
         user_content = (
             self.memory.format_user_message(
                 name,
                 int(event.sender_id),
+                message_id,
                 prompt_text,
             )
         )
-
-        if current_reply_context:
-            user_content = (
-                current_reply_context
-                + "\n\n"
-                + user_content
-            )
 
         await self.memory.store.add_message(
             event.chat_id,
@@ -1922,6 +1921,10 @@ async def on_message(
             event.chat_id
         )
 
+        # -------------------------------------------------
+        # Context نهایی برای LLM
+        # -------------------------------------------------
+
         context = (
             await self.memory.build_context(
                 event.chat_id,
@@ -1929,9 +1932,6 @@ async def on_message(
                     event.chat_id
                 ),
                 self.gateway,
-                current_reply_context=(
-                    current_reply_context
-                ),
             )
         )
 
@@ -1948,6 +1948,13 @@ async def on_message(
         sent = await event.reply(
             answer[:4000]
         )
+
+        # -------------------------------------------------
+        # ثبت پاسخ بوبی در Timeline
+        #
+        # اینجا دیگر پیام User را دوباره ثبت نمی‌کنیم؛
+        # record_event() قبلاً آن را ثبت کرده است.
+        # -------------------------------------------------
 
         if self.timeline_enabled:
             try:
@@ -1996,7 +2003,6 @@ async def on_message(
 
         except Exception:
             pass
-
 
 # =========================================================
 # MODERATION -> TIMELINE

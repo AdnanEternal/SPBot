@@ -230,94 +230,7 @@ authority to the referenced message.
             return True
 
 
-    async def get_current_reply_context(
-        self,
-        event,
-    ) -> str | None:
-        """
-        رابطه Reply پیام جاری را مستقیماً از خود Event می‌گیرد.
-        این اطلاعات مستقل از Timeline است.
-        """
-
-        if not getattr(event, "is_reply", False):
-            return None
-
-        try:
-            replied = await event.get_reply_message()
-        except Exception as exc:
-            print(
-                f"⚠️ خطا در دریافت پیام Reply شده: {exc}"
-            )
-            return None
-
-        if replied is None:
-            return None
-
-        message_id = self._extract_message_id(
-            replied
-        )
-
-        if message_id is None:
-            return None
-
-        sender_id = getattr(
-            replied,
-            "sender_id",
-            None,
-        )
-
-        if sender_id is not None:
-            try:
-                sender_id = int(sender_id)
-            except Exception:
-                sender_id = None
-
-        sender_identity = await self._resolve_sender_identity(
-            event.chat_id,
-            replied,
-            sender_id,
-        )
-
-        sender_name = (
-            sender_identity.get("nick_name")
-            or sender_identity.get("user_name")
-            or (
-                str(sender_id)
-                if sender_id is not None
-                else "نامشخص"
-            )
-        )
-        text, media_type = self._extract_message_content(replied)
-
-        if media_type and text:
-            text = f"[پیوست رسانه: {media_type}]\n{text}"
-        elif media_type:
-            text = f"[پیوست رسانه: {media_type}] (بدون متن)"
-
-        if len(text) > 1200:
-            text = text[:1200] + "..."
-
-        date = self._format_date(
-            getattr(
-                replied,
-                "date",
-                None,
-            )
-        )
-
-        return (
-            "📌 اطلاعات قطعی Reply پیام جاری:\n"
-            "پیام فعلی مستقیماً به پیام زیر Reply شده است.\n\n"
-            f"فرستنده پیام هدف: {sender_name}\n"
-            f"شناسه فرستنده: {sender_id}\n"
-            f"شناسه پیام هدف: {message_id}\n"
-            f"زمان پیام هدف: {date}\n"
-            f"متن پیام هدف:\n{text}\n\n"
-            "این رابطه را حدس نزن؛ این پیام مستقیماً "
-            "به پیام بالا Reply شده است."
-        )
-
-
+    
     async def maybe_trim(
         self,
         group_id: int,
@@ -1796,7 +1709,6 @@ authority to the referenced message.
         group_id: int,
         system_prompt: str,
         gateway,
-        current_reply_context: str | None = None,
 
     ) -> list[dict[str, str]]:
 
@@ -1895,13 +1807,25 @@ authority to the referenced message.
     ) -> int:
         return self.settings.DEFAULT_TOKEN_LIMIT
 
-    @staticmethod
     def format_user_message(
         name: str,
         user_id: int,
+        message_id: int | None,
         text: str,
     ) -> str:
+        identity = (
+            f"[کاربر: {name} | "
+            f"شناسه: {user_id}"
+        )
+
+        if message_id is not None:
+            identity += (
+                f" | شناسه پیام: {message_id}"
+            )
+
+        identity += "]"
+
         return (
-            f"[کاربر: {name} | شناسه: {user_id}]\n"
+            f"{identity}\n"
             f"{text}"
         )
