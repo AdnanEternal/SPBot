@@ -1720,36 +1720,225 @@ async def load_timeline(
 # TIMELINE EVENTS
 # =========================================================
 
-
 @on_event(
     events.NewMessage(
         incoming=True
     )
 )
-async def on_timeline_incoming(
+async def on_message(
     self,
     event,
 ):
     try:
-        if not self.timeline_enabled:
-            return
-
         if not event.is_group:
             return
 
-        await self.memory.ensure_timeline(
-            self.client,
-            event.chat_id,
-            self.timeline_limit,
+        # -------------------------------------------------
+        # ثبت پیام جاری در Timeline
+        #
+        # این باید قبل از هرگونه Trigger detection و
+        # قبل از build_context انجام شود تا Timeline
+        # شامل همین پیام فعلی باشد.
+        #
+        # Commandها داخل record_event() نادیده گرفته می‌شوند.
+        # -------------------------------------------------
+
+        if self.timeline_enabled:
+            try:
+                await self.memory.ensure_timeline(
+                    self.client,
+                    event.chat_id,
+                    self.timeline_limit,
+                )
+
+                await self.memory.record_event(
+                    event
+                )
+
+            except Exception:
+                traceback.print_exc()
+
+        # -------------------------------------------------
+        # متن پیام
+        # -------------------------------------------------
+
+        text = (
+            event.raw_text or ""
+        ).strip()
+
+        if (
+            not text
+            or text.startswith("!")
+        ):
+            return
+
+        if event.sender_id is None:
+            return
+
+        # -------------------------------------------------
+        # Trigger detection
+        # -------------------------------------------------
+
+        trigger = (
+            await self.groups.get_trigger(
+                event.chat_id,
+                self.default_trigger,
+            )
         )
 
-        await self.memory.record_event(
-            event
+        trigger_text = extract_trigger_text(
+            text,
+            trigger,
         )
+
+        if trigger_text is None:
+            return
+
+        # -------------------------------------------------
+        # پیام فعلی برای Memory
+        # -------------------------------------------------
+
+        prompt_text = text
+
+        try:
+            sender = (
+                await event.get_sender()
+            )
+
+            name = (
+                getattr(
+                    sender,
+                    "username",
+                    None,
+                )
+                or getattr(
+                    sender,
+                    "first_name",
+                    None,
+                )
+                or str(
+                    event.sender_id
+                )
+            )
+
+        except Exception:
+            name = str(
+                event.sender_id
+            )
+
+        message_id = (
+            self.memory._extract_message_id(
+                event
+            )
+        )
+
+        user_content = (
+            self.memory.format_user_message(
+                name,
+                int(event.sender_id),
+                message_id,
+                prompt_text,
+            )
+        )
+
+        await self.memory.store.add_message(
+            event.chat_id,
+            "user",
+            user_content,
+            event.sender_id,
+        )
+
+        await self.memory.maybe_trim(
+            event.chat_id
+        )
+
+        # -------------------------------------------------
+        # ساخت Context نهایی
+        # -------------------------------------------------
+
+        context = (
+            await self.memory.build_context(
+                event.chat_id,
+                await self.groups.get_system_prompt(
+                    event.chat_id
+                ),
+                self.gateway,
+            )
+        )
+
+        # -------------------------------------------------
+        # درخواست به مدل
+        # -------------------------------------------------
+
+        answer = await self.gateway.chat(
+            context
+        )
+
+        await self.memory.store.add_message(
+            event.chat_id,
+            "assistant",
+            answer,
+        )
+
+        # -------------------------------------------------
+        # ارسال پاسخ
+        # -------------------------------------------------
+
+        sent = await event.reply(
+            answer[:4000]
+        )
+
+        # -------------------------------------------------
+        # ثبت پاسخ بوبی در Timeline
+        # -------------------------------------------------
+
+        if self.timeline_enabled:
+            try:
+                await self.memory.ensure_timeline(
+                    self.client,
+                    event.chat_id,
+                    self.timeline_limit,
+                )
+
+                if sent is not None:
+                    await self.memory.record_generated_message(
+                        event.chat_id,
+                        sent,
+                    )
+
+            except Exception:
+                traceback.print_exc()
+
+    except AIGatewayError as exc:
+        print(
+            f"❌ AI Gateway: {exc}"
+        )
+
+        try:
+            await event.reply(
+                "❌ بوبی فعلاً نتونست پاسخ بده. "
+                "لطفاً دوباره امتحان کن."
+            )
+
+        except Exception:
+            pass
 
     except Exception:
+        print(
+            "❌ خطای غیرمنتظره در "
+            "AI Message Handler:"
+        )
+
         traceback.print_exc()
 
+        try:
+            await event.reply(
+                "❌ هنگام پردازش پیام "
+                "مشکلی پیش آمد."
+            )
+
+        except Exception:
+            pass
 
 @on_event(events.MessageDeleted)
 async def on_timeline_message_deleted(
