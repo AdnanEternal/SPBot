@@ -213,7 +213,6 @@ class AIGateway:
                 ],
                 model=model,
                 timeout=timeout,
-                temperature=0,
             )
 
         except AIGatewayError as exc:
