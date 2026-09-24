@@ -21,7 +21,6 @@ class AIGatewayPlugin(BasePlugin):
         )
 
         self.store = AIGatewayStore(db)
-
         self.models = self.store.models
         self.groups = self.store.groups
         self.memory = AIMemoryManager(
@@ -43,7 +42,8 @@ class AIGatewayPlugin(BasePlugin):
         self.default_trigger = "بوبی"
 
         self.timeline_enabled = True
-        self.timeline_limit = 200
+        self.timeline_limit = 50
+        self.timeline_max_chars = 20000
 
     async def on_load(self):
         await self.store.create_tables()
@@ -52,6 +52,12 @@ class AIGatewayPlugin(BasePlugin):
 
         self.timeline_enabled = timeline_settings["enabled"]
         self.timeline_limit = timeline_settings["message_limit"]
+        self.timeline_max_chars = timeline_settings["max_chars"]
+
+        self.memory.set_timeline_max_chars(
+            self.timeline_max_chars
+        )
+
 
         telemetry_settings = (
         await self.store.telemetry.get()
@@ -70,13 +76,15 @@ class AIGatewayPlugin(BasePlugin):
             )
 
     async def on_enable(self):
-        await self.store.create_tables()
-
         timeline_settings = await self.store.timeline.get()
-
+    
         self.timeline_enabled = timeline_settings["enabled"]
         self.timeline_limit = timeline_settings["message_limit"]
-
+        self.timeline_max_chars = timeline_settings["max_chars"]
+        
+        self.memory.set_timeline_max_chars(
+            self.timeline_max_chars
+        )
 
         result = self.client.get_me()
 
@@ -166,4 +174,7 @@ class AIGatewayPlugin(BasePlugin):
 
     ai_telemetry_streamer = (
     handlers.ai_telemetry_streamer
+)
+    maximum_timeline_chars = (
+    handlers.maximum_timeline_chars
 )

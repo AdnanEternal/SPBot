@@ -21,7 +21,7 @@ class AIMemoryManager:
 
     MAX_TIMELINE_MESSAGES = 1000
     TIMELINE_CONTEXT_MESSAGES = 80
-    TIMELINE_CONTEXT_CHARS = 12000
+    DEFAULT_TIMELINE_MAX_CHARS = 20000
 
 
     TIMELINE_SYSTEM_INSTRUCTION = """
@@ -91,6 +91,9 @@ Never invent missing facts.
 
         self._trim_counters = defaultdict(int)
         self._bot_user_id: int | None = None
+        self.timeline_max_chars = (
+            self.DEFAULT_TIMELINE_MAX_CHARS
+        )
 
         # group_id -> deque of timeline records
         self._timelines: dict[
@@ -110,7 +113,6 @@ Never invent missing facts.
             int,
             dict[int, dict[str, Any]],
         ] = {}
-
 
         # group_id -> {message_id: reason}
         # پیام‌هایی که یه پلاگین دیگه گفته حذف شدن ولی هنوز تو
@@ -140,6 +142,14 @@ Never invent missing facts.
             else None
         )
 
+    def set_timeline_max_chars(
+        self,
+        max_chars: int,
+    ) -> None:
+        self.timeline_max_chars = max(
+            1,
+            int(max_chars),
+        )
 
     def _get_timeline_message_type(
         self,
@@ -1595,11 +1605,12 @@ Never invent missing facts.
             'source="unavailable" />'
         )
 
-        return result + "\n</message>"    
+        return result + "\n</message>" 
+       
     def get_timeline_context(
-        self,
-        group_id: int,
-    ) -> str | None:
+    self,
+    group_id: int,
+) -> str | None:
 
         timeline = self._timelines.get(
             group_id
@@ -1607,6 +1618,11 @@ Never invent missing facts.
 
         if not timeline:
             return None
+
+        max_chars = max(
+            1,
+            int(self.timeline_max_chars),
+        )
 
         records = list(timeline)
 
@@ -1617,7 +1633,11 @@ Never invent missing facts.
 
         selected: list[dict[str, Any]] = []
 
-        total_chars = 0
+        # خود تگ‌های Timeline هم جزو خروجی Timeline هستند.
+        opening = "<timeline>\n"
+        closing = "\n</timeline>"
+
+        total_chars = len(opening) + len(closing)
 
         for record in reversed(records):
 
@@ -1626,22 +1646,51 @@ Never invent missing facts.
                 by_id,
             )
 
+            candidate_size = (
+                total_chars
+                + len(formatted)
+                + (
+                    1
+                    if selected
+                    else 0
+                )
+            )
+
+            # تعداد پیام هم همچنان محدود است.
+            if (
+                len(selected)
+                >= self.TIMELINE_CONTEXT_MESSAGES
+            ):
+                break
+
+            # اگر اضافه کردن این پیام سقف کاراکتر را رد کند،
+            # پیام‌های قدیمی‌تر هم دیگر بررسی نمی‌شوند.
             if (
                 selected
-                and (
-                    len(selected)
-                    >= self.TIMELINE_CONTEXT_MESSAGES
-                    or
-                    total_chars + len(formatted)
-                    > self.TIMELINE_CONTEXT_CHARS
-                )
+                and candidate_size > max_chars
+            ):
+                break
+
+            # اگر حتی جدیدترین پیام به تنهایی از سقف
+            # بزرگ‌تر باشد، آن را وارد نمی‌کنیم تا
+            # خروجی Timeline هیچ‌وقت از سقف عبور نکند.
+            if (
+                not selected
+                and candidate_size > max_chars
             ):
                 break
 
             selected.append(record)
-            total_chars += len(formatted)
+
+            total_chars = candidate_size
 
         selected.reverse()
+
+        if not selected:
+            return (
+                "<timeline>\n"
+                "</timeline>"
+            )
 
         lines = [
             "<timeline>",
@@ -1659,7 +1708,16 @@ Never invent missing facts.
             "</timeline>"
         )
 
-        return "\n".join(lines)
+        result = "\n".join(lines)
+
+        # تضمین نهایی؛ فقط خود Timeline بررسی می‌شود.
+        if len(result) > max_chars:
+            return (
+                "<timeline>\n"
+                "</timeline>"
+            )
+
+        return result
     # =========================================================
     # Context building
     # =========================================================

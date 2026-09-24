@@ -1434,6 +1434,68 @@ async def timeline_toggle(
     )
 
 
+@command(
+    name="حداکثر کراکتر تایم لاین",
+    permission="owner",
+    chat_type="all",
+    description="حداکثر تعداد کاراکتر Timeline را تنظیم می‌کند.",
+)
+async def maximum_timeline_chars(
+    self,
+    event,
+) -> None:
+
+    value = (
+        event.args_text or ""
+    ).strip()
+
+    # نمایش مقدار فعلی
+    if not value:
+        current = (
+            await self.store.timeline.get_max_chars()
+        )
+
+        await event.reply(
+            "🧭 حداکثر کاراکتر Timeline:\n"
+            f"{current:,} کاراکتر"
+        )
+        return
+
+    if not value.isdigit():
+        await event.reply(
+            "❌ مقدار نامعتبر است.\n\n"
+            "مثال:\n"
+            "!حداکثر کراکتر تایم لاین 26000"
+        )
+        return
+
+    max_chars = int(value)
+
+    if max_chars < 1000:
+        await event.reply(
+            "❌ حداقل مقدار "
+            "1000 کاراکتر است."
+        )
+        return
+
+    await self.store.timeline.set_max_chars(
+        max_chars
+    )
+
+    # همان لحظه روی RAM هم اعمال شود.
+    self.timeline_max_chars = max_chars
+
+    self.memory.set_timeline_max_chars(
+        max_chars
+    )
+
+    await event.reply(
+        "✅ حداکثر کاراکتر Timeline تنظیم شد.\n"
+        f"📏 سقف: {max_chars:,} کاراکتر\n"
+        "💾 در دیتابیس ذخیره شد."
+    )
+
+
 # =========================================================
 # TIMELINE DISPLAY
 # =========================================================

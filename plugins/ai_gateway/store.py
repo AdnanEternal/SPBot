@@ -914,7 +914,8 @@ class AITimelineSettingsStore:
     TABLE = "ai_timeline_settings"
 
     DEFAULT_ENABLED = True
-    DEFAULT_MESSAGE_LIMIT = 200
+    DEFAULT_MESSAGE_LIMIT = 50
+    DEFAULT_MAX_CHARS = 26000
 
     def __init__(self, db: DatabaseManager) -> None:
         self.db = db
@@ -932,11 +933,42 @@ class AITimelineSettingsStore:
                     f"INTEGER NOT NULL DEFAULT "
                     f"{self.DEFAULT_MESSAGE_LIMIT}"
                 ),
+                "max_chars": (
+                    f"INTEGER NOT NULL DEFAULT "
+                    f"{self.DEFAULT_MAX_CHARS}"
+                ),
                 "updated_at": (
                     "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP"
                 ),
             },
         )
+
+        rows = await self.db.fetchall(
+            f"PRAGMA table_info({self.TABLE})"
+        )
+
+        columns = {
+            row["name"]
+            for row in rows
+        }
+
+        if "message_limit" not in columns:
+            await self.db.execute(
+                f"""
+                ALTER TABLE {self.TABLE}
+                ADD COLUMN message_limit INTEGER
+                NOT NULL DEFAULT {self.DEFAULT_MESSAGE_LIMIT}
+                """
+            )
+
+        if "max_chars" not in columns:
+            await self.db.execute(
+                f"""
+                ALTER TABLE {self.TABLE}
+                ADD COLUMN max_chars INTEGER
+                NOT NULL DEFAULT {self.DEFAULT_MAX_CHARS}
+                """
+            )
 
         await self.db.insert(
             self.TABLE,
@@ -945,6 +977,7 @@ class AITimelineSettingsStore:
             },
             or_ignore=True,
         )
+
 
     async def get(self) -> dict:
         await self.create_table()
@@ -958,8 +991,41 @@ class AITimelineSettingsStore:
 
         return {
             "enabled": bool(row["enabled"]),
-            "message_limit": int(row["message_limit"]),
+            "message_limit": int(
+                row["message_limit"]
+            ),
+            "max_chars": int(
+                row["max_chars"]
+            ),
         }
+
+    async def get_max_chars(self) -> int:
+        settings = await self.get()
+
+        return int(
+            settings["max_chars"]
+        )
+
+
+    async def set_max_chars(
+        self,
+        max_chars: int,
+    ) -> None:
+        max_chars = int(max_chars)
+
+        await self.create_table()
+
+        await self.db.execute(
+            f"""
+            UPDATE {self.TABLE}
+            SET max_chars = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = 1
+            """,
+            (
+                max_chars,
+            ),
+        )
 
     async def set(
         self,
