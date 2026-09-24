@@ -122,6 +122,7 @@ class AITelemetryManager:
         latency_ms: float,
         total_duration_ms: float,
         model_info: dict[str, Any],
+        model_name: str | None = None,
     ) -> None:
 
         target = (
@@ -144,6 +145,14 @@ class AITelemetryManager:
                 "date",
                 None,
             ),
+            "input_text": (
+                getattr(
+                    event,
+                    "raw_text",
+                    None,
+                )
+                or ""
+            ),
             "sender": (
                 self._build_sender_info(
                     sender,
@@ -159,6 +168,7 @@ class AITelemetryManager:
                 total_duration_ms
             ),
             "model_info": model_info,
+            "model_name": model_name,
         }
 
         self._enqueue(
@@ -177,6 +187,7 @@ class AITelemetryManager:
         request_latency_ms: float | None,
         total_duration_ms: float | None,
         stage: str,
+        model_name: str | None = None,
     ) -> None:
 
         target = (
@@ -208,6 +219,15 @@ class AITelemetryManager:
             "group_id": group_id,
             "trigger": trigger,
             "context": context or [],
+            "model_name": model_name,
+            "input_text": (
+                    getattr(
+                        event,
+                        "raw_text",
+                        None,
+                    )
+                    or ""
+                ),
             "error_type": (
                 error.__class__.__name__
             ),
@@ -608,11 +628,107 @@ class AITelemetryManager:
             )
         ).strip()
 
-        if len(error) > 900:
+        if len(error) > 1200:
             error = (
-                error[:897]
+                error[:1197]
                 + "..."
             )
+
+        context = (
+            payload.get(
+                "context"
+            )
+            or []
+        )
+
+        input_text = str(
+            payload.get(
+                "input_text",
+                "",
+            )
+            or ""
+        )
+
+        input_chars = len(
+            input_text
+        )
+
+        # توکن تقریبی خود پیام ورودی
+        input_tokens = None
+
+        try:
+            model_name = (
+                payload.get(
+                    "model_name"
+                )
+            )
+
+            if model_name:
+                input_tokens = int(
+                    token_counter(
+                        model=model_name,
+                        text=input_text,
+                    )
+                )
+
+        except Exception:
+            input_tokens = None
+
+        # اگر model_name موجود نبود،
+        # یک تخمین ساده‌ی کاراکتری داریم.
+        if input_tokens is None:
+            input_tokens = max(
+                1,
+                input_chars // 4,
+            ) if input_chars else 0
+
+        context_chars = sum(
+            len(
+                str(
+                    message.get(
+                        "content",
+                        "",
+                    )
+                )
+            )
+            for message in context
+        )
+
+        context_tokens = None
+
+        try:
+            model_name = (
+                payload.get(
+                    "model_name"
+                )
+            )
+
+            if model_name:
+                context_text = "\n".join(
+                    str(
+                        message.get(
+                            "content",
+                            "",
+                        )
+                    )
+                    for message in context
+                )
+
+                context_tokens = int(
+                    token_counter(
+                        model=model_name,
+                        text=context_text,
+                    )
+                )
+
+        except Exception:
+            context_tokens = None
+
+        if context_tokens is None:
+            context_tokens = max(
+                1,
+                context_chars // 4,
+            ) if context_chars else 0
 
         request_latency = (
             payload.get(
@@ -638,13 +754,18 @@ class AITelemetryManager:
             else "نامشخص"
         )
 
+        model_name = (
+            payload.get(
+                "model_name"
+            )
+            or "نامشخص"
+        )
+
         return (
             "📡 AI TELEMETRY\n\n"
             "❌ درخواست ناموفق بود\n\n"
 
-            f"👤 کاربر: "
-            f"{user_label}\n"
-
+            f"👤 کاربر: {user_label}\n"
             f"🆔 User ID: "
             f"{sender['user_id']}\n"
 
@@ -655,28 +776,48 @@ class AITelemetryManager:
             f"{event_time}\n\n"
 
             f"⚡ Trigger: "
-            f"{payload['trigger']}\n\n"
+            f"{payload['trigger']}\n"
+
+            f"🤖 Model: "
+            f"{model_name}\n\n"
+
+            "📨 پیام ورودی\n"
+            f"• Characters: "
+            f"{input_chars:,}\n"
+
+            f"• تقریبی Tokens: "
+            f"{input_tokens:,}\n"
+
+            f"• متن:\n"
+            f"{input_text[:1500] or '[خالی]'}\n\n"
+
+            "📥 Context ارسالی به مدل\n"
+            f"• Messages: "
+            f"{len(context):,}\n"
+
+            f"• Characters: "
+            f"{context_chars:,}\n"
+
+            f"• تقریبی Tokens: "
+            f"{context_tokens:,}\n\n"
 
             "❌ خطا\n"
-
             f"• مرحله: "
             f"{payload['stage']}\n"
 
             f"• نوع: "
             f"{payload['error_type']}\n"
 
-            f"• دلیل: "
+            f"• دلیل:\n"
             f"{error or 'نامشخص'}\n\n"
 
             "⏱️ عملکرد\n"
-
             f"• Request: "
             f"{request_text}\n"
 
             f"• Total processing: "
             f"{total_text}"
         )
-
     # =====================================================
     # TOKEN FALLBACK
     # =====================================================

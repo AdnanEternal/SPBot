@@ -2106,6 +2106,7 @@ async def on_message(
             and not reply_to_booby
         ):
             return
+
         telemetry_enabled = (
             self.telemetry.enabled
         )
@@ -2120,6 +2121,30 @@ async def on_message(
 
         telemetry_emitted = False
 
+        active_model = None
+
+        try:
+            active_model = (
+                await self.models.get_active()
+            )
+        except Exception:
+            active_model = None
+
+        telemetry_model_name = None
+
+        if active_model is not None:
+            try:
+                telemetry_model_name = (
+                    self.gateway._litellm_model(
+                        active_model
+                    )
+                )
+            except Exception:
+                telemetry_model_name = (
+                    active_model.get(
+                        "model_id"
+                    )
+                )
 
         # -------------------------------------------------
         # DEBUG
@@ -2318,6 +2343,7 @@ async def on_message(
                     total_duration_ms
                 ),
                 model_info=model_info,
+                model_name=telemetry_model_name,
             )
 
             telemetry_emitted = True
@@ -2438,6 +2464,7 @@ async def on_message(
                     total_duration_ms
                 ),
                 stage="AI Gateway",
+                model_name=telemetry_model_name,
             )
 
             telemetry_emitted = True
@@ -2492,6 +2519,7 @@ async def on_message(
 
             self.telemetry.emit_failure(
                 event=event,
+                model_name=telemetry_model_name,
                 sender=sender
                 if "sender" in locals()
                 else None,

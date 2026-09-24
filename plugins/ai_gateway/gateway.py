@@ -24,6 +24,15 @@ class AIGatewayContextLengthError(AIGatewayError):
     pass
 
 
+class AIGatewayRetryExhaustedError(
+    AIGatewayError
+):
+    """
+    همه تلاش‌های retry شکست خورده‌اند،
+    ولی اطلاعات خطای واقعی آخرین تلاش حفظ می‌شود.
+    """
+    pass
+
 class AIGateway:
     MAX_RETRIES = 3
     RETRY_DELAYS = (1, 2, 4)
@@ -40,6 +49,136 @@ class AIGateway:
         self._ai_semaphore = asyncio.Semaphore(
             self.AI_CONCURRENCY
         )
+
+
+    @staticmethod
+    def _classify_error(
+        exc: Exception,
+    ) -> str:
+
+        error_name = (
+            exc.__class__.__name__.lower()
+        )
+
+        status_code = getattr(
+            exc,
+            "status_code",
+            None,
+        )
+
+        if (
+            status_code == 429
+            or "ratelimit" in error_name
+            or "rate_limit" in error_name
+        ):
+            return "RATE_LIMIT"
+
+        if (
+            status_code in {
+                408,
+                504,
+            }
+            or "timeout" in error_name
+        ):
+            return "TIMEOUT"
+
+        if status_code in {
+            401,
+            403,
+        }:
+            return "AUTHENTICATION"
+
+        if status_code == 400:
+            return "BAD_REQUEST"
+
+        if status_code in {
+            500,
+            502,
+            503,
+        }:
+            return "SERVER_ERROR"
+
+        if (
+            "connection" in error_name
+            or "connect" in str(exc).lower()
+        ):
+            return "CONNECTION"
+
+        return "UNKNOWN"
+
+
+
+    @staticmethod
+    def _error_details(
+        exc: Exception,
+    ) -> str:
+
+        parts = []
+
+        error_type = (
+            exc.__class__.__name__
+        )
+
+        parts.append(
+            f"type={error_type}"
+        )
+
+        status_code = getattr(
+            exc,
+            "status_code",
+            None,
+        )
+
+        if status_code is not None:
+            parts.append(
+                f"status={status_code}"
+            )
+
+        llm_provider = getattr(
+            exc,
+            "llm_provider",
+            None,
+        )
+
+        if llm_provider:
+            parts.append(
+                f"provider={llm_provider}"
+            )
+
+        retry_after = getattr(
+            exc,
+            "retry_after",
+            None,
+        )
+
+        if retry_after is not None:
+            parts.append(
+                f"retry_after={retry_after}"
+            )
+
+        provider_specific_fields = getattr(
+            exc,
+            "provider_specific_fields",
+            None,
+        )
+
+        if provider_specific_fields:
+            parts.append(
+                "provider_fields="
+                + str(
+                    provider_specific_fields
+                )
+            )
+
+        message = str(exc).strip()
+
+        if message:
+            parts.append(
+                f"message={message}"
+            )
+
+        return " | ".join(parts)
+
 
     @staticmethod
     def _extract_usage(
@@ -360,6 +499,114 @@ class AIGateway:
             504,
         }
 
+    async def _completion(
+        self,
+        kwargs: dict[str, Any],
+        api_key: Optional[str],
+    ):
+        last_error: Optional[Exception] = None
+    
+        total_attempts = (
+            self.MAX_RETRIES + 1
+        )
+    
+        for attempt in range(total_attempts):
+            try:
+                return await acompletion(
+                    **kwargs
+                )
+    
+            except Exception as exc:
+                last_error = exc
+    
+                safe_error = (
+                    self._safe_error(
+                        exc,
+                        api_key,
+                    )
+                )
+    
+                error_class = (
+                    self._classify_error(
+                        exc
+                    )
+                )
+    
+                detailed_error = (
+                    self._error_details(
+                        exc
+                    )
+                )
+    
+                print(
+                    "❌ AI REQUEST FAILED | "
+                    f"attempt={attempt + 1}/{total_attempts} | "
+                    f"class={error_class} | "
+                    f"model={kwargs.get('model')} | "
+                    f"{detailed_error}"
+                )
+    
+                if self._is_context_length_error(
+                    exc
+                ):
+                    raise AIGatewayContextLengthError(
+                        safe_error
+                    ) from exc
+    
+                if not self._is_retryable_error(
+                    exc
+                ):
+                    raise AIGatewayError(
+                        f"[{error_class}] "
+                        f"{detailed_error}"
+                    ) from exc
+    
+                if attempt >= self.MAX_RETRIES:
+                    break
+    
+                delay = self.RETRY_DELAYS[
+                    min(
+                        attempt,
+                        len(self.RETRY_DELAYS) - 1,
+                    )
+                ]
+    
+                print(
+                    "⚠️ Retry AI Gateway | "
+                    f"class={error_class} | "
+                    f"delay={delay}s"
+                )
+    
+                await asyncio.sleep(
+                    delay
+                )
+    
+        if last_error is None:
+            raise AIGatewayRetryExhaustedError(
+                "هیچ خطای مشخصی ثبت نشد."
+            )
+    
+        error_class = (
+            self._classify_error(
+                last_error
+            )
+        )
+    
+        detailed_error = (
+            self._error_details(
+                last_error
+            )
+        )
+    
+        raise AIGatewayRetryExhaustedError(
+            f"[{error_class}] "
+            f"پس از {total_attempts} تلاش ناموفق. "
+            f"آخرین خطا: {detailed_error}"
+        ) from last_error
+
+
+
+
     @staticmethod
     def _safe_error(exc: Exception, api_key: Optional[str]) -> str:
         error = str(exc)
@@ -369,51 +616,7 @@ class AIGateway:
 
         return error
 
-    async def _completion(
-        self,
-        kwargs: dict[str, Any],
-        api_key: Optional[str],
-    ):
-        last_error: Optional[Exception] = None
-
-        for attempt in range(self.MAX_RETRIES + 1):
-            try:
-                return await acompletion(**kwargs)
-
-            except Exception as exc:
-                last_error = exc
-
-                if self._is_context_length_error(exc):
-                    raise AIGatewayContextLengthError(
-                        self._safe_error(exc, api_key)
-                    ) from exc
-
-                if not self._is_retryable_error(exc):
-                    raise AIGatewayError(
-                        self._safe_error(exc, api_key)
-                    ) from exc
-
-                if attempt >= self.MAX_RETRIES:
-                    break
-
-                delay = self.RETRY_DELAYS[
-                    min(attempt, len(self.RETRY_DELAYS) - 1)
-                ]
-
-                print(
-                    f"⚠️ خطای موقت AI Gateway "
-                    f"(تلاش {attempt + 1}/{self.MAX_RETRIES + 1}) - "
-                    f"Retry بعد از {delay}s: "
-                    f"{self._safe_error(exc, api_key)}"
-                )
-
-                await asyncio.sleep(delay)
-
-        raise AIGatewayError(
-            "سرویس AI بعد از چند تلاش متوالی پاسخ نداد. "
-            "لطفاً کمی بعد دوباره امتحان کنید."
-        ) from last_error
-
+    
     async def chat(
         self,
         messages: list[dict[str, str]],
@@ -488,7 +691,7 @@ class AIGateway:
 
                 if (
                     not shrunk_message
-                    or len(shrunk_message) >= len(message)
+                    or len(shrunk_message) >= len(messages)
                 ):
                     raise AIGatewayError(
                         "پیام حتی بعد از کوچیک‌کردن context"
