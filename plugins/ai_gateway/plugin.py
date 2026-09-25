@@ -10,7 +10,7 @@ from .telemetry import AITelemetryManager
 
 class AIGatewayPlugin(BasePlugin):
     name = "AI Gateway"
-    version = "2.14.7"
+    version = "2.14.8"
 
     def __init__(self, client, command_manager, db, event_bus):
         super().__init__(
@@ -31,11 +31,9 @@ class AIGatewayPlugin(BasePlugin):
 
         self.gateway = AIGateway(self.models)
 
-        self.telemetry = (
-            AITelemetryManager(
+        self.telemetry = AITelemetryManager(
                 self.client
             )
-        )
 
 
         self.bot_user_id = None
@@ -129,6 +127,7 @@ class AIGatewayPlugin(BasePlugin):
     activate_model = handlers.activate_model
     delete_model = handlers.delete_model
     model_info = handlers.model_info
+    model_statistics = handlers.model_statistics
     update_model_key = handlers.update_model_key
     ping_models = handlers.ping_models
 

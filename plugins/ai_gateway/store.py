@@ -9,6 +9,255 @@ from typing import Any, Optional
 
 from core.database_manager import DatabaseManager
 
+class AIModelStatisticsStore:
+    TABLE = "ai_model_statistics"
+
+    DEFAULT_SCORE = 50
+
+    def __init__(
+        self,
+        db: DatabaseManager,
+    ) -> None:
+        self.db = db
+
+    async def create_table(self) -> None:
+        await self.db.create_table(
+            self.TABLE,
+            columns={
+                "model_name": (
+                    "TEXT PRIMARY KEY"
+                ),
+
+                # -------------------------
+                # Scores
+                # -------------------------
+
+                "owner_score": (
+                    f"INTEGER NOT NULL "
+                    f"DEFAULT {self.DEFAULT_SCORE} "
+                    "CHECK(owner_score BETWEEN 0 AND 100)"
+                ),
+
+                "reliability_score": (
+                    f"INTEGER NOT NULL "
+                    f"DEFAULT {self.DEFAULT_SCORE} "
+                    "CHECK(reliability_score BETWEEN 0 AND 100)"
+                ),
+
+                "latency_score": (
+                    f"INTEGER NOT NULL "
+                    f"DEFAULT {self.DEFAULT_SCORE} "
+                    "CHECK(latency_score BETWEEN 0 AND 100)"
+                ),
+
+                # -------------------------
+                # Raw counters
+                # -------------------------
+
+                "success_count": (
+                    "INTEGER NOT NULL DEFAULT 0"
+                ),
+
+                "failure_count": (
+                    "INTEGER NOT NULL DEFAULT 0"
+                ),
+
+                "rate_limit_count": (
+                    "INTEGER NOT NULL DEFAULT 0"
+                ),
+
+                "quota_count": (
+                    "INTEGER NOT NULL DEFAULT 0"
+                ),
+
+                "timeout_count": (
+                    "INTEGER NOT NULL DEFAULT 0"
+                ),
+
+                "context_error_count": (
+                    "INTEGER NOT NULL DEFAULT 0"
+                ),
+
+                "auth_error_count": (
+                    "INTEGER NOT NULL DEFAULT 0"
+                ),
+
+                "server_error_count": (
+                    "INTEGER NOT NULL DEFAULT 0"
+                ),
+
+                "unknown_error_count": (
+                    "INTEGER NOT NULL DEFAULT 0"
+                ),
+
+                # -------------------------
+                # Latency
+                # -------------------------
+
+                "total_latency_ms": (
+                    "REAL NOT NULL DEFAULT 0"
+                ),
+
+                "average_latency_ms": (
+                    "REAL NOT NULL DEFAULT 0"
+                ),
+
+                # -------------------------
+                # Last state
+                # -------------------------
+
+                "last_success_at": "TEXT",
+                "last_failure_at": "TEXT",
+                "last_error": "TEXT",
+
+                "updated_at": (
+                    "TEXT NOT NULL "
+                    "DEFAULT CURRENT_TIMESTAMP"
+                ),
+            },
+        )
+
+    async def ensure(
+        self,
+        model_name: str,
+    ) -> None:
+        normalized = (
+            model_name.strip().lower()
+        )
+
+        if not normalized:
+            raise ValueError(
+                "نام مدل نمی‌تواند خالی باشد."
+            )
+
+        await self.db.insert(
+            self.TABLE,
+            {
+                "model_name": normalized,
+            },
+            or_ignore=True,
+        )
+
+    async def get(
+        self,
+        model_name: str,
+    ) -> dict[str, Any] | None:
+
+        normalized = (
+            model_name.strip().lower()
+        )
+
+        await self.ensure(
+            normalized
+        )
+
+        row = await self.db.select_one(
+            self.TABLE,
+            where={
+                "model_name": normalized,
+            },
+        )
+
+        return (
+            dict(row)
+            if row is not None
+            else None
+        )
+
+    async def get_all(
+        self,
+    ) -> list[dict[str, Any]]:
+
+        rows = await self.db.fetchall(
+            f"""
+            SELECT *
+            FROM {self.TABLE}
+            ORDER BY owner_score DESC
+            """
+        )
+
+        return [
+            dict(row)
+            for row in rows
+        ]
+
+    async def set_scores(
+        self,
+        model_name: str,
+        *,
+        owner_score: int | None = None,
+        reliability_score: int | None = None,
+        latency_score: int | None = None,
+    ) -> None:
+
+        normalized = (
+            model_name.strip().lower()
+        )
+
+        await self.ensure(
+            normalized
+        )
+
+        values: dict[str, Any] = {}
+
+        if owner_score is not None:
+            values["owner_score"] = self._validate_score(
+                owner_score
+            )
+
+        if reliability_score is not None:
+            values["reliability_score"] = self._validate_score(
+                reliability_score
+            )
+
+        if latency_score is not None:
+            values["latency_score"] = self._validate_score(
+                latency_score
+            )
+
+        if not values:
+            return
+
+        assignments = ", ".join(
+            f"{column} = ?"
+            for column in values
+        )
+
+        parameters = list(
+            values.values()
+        )
+
+        parameters.append(
+            normalized
+        )
+
+        await self.db.execute(
+            f"""
+            UPDATE {self.TABLE}
+            SET
+                {assignments},
+                updated_at = CURRENT_TIMESTAMP
+            WHERE model_name = ?
+            """,
+            tuple(parameters),
+        )
+
+    @staticmethod
+    def _validate_score(
+        score: int,
+    ) -> int:
+        score = int(score)
+
+        if not 0 <= score <= 100:
+            raise ValueError(
+                "امتیاز باید بین 0 تا 100 باشد."
+            )
+
+        return score
+
+
+
+
 
 class AIModelStore:
     TABLE = "ai_models"
@@ -444,6 +693,16 @@ class AIGroupSettingsStore:
         )
 
         self._trigger_cache.delete(group_id)
+
+
+
+
+
+
+
+
+
+
 class AIMemorySettingsStore:
     TABLE = "ai_memory_settings"
 
@@ -1152,20 +1411,18 @@ class AIGatewayStore:
     ) -> None:
 
         self.models = AIModelStore(db)
+        self.model_statistics = AIModelStatisticsStore(db)
         self.groups = AIGroupSettingsStore(db)
         self.memory = AIMemoryStore(db)
-        self.memory_settings = (
-            AIMemorySettingsStore(db)
-        )
+        self.memory_settings = AIMemorySettingsStore(db)
         self.api_keys = AIAPIKeyStore(db)
         self.timeline = AITimelineSettingsStore(db)
+        self.telemetry = AITelemetrySettingsStore(db)
 
-        self.telemetry = (
-            AITelemetrySettingsStore(db)
-        )
 
     async def create_tables(self) -> None:
         await self.models.create_table()
+        await self.model_statistics.create_table()
         await self.groups.create_table()
         await self.memory.create_tables()
         await self.memory_settings.create_table()

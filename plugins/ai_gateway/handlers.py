@@ -594,6 +594,104 @@ async def api_key_models_ping(
             break
 
 
+
+
+
+
+
+@command(
+    name="مدل آمار",
+    permission="owner",
+    chat_type="all",
+    description="آمار و امتیازهای یک مدل را نشان می‌دهد.",
+)
+async def model_statistics(
+    self,
+    event,
+):
+    name = (
+        event.args_text or ""
+    ).strip()
+
+    if not name:
+        await event.reply(
+            "❌ نام مدل را وارد کن.\n"
+            "مثال:\n"
+            "!مدل آمار gemini38flash"
+        )
+        return
+
+    model = await self.models.get(
+        name
+    )
+
+    if model is None:
+        await event.reply(
+            f"❌ مدل «{name}» پیدا نشد."
+        )
+        return
+
+    stats = (
+        await self.store.model_statistics.get(
+            model["name"]
+        )
+    )
+
+    if stats is None:
+        await event.reply(
+            f"❌ برای مدل «{model['name']}» "
+            "آماری ثبت نشده است."
+        )
+        return
+
+    await event.reply(
+        f"📊 آمار مدل «{model['name']}»\n\n"
+
+        "⭐ امتیازها\n"
+        f"• رضایت Owner: "
+        f"{stats['owner_score']}/100\n"
+        f"• Reliability: "
+        f"{stats['reliability_score']}/100\n"
+        f"• Latency: "
+        f"{stats['latency_score']}/100\n\n"
+
+        "📈 آمار درخواست‌ها\n"
+        f"• موفق: "
+        f"{stats['success_count']:,}\n"
+        f"• ناموفق: "
+        f"{stats['failure_count']:,}\n\n"
+
+        "❌ انواع خطا\n"
+        f"• Rate Limit: "
+        f"{stats['rate_limit_count']:,}\n"
+        f"• سهمیه: "
+        f"{stats['quota_count']:,}\n"
+        f"• Timeout: "
+        f"{stats['timeout_count']:,}\n"
+        f"• Context: "
+        f"{stats['context_error_count']:,}\n"
+        f"• احراز هویت: "
+        f"{stats['auth_error_count']:,}\n"
+        f"• Server: "
+        f"{stats['server_error_count']:,}\n"
+        f"• ناشناخته: "
+        f"{stats['unknown_error_count']:,}\n\n"
+
+        "⏱️ تأخیر\n"
+        f"• مجموع: "
+        f"{stats['total_latency_ms']:,.0f} ms\n"
+        f"• میانگین: "
+        f"{stats['average_latency_ms']:,.0f} ms\n\n"
+
+        "🕒 آخرین وضعیت\n"
+        f"• آخرین موفقیت: "
+        f"{stats['last_success_at'] or 'ندارد'}\n"
+        f"• آخرین شکست: "
+        f"{stats['last_failure_at'] or 'ندارد'}\n"
+        f"• آخرین خطا: "
+        f"{stats['last_error'] or 'ندارد'}"
+    )
+
 # =========================================================
 # MEMORY MANAGEMENT
 # =========================================================
