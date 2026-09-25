@@ -796,18 +796,6 @@ class AIGateway:
                     # Statistics: SUCCESS
                     # ---------------------------------------------
 
-                    if record_statistics:
-                        try:
-                            await self.statistics.record_success(
-                                litellm_model,
-                                model_latency_ms,
-                            )
-
-                        except Exception as stats_exc:
-                            print(
-                                "⚠️ ثبت آمار موفقیت مدل ناموفق بود: "
-                                f"{stats_exc}"
-                            )
 
                     print(
                         "✅ AI MODEL SUCCESS | "
@@ -864,9 +852,7 @@ class AIGateway:
                     if record_statistics:
                         try:
                             await self.statistics.record_failure(
-                                litellm_model,
-                                error_category,
-                                safe_error,
+                                candidate["name"],
                             )
 
                         except Exception as stats_exc:
