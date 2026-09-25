@@ -617,153 +617,172 @@ class AIGateway:
         return error
 
     
-    async def chat(
-        self,
-        messages: list[dict[str, str]],
-        *,
-        model: Optional[dict[str, Any]] = None,
-        timeout: float = 60.0,
-        temperature: Optional[float] = None,
-        return_metadata: bool = False,
-    ) -> str | tuple[str, dict[str, Any]]:
+async def chat(
+    self,
+    messages: list[dict[str, str]],
+    *,
+    model: Optional[dict[str, Any]] = None,
+    timeout: float = 60.0,
+    temperature: Optional[float] = None,
+    return_metadata: bool = False,
+) -> str | tuple[str, dict[str, Any]]:
 
-        model = (
-            model
-            or await self.models.get_active()
+    # -------------------------------------------------
+    # Candidate models
+    # -------------------------------------------------
+
+    if model is not None:
+        # وقتی مدل به‌صورت صریح مشخص شده،
+        # فقط همان مدل استفاده شود.
+        candidates = [model]
+
+    else:
+        # مدل فعال ابتدا، سپس بقیه مدل‌ها.
+        candidates = await self.models.get_all()
+
+    if not candidates:
+        raise AIGatewayError(
+            "هیچ مدلی برای ارسال درخواست وجود ندارد."
         )
 
-        if model is None:
-            raise AIGatewayError(
-                "هیچ مدل فعالی تنظیم نشده است."
+    last_error: Optional[Exception] = None
+
+    # -------------------------------------------------
+    # Fallback loop
+    # -------------------------------------------------
+
+    async with self._ai_semaphore:
+
+        for index, candidate in enumerate(candidates):
+
+            litellm_model = self._litellm_model(
+                candidate
             )
 
-        api_key = model.get("api_key")
+            api_key = candidate.get("api_key")
 
-        # -------------------------------------------------
-        # LiteLLM model identifier
-        # -------------------------------------------------
+            kwargs: dict[str, Any] = {
+                "model": litellm_model,
+                "messages": messages,
+                "timeout": timeout,
+            }
 
-        litellm_model = (
-            self._litellm_model(
-                model
-            )
-        )
+            if api_key:
+                kwargs["api_key"] = api_key
 
-        kwargs: dict[str, Any] = {
-            "model": litellm_model,
-            "messages": messages,
-            "timeout": timeout,
-        }
+            if candidate.get("base_url"):
+                kwargs["api_base"] = (
+                    candidate["base_url"]
+                )
 
-        if api_key:
-            kwargs["api_key"] = api_key
+            if temperature is not None:
+                kwargs["temperature"] = temperature
 
-        if model.get("base_url"):
-            kwargs["api_base"] = (
-                model["base_url"]
-            )
-
-        if temperature is not None:
-            kwargs["temperature"] = (
-                temperature
-            )
-
-        # -------------------------------------------------
-        # Request
-        # -------------------------------------------------
-
-        async with self._ai_semaphore:
             try:
+
+                print(
+                    "📡 AI MODEL ATTEMPT | "
+                    f"{index + 1}/{len(candidates)} | "
+                    f"model={litellm_model}"
+                )
+
+                # -----------------------------------------
+                # Request
+                # -----------------------------------------
+
                 response = await self._completion(
                     kwargs,
                     api_key,
                 )
-            except AIGatewayContextLengthError:
-                shrunk_message = []
 
-                if messages:
-                    shrunk_message.append(messages[0])
+                # -----------------------------------------
+                # Success
+                # -----------------------------------------
 
-                for message in reversed(messages):
-                    if message.get("role") == "user":
-                        shrunk_message.append(message)
-                        break
-
-                if (
-                    not shrunk_message
-                    or len(shrunk_message) >= len(messages)
-                ):
-                    raise AIGatewayError(
-                        "پیام حتی بعد از کوچیک‌کردن context"
-                        "هم بیش از حد مجاز مدل بود."
+                try:
+                    content = (
+                        response
+                        .choices[0]
+                        .message
+                        .content
                     )
 
+                except Exception as exc:
+                    raise AIGatewayError(
+                        "پاسخ مدل ساختار قابل استفاده‌ای نداشت."
+                    ) from exc
+
+                if not content:
+                    raise AIGatewayError(
+                        "مدل پاسخ متنی خالی برگرداند."
+                    )
+
+                content = str(
+                    content
+                ).strip()
+
                 print(
-                    "⚠️ Context از سقف مدل رد شد؛ "
-                    "تلاش دوباره با context بسیار کوچیک‌شده..."
+                    "✅ AI MODEL SUCCESS | "
+                    f"model={litellm_model}"
                 )
 
-                kwargs["messages"] = shrunk_message
+                if not return_metadata:
+                    return content
 
-                response = await self._completion(
-                    kwargs,
-                    api_key
+                return (
+                    content,
+                    {
+                        "model": litellm_model,
+                        "provider": candidate.get(
+                            "provider"
+                        ),
+                        "model_id": candidate.get(
+                            "model_id"
+                        ),
+                        "base_url": candidate.get(
+                            "base_url"
+                        ),
+                        "usage": self._extract_usage(
+                            response
+                        ),
+                    },
                 )
-        # -------------------------------------------------
-        # Extract content
-        # -------------------------------------------------
 
-        try:
-            content = (
-                response
-                .choices[0]
-                .message
-                .content
-            )
+            except Exception as exc:
 
-        except Exception as exc:
-            raise AIGatewayError(
-                "پاسخ مدل ساختار قابل استفاده‌ای نداشت."
-            ) from exc
+                last_error = exc
 
-        if not content:
-            raise AIGatewayError(
-                "مدل پاسخ متنی خالی برگرداند."
-            )
+                print(
+                    "❌ AI MODEL FAILED | "
+                    f"model={litellm_model} | "
+                    f"error={exc}"
+                )
 
-        content = str(
-            content
-        ).strip()
+                # این مدل شکست خورد.
+                # اگر مدل دیگری وجود دارد، همان messages
+                # اصلی را به آن می‌دهیم.
+                if index + 1 < len(candidates):
+                    print(
+                        "🔁 FALLBACK TO NEXT MODEL | "
+                        f"next={self._litellm_model(candidates[index + 1])}"
+                    )
+                    continue
 
-        # -------------------------------------------------
-        # Normal mode
-        # -------------------------------------------------
+    # -------------------------------------------------
+    # All models failed
+    # -------------------------------------------------
 
-        if not return_metadata:
-            return content
+    if last_error is not None:
+        raise AIGatewayError(
+            "همه مدل‌های موجود برای پاسخ‌گویی "
+            "ناموفق بودند. "
+            f"آخرین خطا: {last_error}"
+        ) from last_error
 
-        # -------------------------------------------------
-        # Telemetry metadata
-        # -------------------------------------------------
+    raise AIGatewayError(
+        "درخواست AI بدون دریافت پاسخ پایان یافت."
+    )
 
-        return (
-            content,
-            {
-                "model": litellm_model,
-                "provider": model.get(
-                    "provider"
-                ),
-                "model_id": model.get(
-                    "model_id"
-                ),
-                "base_url": model.get(
-                    "base_url"
-                ),
-                "usage": self._extract_usage(
-                    response
-                ),
-            },
-        )
     async def ping(
         self,
         model: dict[str, Any],
