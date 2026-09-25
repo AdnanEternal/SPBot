@@ -4,7 +4,7 @@ from core.decorators import command, on_bus_event, on_event
 
 from .gateway import AIGatewayError
 from .trigger import extract_trigger_text
-
+from plugins.ai_gateway.utils import score_emoji
 import traceback
 import time
 
@@ -644,16 +644,20 @@ async def model_statistics(
         )
         return
 
+    owner_score = stats['owner_score']
+    reliability_score = stats['reliability_score']
+    latency_score = stats['latency_score']
+
     await event.reply(
         f"📊 آمار مدل «{model['name']}»\n\n"
 
         "⭐ امتیازها\n"
-        f"• رضایت Owner: "
-        f"{stats['owner_score']}/100\n"
+        f"• Owner's consent: "
+        f"{score_emoji(owner_score)} {owner_score}/100\n"
         f"• Reliability: "
-        f"{stats['reliability_score']}/100\n"
+        f"{score_emoji(reliability_score)} {reliability_score}/100\n"
         f"• Latency: "
-        f"{stats['latency_score']}/100\n\n"
+        f"{score_emoji(latency_score)} {latency_score}/100\n\n"
 
         "📈 آمار درخواست‌ها\n"
         f"• موفق: "
@@ -664,17 +668,17 @@ async def model_statistics(
         "❌ انواع خطا\n"
         f"• Rate Limit: "
         f"{stats['rate_limit_count']:,}\n"
-        f"• سهمیه: "
+        f"• Quota: "
         f"{stats['quota_count']:,}\n"
         f"• Timeout: "
         f"{stats['timeout_count']:,}\n"
         f"• Context: "
         f"{stats['context_error_count']:,}\n"
-        f"• احراز هویت: "
+        f"• Authentication: "
         f"{stats['auth_error_count']:,}\n"
         f"• Server: "
         f"{stats['server_error_count']:,}\n"
-        f"• ناشناخته: "
+        f"• Unknown: "
         f"{stats['unknown_error_count']:,}\n\n"
 
         "⏱️ تأخیر\n"

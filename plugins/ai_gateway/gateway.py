@@ -616,172 +616,172 @@ class AIGateway:
 
         return error
 
-    
-async def chat(
-    self,
-    messages: list[dict[str, str]],
-    *,
-    model: Optional[dict[str, Any]] = None,
-    timeout: float = 60.0,
-    temperature: Optional[float] = None,
-    return_metadata: bool = False,
-) -> str | tuple[str, dict[str, Any]]:
+        
+    async def chat(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        model: Optional[dict[str, Any]] = None,
+        timeout: float = 60.0,
+        temperature: Optional[float] = None,
+        return_metadata: bool = False,
+    ) -> str | tuple[str, dict[str, Any]]:
 
-    # -------------------------------------------------
-    # Candidate models
-    # -------------------------------------------------
+        # -------------------------------------------------
+        # Candidate models
+        # -------------------------------------------------
 
-    if model is not None:
-        # وقتی مدل به‌صورت صریح مشخص شده،
-        # فقط همان مدل استفاده شود.
-        candidates = [model]
+        if model is not None:
+            # وقتی مدل به‌صورت صریح مشخص شده،
+            # فقط همان مدل استفاده شود.
+            candidates = [model]
 
-    else:
-        # مدل فعال ابتدا، سپس بقیه مدل‌ها.
-        candidates = await self.models.get_all()
+        else:
+            # مدل فعال ابتدا، سپس بقیه مدل‌ها.
+            candidates = await self.models.get_all()
 
-    if not candidates:
-        raise AIGatewayError(
-            "هیچ مدلی برای ارسال درخواست وجود ندارد."
-        )
-
-    last_error: Optional[Exception] = None
-
-    # -------------------------------------------------
-    # Fallback loop
-    # -------------------------------------------------
-
-    async with self._ai_semaphore:
-
-        for index, candidate in enumerate(candidates):
-
-            litellm_model = self._litellm_model(
-                candidate
+        if not candidates:
+            raise AIGatewayError(
+                "هیچ مدلی برای ارسال درخواست وجود ندارد."
             )
 
-            api_key = candidate.get("api_key")
+        last_error: Optional[Exception] = None
 
-            kwargs: dict[str, Any] = {
-                "model": litellm_model,
-                "messages": messages,
-                "timeout": timeout,
-            }
+        # -------------------------------------------------
+        # Fallback loop
+        # -------------------------------------------------
 
-            if api_key:
-                kwargs["api_key"] = api_key
+        async with self._ai_semaphore:
 
-            if candidate.get("base_url"):
-                kwargs["api_base"] = (
-                    candidate["base_url"]
+            for index, candidate in enumerate(candidates):
+
+                litellm_model = self._litellm_model(
+                    candidate
                 )
 
-            if temperature is not None:
-                kwargs["temperature"] = temperature
+                api_key = candidate.get("api_key")
 
-            try:
+                kwargs: dict[str, Any] = {
+                    "model": litellm_model,
+                    "messages": messages,
+                    "timeout": timeout,
+                }
 
-                print(
-                    "📡 AI MODEL ATTEMPT | "
-                    f"{index + 1}/{len(candidates)} | "
-                    f"model={litellm_model}"
-                )
+                if api_key:
+                    kwargs["api_key"] = api_key
 
-                # -----------------------------------------
-                # Request
-                # -----------------------------------------
+                if candidate.get("base_url"):
+                    kwargs["api_base"] = (
+                        candidate["base_url"]
+                    )
 
-                response = await self._completion(
-                    kwargs,
-                    api_key,
-                )
-
-                # -----------------------------------------
-                # Success
-                # -----------------------------------------
+                if temperature is not None:
+                    kwargs["temperature"] = temperature
 
                 try:
-                    content = (
-                        response
-                        .choices[0]
-                        .message
-                        .content
+
+                    print(
+                        "📡 AI MODEL ATTEMPT | "
+                        f"{index + 1}/{len(candidates)} | "
+                        f"model={litellm_model}"
+                    )
+
+                    # -----------------------------------------
+                    # Request
+                    # -----------------------------------------
+
+                    response = await self._completion(
+                        kwargs,
+                        api_key,
+                    )
+
+                    # -----------------------------------------
+                    # Success
+                    # -----------------------------------------
+
+                    try:
+                        content = (
+                            response
+                            .choices[0]
+                            .message
+                            .content
+                        )
+
+                    except Exception as exc:
+                        raise AIGatewayError(
+                            "پاسخ مدل ساختار قابل استفاده‌ای نداشت."
+                        ) from exc
+
+                    if not content:
+                        raise AIGatewayError(
+                            "مدل پاسخ متنی خالی برگرداند."
+                        )
+
+                    content = str(
+                        content
+                    ).strip()
+
+                    print(
+                        "✅ AI MODEL SUCCESS | "
+                        f"model={litellm_model}"
+                    )
+
+                    if not return_metadata:
+                        return content
+
+                    return (
+                        content,
+                        {
+                            "model": litellm_model,
+                            "provider": candidate.get(
+                                "provider"
+                            ),
+                            "model_id": candidate.get(
+                                "model_id"
+                            ),
+                            "base_url": candidate.get(
+                                "base_url"
+                            ),
+                            "usage": self._extract_usage(
+                                response
+                            ),
+                        },
                     )
 
                 except Exception as exc:
-                    raise AIGatewayError(
-                        "پاسخ مدل ساختار قابل استفاده‌ای نداشت."
-                    ) from exc
 
-                if not content:
-                    raise AIGatewayError(
-                        "مدل پاسخ متنی خالی برگرداند."
-                    )
+                    last_error = exc
 
-                content = str(
-                    content
-                ).strip()
-
-                print(
-                    "✅ AI MODEL SUCCESS | "
-                    f"model={litellm_model}"
-                )
-
-                if not return_metadata:
-                    return content
-
-                return (
-                    content,
-                    {
-                        "model": litellm_model,
-                        "provider": candidate.get(
-                            "provider"
-                        ),
-                        "model_id": candidate.get(
-                            "model_id"
-                        ),
-                        "base_url": candidate.get(
-                            "base_url"
-                        ),
-                        "usage": self._extract_usage(
-                            response
-                        ),
-                    },
-                )
-
-            except Exception as exc:
-
-                last_error = exc
-
-                print(
-                    "❌ AI MODEL FAILED | "
-                    f"model={litellm_model} | "
-                    f"error={exc}"
-                )
-
-                # این مدل شکست خورد.
-                # اگر مدل دیگری وجود دارد، همان messages
-                # اصلی را به آن می‌دهیم.
-                if index + 1 < len(candidates):
                     print(
-                        "🔁 FALLBACK TO NEXT MODEL | "
-                        f"next={self._litellm_model(candidates[index + 1])}"
+                        "❌ AI MODEL FAILED | "
+                        f"model={litellm_model} | "
+                        f"error={exc}"
                     )
-                    continue
 
-    # -------------------------------------------------
-    # All models failed
-    # -------------------------------------------------
+                    # این مدل شکست خورد.
+                    # اگر مدل دیگری وجود دارد، همان messages
+                    # اصلی را به آن می‌دهیم.
+                    if index + 1 < len(candidates):
+                        print(
+                            "🔁 FALLBACK TO NEXT MODEL | "
+                            f"next={self._litellm_model(candidates[index + 1])}"
+                        )
+                        continue
 
-    if last_error is not None:
+        # -------------------------------------------------
+        # All models failed
+        # -------------------------------------------------
+
+        if last_error is not None:
+            raise AIGatewayError(
+                "همه مدل‌های موجود برای پاسخ‌گویی "
+                "ناموفق بودند. "
+                f"آخرین خطا: {last_error}"
+            ) from last_error
+
         raise AIGatewayError(
-            "همه مدل‌های موجود برای پاسخ‌گویی "
-            "ناموفق بودند. "
-            f"آخرین خطا: {last_error}"
-        ) from last_error
-
-    raise AIGatewayError(
-        "درخواست AI بدون دریافت پاسخ پایان یافت."
-    )
+            "درخواست AI بدون دریافت پاسخ پایان یافت."
+        )
 
     async def ping(
         self,
