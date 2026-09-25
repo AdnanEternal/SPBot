@@ -703,7 +703,7 @@ async def model_statistics(
         f"• آخرین شکست: "
         f"{stats['last_failure_at'] or 'ندارد'}\n"
         f"• آخرین خطا: "
-        f"{stats['last_error'] or 'ندارد'}"
+        f"{stats['last_error'] or 'ندارد'}\n\n"
 
         f"• Last Ping success: "
         f"{stats['ping_last_success_at'] or 'None'}\n"
