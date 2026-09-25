@@ -315,3 +315,289 @@ class GitHubManager:
 
         with open(local_path, "wb") as file:
             file.write(data)
+
+
+    async def rotate_database_backup(
+    self,
+    local_path: str,
+    latest_path: str,
+    archive_path: str,
+    commit_message: str,
+) -> None:
+        """
+        بکاپ جدید را به latest_path می‌فرستد و latest قبلی را
+        در همان commit به archive_path منتقل می‌کند.
+
+        مثال:
+            backups/latest.db
+            ->
+            backups/database_2026-09-25_17-38-00.db
+
+        سپس فایل جدید در:
+            backups/latest.db
+        قرار می‌گیرد.
+
+        این عملیات در یک commit انجام می‌شود.
+        """
+
+        
+
+        with open(
+            local_path,
+            "rb",
+        ) as file:
+            new_content = base64.b64encode(
+                file.read()
+            ).decode("utf-8")
+
+        base_url = (
+            f"{self.BASE_URL}/repos/"
+            f"{self.repository}"
+        )
+
+        async with aiohttp.ClientSession(
+            headers=self.headers,
+            timeout=aiohttp.ClientTimeout(
+                total=120
+            ),
+        ) as session:
+
+            # -------------------------------------------------
+            # 1. بررسی latest فعلی
+            # -------------------------------------------------
+
+            latest_url = (
+                f"{base_url}/contents/"
+                f"{latest_path}"
+            )
+
+            old_latest_sha = None
+
+            async with session.get(
+                latest_url,
+                params={"ref": self.branch},
+                headers={
+                    **self.headers,
+                    "Accept": (
+                        "application/vnd.github+json"
+                    ),
+                },
+            ) as response:
+
+                if response.status == 200:
+                    data = await response.json()
+
+                    old_latest_sha = data.get(
+                        "sha"
+                    )
+
+                elif response.status != 404:
+                    text = await response.text()
+
+                    raise RuntimeError(
+                        "Failed to inspect current "
+                        f"database backup: "
+                        f"{response.status} - {text}"
+                    )
+
+            # -------------------------------------------------
+            # 2. گرفتن HEAD branch
+            # -------------------------------------------------
+
+            ref_url = (
+                f"{base_url}/git/ref/"
+                f"heads/{self.branch}"
+            )
+
+            async with session.get(
+                ref_url
+            ) as response:
+
+                if response.status != 200:
+                    text = await response.text()
+
+                    raise RuntimeError(
+                        "Failed to get GitHub branch "
+                        f"reference: "
+                        f"{response.status} - {text}"
+                    )
+
+                ref_data = await response.json()
+
+            parent_commit_sha = (
+                ref_data["object"]["sha"]
+            )
+
+            # -------------------------------------------------
+            # 3. گرفتن tree فعلی
+            # -------------------------------------------------
+
+            commit_url = (
+                f"{base_url}/git/commits/"
+                f"{parent_commit_sha}"
+            )
+
+            async with session.get(
+                commit_url
+            ) as response:
+
+                if response.status != 200:
+                    text = await response.text()
+
+                    raise RuntimeError(
+                        "Failed to get current commit: "
+                        f"{response.status} - {text}"
+                    )
+
+                commit_data = await response.json()
+
+            base_tree_sha = (
+                commit_data["tree"]["sha"]
+            )
+
+            # -------------------------------------------------
+            # 4. ساخت blob برای بکاپ جدید
+            # -------------------------------------------------
+
+            blob_url = (
+                f"{base_url}/git/blobs"
+            )
+
+            async with session.post(
+                blob_url,
+                json={
+                    "content": new_content,
+                    "encoding": "base64",
+                },
+            ) as response:
+
+                if response.status not in (
+                    201,
+                ):
+                    text = await response.text()
+
+                    raise RuntimeError(
+                        "Failed to create database "
+                        f"backup blob: "
+                        f"{response.status} - {text}"
+                    )
+
+                blob_data = await response.json()
+
+            new_blob_sha = blob_data["sha"]
+
+            # -------------------------------------------------
+            # 5. ساخت tree جدید
+            #
+            # latest جدید:
+            #   latest_path -> new blob
+            #
+            # latest قبلی:
+            #   archive_path -> old blob
+            # -------------------------------------------------
+
+            tree_entries = [
+                {
+                    "path": latest_path,
+                    "mode": "100644",
+                    "type": "blob",
+                    "sha": new_blob_sha,
+                }
+            ]
+
+            if old_latest_sha:
+                tree_entries.append(
+                    {
+                        "path": archive_path,
+                        "mode": "100644",
+                        "type": "blob",
+                        "sha": old_latest_sha,
+                    }
+                )
+
+            tree_url = (
+                f"{base_url}/git/trees"
+            )
+
+            async with session.post(
+                tree_url,
+                json={
+                    "base_tree": base_tree_sha,
+                    "tree": tree_entries,
+                },
+            ) as response:
+
+                if response.status != 201:
+                    text = await response.text()
+
+                    raise RuntimeError(
+                        "Failed to create backup "
+                        f"tree: "
+                        f"{response.status} - {text}"
+                    )
+
+                tree_data = await response.json()
+
+            new_tree_sha = tree_data["sha"]
+
+            # -------------------------------------------------
+            # 6. ساخت commit
+            # -------------------------------------------------
+
+            create_commit_url = (
+                f"{base_url}/git/commits"
+            )
+
+            async with session.post(
+                create_commit_url,
+                json={
+                    "message": commit_message,
+                    "tree": new_tree_sha,
+                    "parents": [
+                        parent_commit_sha
+                    ],
+                },
+            ) as response:
+
+                if response.status != 201:
+                    text = await response.text()
+
+                    raise RuntimeError(
+                        "Failed to create backup "
+                        f"commit: "
+                        f"{response.status} - {text}"
+                    )
+
+                new_commit_data = (
+                    await response.json()
+                )
+
+            new_commit_sha = (
+                new_commit_data["sha"]
+            )
+
+            # -------------------------------------------------
+            # 7. انتقال branch به commit جدید
+            # -------------------------------------------------
+
+            update_ref_url = (
+                f"{base_url}/git/refs/heads/"
+                f"{self.branch}"
+            )
+
+            async with session.patch(
+                update_ref_url,
+                json={
+                    "sha": new_commit_sha,
+                    "force": False,
+                },
+            ) as response:
+
+                if response.status != 200:
+                    text = await response.text()
+
+                    raise RuntimeError(
+                        "Failed to update GitHub "
+                        f"branch: "
+                        f"{response.status} - {text}"
+                    )

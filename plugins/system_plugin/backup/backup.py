@@ -6,7 +6,7 @@ import tempfile
 from config import config
 from core.database_manager import DatabaseManager
 from ..github_manager.manager import GitHubManager
-
+from datetime import datetime
 
 class DatabaseBackupManager:
     LOCK_TIMEOUT = 30
@@ -110,11 +110,22 @@ class DatabaseBackupManager:
                 "✅ Backup محلی سالم است؛ "
                 "در حال آپلود به GitHub..."
             )
+            timestamp = datetime.now().strftime(
+                "%Y-%m-%d_%H-%M-%S"
+            )
 
-            await self.github.upload_file(
+            archive_path = (
+                f"backups/database_{timestamp}.db"
+            )
+
+            await self.github.rotate_database_backup(
                 local_path=temp_path,
-                remote_path=self.remote_path,
-                commit_message="Update database backup",
+                latest_path=self.remote_path,
+                archive_path=archive_path,
+                commit_message=(
+                    f"Rotate database backup "
+                    f"{timestamp}"
+                ),
             )
 
             print(

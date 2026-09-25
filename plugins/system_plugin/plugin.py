@@ -37,7 +37,7 @@ class SystemPlugin(BasePlugin):
         self.runtime_update_lock = asyncio.Lock()
 
     name = "System"
-    version = "2.9.3"
+    version = "2.9.4"
 
     show_help = handlers.show_help
     github_check = handlers.github_check

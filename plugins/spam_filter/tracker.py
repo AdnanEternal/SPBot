@@ -11,7 +11,7 @@ from typing import Optional
 
 class SpamTracker:
     CLEANUP_EVERY = 500   # هر چند پیام یه بار پاک‌سازی انجام بشه
-    STALE_SECONDS = 600   # کاربری که ۱۰ دقیقه پیام نداده از حافظه پاک می‌شه
+    STALE_SECONDS = 200   # کاربری که ۱۰ دقیقه پیام نداده از حافظه پاک می‌شه
 
     def __init__(self) -> None:
         self._messages: dict[tuple[int, int], deque] = defaultdict(lambda: deque(maxlen=100))
