@@ -691,10 +691,10 @@ async def model_statistics(
         f"• Average latency: "
         f"{stats['ping_average_latency_ms']:,.0f} ms\n\n"
 
-        "⏱️ تأخیر\n"
-        f"• مجموع: "
+        "⏱️ latency\n"
+        f"• Total: "
         f"{stats['total_latency_ms']:,.0f} ms\n"
-        f"• میانگین: "
+        f"• Average: "
         f"{stats['average_latency_ms']:,.0f} ms\n\n"
 
         "🕒 آخرین وضعیت\n"
