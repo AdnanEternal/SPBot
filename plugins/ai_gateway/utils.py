@@ -1,17 +1,17 @@
 def score_emoji(score: int) -> str:
     if score < 25:
-        return "🔴"
+        return "🟥"
 
     if score < 45:
-        return "🟠"
+        return "🟧"
 
     if score < 55:
-        return "🟡"
+        return "🟨"
 
     if score < 75:
-        return "🟢"
+        return "🟩"
 
     if score < 85:
-        return "🟣"
+        return "🟪"
 
     return "👑"

@@ -652,12 +652,12 @@ async def model_statistics(
         f"📊 آمار مدل «{model['name']}»\n\n"
 
         "⭐ امتیازها\n"
-        f"• Owner's consent: "
-        f"{score_emoji(owner_score)} {owner_score}/100\n"
-        f"• Reliability: "
-        f"{score_emoji(reliability_score)} {reliability_score}/100\n"
-        f"• Latency: "
-        f"{score_emoji(latency_score)} {latency_score}/100\n\n"
+        f"{score_emoji(owner_score)} Owner's consent: "
+        f"{owner_score}/100\n"
+        f"{score_emoji(reliability_score)} Reliability: "
+        f"{reliability_score}/100\n"
+        f"{score_emoji(latency_score)}Latency: "
+        f"{latency_score}/100\n\n"
 
         "📈 آمار درخواست‌ها\n"
         f"• موفق: "
