@@ -6,7 +6,7 @@ import tempfile
 from config import config
 from core.database_manager import DatabaseManager
 from ..github_manager.manager import GitHubManager
-from datetime import datetime
+from core.time_manager import format_project_time, now_in
 
 class DatabaseBackupManager:
     LOCK_TIMEOUT = 30
@@ -110,8 +110,13 @@ class DatabaseBackupManager:
                 "✅ Backup محلی سالم است؛ "
                 "در حال آپلود به GitHub..."
             )
-            timestamp = datetime.now().strftime(
-                "%Y-%m-%d_%H-%M-%S"
+            timestamp = format_project_time(
+                now_in("Asia/Tehran"),
+                "%Y-%m-%d_%H-%M-%S",
+            )
+
+            archive_path = (
+                f"backups/database_{timestamp}.db"
             )
 
             archive_path = (
