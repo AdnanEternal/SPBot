@@ -10,7 +10,7 @@ from .telemetry import AITelemetryManager
 
 class AIGatewayPlugin(BasePlugin):
     name = "AI Gateway"
-    version = "2.15.2"
+    version = "2.15.3"
 
     def __init__(self, client, command_manager, db, event_bus):
         super().__init__(

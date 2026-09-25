@@ -17,12 +17,46 @@ class AIModelStatisticsStore:
     TABLE = "ai_model_statistics"
 
     DEFAULT_SCORE = 50
+    OWNER_WEIGHT = 0.70
+    RELIABILITY_WEIGHT = 0.20
+    LATENCY_WEIGHT = 0.10
 
     def __init__(
         self,
         db: DatabaseManager,
     ) -> None:
         self.db = db
+
+
+
+
+    @classmethod
+    def calculate_overall_score(
+        cls,
+        stats: dict[str, Any],
+    ) -> int:
+
+        score = (
+            float(stats["owner_score"])
+            * cls.OWNER_WEIGHT
+            + float(stats["reliability_score"])
+            * cls.RELIABILITY_WEIGHT
+            + float(stats["latency_score"])
+            * cls.LATENCY_WEIGHT
+        )
+
+        return int(
+            round(
+                max(
+                    0,
+                    min(
+                        100,
+                        score,
+                    ),
+                )
+            )
+        )
+
 
     async def create_table(self) -> None:
         await self.db.create_table(
@@ -588,7 +622,7 @@ class AIModelStatisticsStore:
                 normalized,
             ),
         )
-        
+
         await self.recalculate_scores(
             normalized
         )

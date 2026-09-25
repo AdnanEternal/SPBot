@@ -656,6 +656,82 @@ class AIGateway:
             504,
         }
 
+
+
+
+
+
+
+    async def _get_model_candidates(
+        self,
+    ) -> list[dict[str, Any]]:
+
+        models = await self.models.get_all()
+
+        if not models:
+            return []
+
+        active_model = await self.models.get_active()
+
+        statistics = (
+            await self.statistics.get_all()
+        )
+
+        statistics_map = {
+            stats["model_name"]: stats
+            for stats in statistics
+        }
+
+        active_name = (
+            active_model["name"]
+            if active_model is not None
+            else None
+        )
+
+        fallback_models = [
+            model
+            for model in models
+            if (
+                active_name is None
+                or model["name"] != active_name
+            )
+        ]
+
+        def overall_score(
+            model: dict[str, Any],
+        ) -> int:
+
+            stats = statistics_map.get(
+                model["name"]
+            )
+
+            if stats is None:
+                return 50
+
+            return self.statistics.calculate_overall_score(
+                stats
+            )
+
+        fallback_models.sort(
+            key=overall_score,
+            reverse=True,
+        )
+
+        if active_model is not None:
+            return [
+                active_model,
+                *fallback_models,
+            ]
+
+        return fallback_models
+
+
+
+
+
+
+
+
     async def _completion(
         self,
         kwargs: dict[str, Any],
@@ -807,15 +883,22 @@ class AIGateway:
         # -------------------------------------------------
         # Candidate models
         # -------------------------------------------------
-
         if model is not None:
+
             # وقتی مدل به‌صورت صریح مشخص شده،
             # فقط همان مدل استفاده شود.
-            candidates = [model]
+            candidates = [
+                model
+            ]
 
         else:
-            # مدل فعال ابتدا، سپس بقیه مدل‌ها.
-            candidates = await self.models.get_all()
+
+            # مدل Active اولین انتخاب است.
+            # بعد از آن، مدل‌ها بر اساس Overall Score
+            # از بیشترین به کمترین مرتب می‌شوند.
+            candidates = (
+                await self._get_model_candidates()
+            )
 
         if not candidates:
             raise AIGatewayError(
