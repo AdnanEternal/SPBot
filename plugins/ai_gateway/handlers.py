@@ -681,6 +681,16 @@ async def model_statistics(
         f"• Unknown: "
         f"{stats['unknown_error_count']:,}\n\n"
 
+        "📡 Ping\n"
+        f"• Success: "
+        f"{stats['ping_success_count']:,}\n"
+        f"• Failure: "
+        f"{stats['ping_failure_count']:,}\n"
+        f"• Total latency: "
+        f"{stats['ping_total_latency_ms']:,.0f} ms\n"
+        f"• Average latency: "
+        f"{stats['ping_average_latency_ms']:,.0f} ms\n\n"
+
         "⏱️ تأخیر\n"
         f"• مجموع: "
         f"{stats['total_latency_ms']:,.0f} ms\n"
@@ -694,6 +704,13 @@ async def model_statistics(
         f"{stats['last_failure_at'] or 'ندارد'}\n"
         f"• آخرین خطا: "
         f"{stats['last_error'] or 'ندارد'}"
+
+        f"• Last Ping success: "
+        f"{stats['ping_last_success_at'] or 'None'}\n"
+        f"• Last Ping failure: "
+        f"{stats['ping_last_failure_at'] or 'None'}\n"
+        f"• Last Ping error: "
+        f"{stats['ping_last_error'] or 'None'}"
     )
 
 # =========================================================

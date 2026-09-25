@@ -7,8 +7,10 @@ import time
 from typing import Any, Optional
 
 from litellm import acompletion
-
-from .store import AIModelStore
+from .store import (
+    AIModelStore,
+    AIModelStatisticsStore,
+)
 
 
 class AIGatewayError(Exception):
@@ -43,12 +45,16 @@ class AIGateway:
     def __init__(
         self,
         models: AIModelStore,
+        statistics: AIModelStatisticsStore,
     ) -> None:
+        
         self.models = models
+        self.statistics = statistics
 
         self._ai_semaphore = asyncio.Semaphore(
             self.AI_CONCURRENCY
         )
+
 
 
     @staticmethod
@@ -66,10 +72,54 @@ class AIGateway:
             None,
         )
 
+        message = str(
+            exc
+        ).lower()
+
+        provider_fields = str(
+            getattr(
+                exc,
+                "provider_specific_fields",
+                "",
+            )
+        ).lower()
+
+        combined = (
+            message
+            + " "
+            + provider_fields
+        )
+
+        if AIGateway._is_context_length_error(
+            exc
+        ):
+            return "CONTEXT"
+
+        if status_code in {
+            401,
+            403,
+        }:
+            return "AUTHENTICATION"
+
+        quota_keywords = (
+            "quota",
+            "insufficient_quota",
+            "daily limit",
+            "usage limit",
+            "credits exhausted",
+        )
+
+        if any(
+            keyword in combined
+            for keyword in quota_keywords
+        ):
+            return "QUOTA"
+
         if (
             status_code == 429
             or "ratelimit" in error_name
             or "rate_limit" in error_name
+            or "rate limit" in message
         ):
             return "RATE_LIMIT"
 
@@ -83,31 +133,13 @@ class AIGateway:
             return "TIMEOUT"
 
         if status_code in {
-            401,
-            403,
-        }:
-            return "AUTHENTICATION"
-
-        if status_code == 400:
-            return "BAD_REQUEST"
-
-        if status_code in {
             500,
             502,
             503,
         }:
             return "SERVER_ERROR"
 
-        if (
-            "connection" in error_name
-            or "connect" in str(exc).lower()
-        ):
-            return "CONNECTION"
-
         return "UNKNOWN"
-
-
-
     @staticmethod
     def _error_details(
         exc: Exception,
@@ -358,6 +390,7 @@ class AIGateway:
                 ],
                 model=model,
                 timeout=timeout,
+                record_statistics=False,
             )
 
         except AIGatewayError as exc:
@@ -503,6 +536,9 @@ class AIGateway:
         self,
         kwargs: dict[str, Any],
         api_key: Optional[str],
+        *,
+        statistics_name: str | None = None,
+        record_statistics: bool = True,
     ):
         last_error: Optional[Exception] = None
     
@@ -531,7 +567,23 @@ class AIGateway:
                         exc
                     )
                 )
-    
+                if (
+                    record_statistics
+                    and statistics_name
+                ):
+                    try:
+                        await self.statistics.record_attempt_error(
+                            statistics_name,
+                            error_class,
+                            safe_error,
+                        )
+
+                    except Exception as stats_exc:
+                        print(
+                            "⚠️ ثبت خطای Attempt مدل ناموفق بود: "
+                            f"{stats_exc}"
+                        )
+
                 detailed_error = (
                     self._error_details(
                         exc
@@ -625,6 +677,7 @@ class AIGateway:
         timeout: float = 60.0,
         temperature: Optional[float] = None,
         return_metadata: bool = False,
+        record_statistics: bool = True,
     ) -> str | tuple[str, dict[str, Any]]:
 
         # -------------------------------------------------
@@ -678,6 +731,9 @@ class AIGateway:
                 if temperature is not None:
                     kwargs["temperature"] = temperature
 
+                model_started = time.perf_counter()
+                api_response_received = False
+                
                 try:
 
                     print(
@@ -686,18 +742,14 @@ class AIGateway:
                         f"model={litellm_model}"
                     )
 
-                    # -----------------------------------------
-                    # Request
-                    # -----------------------------------------
-
                     response = await self._completion(
                         kwargs,
                         api_key,
+                        statistics_name=candidate["name"],
+                        record_statistics=record_statistics,
+                    
                     )
-
-                    # -----------------------------------------
-                    # Success
-                    # -----------------------------------------
+                    api_response_received = True
 
                     try:
                         content = (
@@ -721,9 +773,46 @@ class AIGateway:
                         content
                     ).strip()
 
+                    model_latency_ms = (
+                        time.perf_counter()
+                        - model_started
+                    ) * 1000
+
+                    if record_statistics:
+                        try:
+                            await self.statistics.record_success(
+                                candidate["name"],
+                                model_latency_ms,
+                            )
+
+                        except Exception as stats_exc:
+                            print(
+                                "⚠️ ثبت موفقیت مدل ناموفق بود: "
+                                f"{stats_exc}"
+                            )
+
+
+                    # ---------------------------------------------
+                    # Statistics: SUCCESS
+                    # ---------------------------------------------
+
+                    if record_statistics:
+                        try:
+                            await self.statistics.record_success(
+                                litellm_model,
+                                model_latency_ms,
+                            )
+
+                        except Exception as stats_exc:
+                            print(
+                                "⚠️ ثبت آمار موفقیت مدل ناموفق بود: "
+                                f"{stats_exc}"
+                            )
+
                     print(
                         "✅ AI MODEL SUCCESS | "
-                        f"model={litellm_model}"
+                        f"model={litellm_model} | "
+                        f"latency={model_latency_ms:.0f}ms"
                     )
 
                     if not return_metadata:
@@ -750,24 +839,57 @@ class AIGateway:
 
                 except Exception as exc:
 
+                    model_latency_ms = (
+                        time.perf_counter()
+                        - model_started
+                    ) * 1000
+
                     last_error = exc
+
+                    error_category = (
+                        self._classify_error(
+                            exc
+                        )
+                    )
+
+                    safe_error = self._safe_error(
+                        str(exc),
+                        api_key,
+                    )
+
+                    # ---------------------------------------------
+                    # Statistics: FAILURE
+                    # ---------------------------------------------
+
+                    if record_statistics:
+                        try:
+                            await self.statistics.record_failure(
+                                litellm_model,
+                                error_category,
+                                safe_error,
+                            )
+
+                        except Exception as stats_exc:
+                            print(
+                                "⚠️ ثبت آمار شکست مدل ناموفق بود: "
+                                f"{stats_exc}"
+                            )
 
                     print(
                         "❌ AI MODEL FAILED | "
                         f"model={litellm_model} | "
-                        f"error={exc}"
+                        f"class={error_category} | "
+                        f"latency={model_latency_ms:.0f}ms | "
+                        f"error={safe_error}"
                     )
 
-                    # این مدل شکست خورد.
-                    # اگر مدل دیگری وجود دارد، همان messages
-                    # اصلی را به آن می‌دهیم.
                     if index + 1 < len(candidates):
                         print(
                             "🔁 FALLBACK TO NEXT MODEL | "
                             f"next={self._litellm_model(candidates[index + 1])}"
                         )
-                        continue
 
+                        continue
         # -------------------------------------------------
         # All models failed
         # -------------------------------------------------
@@ -782,7 +904,7 @@ class AIGateway:
         raise AIGatewayError(
             "درخواست AI بدون دریافت پاسخ پایان یافت."
         )
-
+    
     async def ping(
         self,
         model: dict[str, Any],
@@ -802,17 +924,46 @@ class AIGateway:
                 model=model,
                 timeout=timeout,
                 temperature=0,
+                record_statistics=False,
             )
 
-        except AIGatewayError as exc:
+        except Exception as exc:
+
             latency = (
-                time.perf_counter() - started
+                time.perf_counter()
+                - started
             ) * 1000
+
+            try:
+                await self.statistics.record_ping_failure(
+                    model["name"],
+                    latency,
+                    str(exc),
+                )
+
+            except Exception as stats_exc:
+                print(
+                    "⚠️ ثبت Ping ناموفق بود: "
+                    f"{stats_exc}"
+                )
 
             return False, latency, str(exc)
 
         latency = (
-            time.perf_counter() - started
+            time.perf_counter()
+            - started
         ) * 1000
+
+        try:
+            await self.statistics.record_ping_success(
+                model["name"],
+                latency,
+            )
+
+        except Exception as stats_exc:
+            print(
+                "⚠️ ثبت Ping موفق بود ولی ذخیره آمار "
+                f"ناموفق شد: {stats_exc}"
+            )
 
         return True, latency, ""

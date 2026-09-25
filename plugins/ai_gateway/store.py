@@ -1,13 +1,17 @@
 
 
 import asyncio
-from core.ttl_cache import TTLCache
 from litellm import token_counter
 
 
 from typing import Any, Optional
 
 from core.database_manager import DatabaseManager
+from core.ttl_cache import TTLCache
+from core.time_manager import (
+    format_project_time,
+    now,
+)
 
 class AIModelStatisticsStore:
     TABLE = "ai_model_statistics"
@@ -51,7 +55,7 @@ class AIModelStatisticsStore:
                 ),
 
                 # -------------------------
-                # Raw counters
+                # Real request counters
                 # -------------------------
 
                 "success_count": (
@@ -91,7 +95,7 @@ class AIModelStatisticsStore:
                 ),
 
                 # -------------------------
-                # Latency
+                # Real request latency
                 # -------------------------
 
                 "total_latency_ms": (
@@ -103,12 +107,36 @@ class AIModelStatisticsStore:
                 ),
 
                 # -------------------------
-                # Last state
+                # Last real request state
                 # -------------------------
 
                 "last_success_at": "TEXT",
                 "last_failure_at": "TEXT",
                 "last_error": "TEXT",
+
+                # -------------------------
+                # Ping
+                # -------------------------
+
+                "ping_success_count": (
+                    "INTEGER NOT NULL DEFAULT 0"
+                ),
+
+                "ping_failure_count": (
+                    "INTEGER NOT NULL DEFAULT 0"
+                ),
+
+                "ping_total_latency_ms": (
+                    "REAL NOT NULL DEFAULT 0"
+                ),
+
+                "ping_average_latency_ms": (
+                    "REAL NOT NULL DEFAULT 0"
+                ),
+
+                "ping_last_success_at": "TEXT",
+                "ping_last_failure_at": "TEXT",
+                "ping_last_error": "TEXT",
 
                 "updated_at": (
                     "TEXT NOT NULL "
@@ -117,6 +145,49 @@ class AIModelStatisticsStore:
             },
         )
 
+        # -------------------------
+        # Migration
+        # -------------------------
+
+        rows = await self.db.fetchall(
+            f"PRAGMA table_info({self.TABLE})"
+        )
+
+        columns = {
+            row["name"]
+            for row in rows
+        }
+
+        migrations = {
+            "ping_success_count": (
+                "INTEGER NOT NULL DEFAULT 0"
+            ),
+            "ping_failure_count": (
+                "INTEGER NOT NULL DEFAULT 0"
+            ),
+            "ping_total_latency_ms": (
+                "REAL NOT NULL DEFAULT 0"
+            ),
+            "ping_average_latency_ms": (
+                "REAL NOT NULL DEFAULT 0"
+            ),
+            "ping_last_success_at": "TEXT",
+            "ping_last_failure_at": "TEXT",
+            "ping_last_error": "TEXT",
+        }
+
+        for column, definition in migrations.items():
+
+            if column in columns:
+                continue
+
+            await self.db.execute(
+                f"""
+                ALTER TABLE {self.TABLE}
+                ADD COLUMN {column} {definition}
+                """
+            )
+            
     async def ensure(
         self,
         model_name: str,
@@ -242,6 +313,277 @@ class AIModelStatisticsStore:
             tuple(parameters),
         )
 
+
+
+    async def record_attempt_error(
+        self,
+        model_name: str,
+        error_category: str,
+        error: str,
+    ) -> None:
+
+        normalized = (
+            model_name.strip().lower()
+        )
+
+        await self.ensure(
+            normalized
+        )
+
+        category_columns = {
+            "RATE_LIMIT": "rate_limit_count",
+            "QUOTA": "quota_count",
+            "TIMEOUT": "timeout_count",
+            "CONTEXT": "context_error_count",
+            "AUTHENTICATION": "auth_error_count",
+            "SERVER_ERROR": "server_error_count",
+            "UNKNOWN": "unknown_error_count",
+        }
+
+        error_column = (
+            category_columns.get(
+                error_category,
+                "unknown_error_count",
+            )
+        )
+
+        timestamp = format_project_time(
+            now()
+        )
+
+        safe_error = str(
+            error or ""
+        ).strip()
+
+        if len(safe_error) > 2000:
+            safe_error = (
+                safe_error[:1997]
+                + "..."
+            )
+
+        await self.db.execute(
+            f"""
+            UPDATE {self.TABLE}
+            SET
+                {error_column} =
+                    {error_column} + 1,
+
+                last_failure_at = ?,
+
+                last_error = ?,
+
+                updated_at =
+                    CURRENT_TIMESTAMP
+
+            WHERE model_name = ?
+            """,
+            (
+                timestamp,
+                safe_error,
+                normalized,
+            ),
+        )
+
+    async def record_ping_success(
+        self,
+        model_name: str,
+        latency_ms: float,
+    ) -> None:
+
+        normalized = (
+            model_name.strip().lower()
+        )
+
+        await self.ensure(
+            normalized
+        )
+
+        latency_ms = max(
+            0.0,
+            float(latency_ms),
+        )
+
+        timestamp = format_project_time(
+            now()
+        )
+
+        await self.db.execute(
+            f"""
+            UPDATE {self.TABLE}
+            SET
+                ping_success_count =
+                    ping_success_count + 1,
+
+                ping_total_latency_ms =
+                    ping_total_latency_ms + ?,
+
+                ping_average_latency_ms =
+                    (
+                        ping_total_latency_ms + ?
+                    ) / (
+                        ping_success_count + 1
+                    ),
+
+                ping_last_success_at = ?,
+
+                updated_at =
+                    CURRENT_TIMESTAMP
+
+            WHERE model_name = ?
+            """,
+            (
+                latency_ms,
+                latency_ms,
+                timestamp,
+                normalized,
+            ),
+        )
+
+
+    async def record_ping_failure(
+        self,
+        model_name: str,
+        latency_ms: float,
+        error: str,
+    ) -> None:
+
+        normalized = (
+            model_name.strip().lower()
+        )
+
+        await self.ensure(
+            normalized
+        )
+
+        timestamp = format_project_time(
+            now()
+        )
+
+        safe_error = str(
+            error or ""
+        ).strip()
+
+        if len(safe_error) > 2000:
+            safe_error = (
+                safe_error[:1997]
+                + "..."
+            )
+
+        await self.db.execute(
+            f"""
+            UPDATE {self.TABLE}
+            SET
+                ping_failure_count =
+                    ping_failure_count + 1,
+
+                ping_last_failure_at = ?,
+
+                ping_last_error = ?,
+
+                updated_at =
+                    CURRENT_TIMESTAMP
+
+            WHERE model_name = ?
+            """,
+            (
+                timestamp,
+                safe_error,
+                normalized,
+            ),
+        )
+
+    async def record_success(
+        self,
+        model_name: str,
+        latency_ms: float,
+    ) -> None:
+
+        normalized = (
+            model_name.strip().lower()
+        )
+
+        await self.ensure(
+            normalized
+        )
+
+        latency_ms = max(
+            0.0,
+            float(latency_ms),
+        )
+
+        timestamp = format_project_time(
+            now()
+        )
+
+        await self.db.execute(
+            f"""
+            UPDATE {self.TABLE}
+            SET
+                success_count =
+                    success_count + 1,
+
+                total_latency_ms =
+                    total_latency_ms + ?,
+
+                average_latency_ms =
+                    (
+                        total_latency_ms + ?
+                    ) / (
+                        success_count + 1
+                    ),
+
+                last_success_at = ?,
+
+                updated_at =
+                    CURRENT_TIMESTAMP
+
+            WHERE model_name = ?
+            """,
+            (
+                latency_ms,
+                latency_ms,
+                timestamp,
+                normalized,
+            ),
+        )
+
+
+    async def record_failure(
+        self,
+        model_name: str,
+    ) -> None:
+
+        normalized = (
+            model_name.strip().lower()
+        )
+
+        await self.ensure(
+            normalized
+        )
+
+        timestamp = format_project_time(
+            now()
+        )
+
+        await self.db.execute(
+            f"""
+            UPDATE {self.TABLE}
+            SET
+                failure_count =
+                    failure_count + 1,
+
+                last_failure_at = ?,
+
+                updated_at =
+                    CURRENT_TIMESTAMP
+
+            WHERE model_name = ?
+            """,
+            (
+                timestamp,
+                normalized,
+            ),
+        )
     @staticmethod
     def _validate_score(
         score: int,
