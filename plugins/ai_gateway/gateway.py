@@ -362,22 +362,31 @@ class AIGateway:
 
         return sorted(set(result))
 
-
     async def ping_remote_model(
         self,
         api_key_data: dict,
         model_id: str,
         timeout: float = 20.0,
+        statistics_name: str | None = None,
     ) -> tuple[bool, float, str]:
 
         started = time.perf_counter()
 
         model = {
-            "name": model_id,
-            "provider": api_key_data["provider"],
+            "name": (
+                statistics_name
+                or model_id
+            ),
+            "provider": api_key_data[
+                "provider"
+            ],
             "model_id": model_id,
-            "api_key": api_key_data["api_key"],
-            "base_url": api_key_data.get("base_url"),
+            "api_key": api_key_data[
+                "api_key"
+            ],
+            "base_url": api_key_data.get(
+                "base_url"
+            ),
         }
 
         try:
@@ -385,7 +394,9 @@ class AIGateway:
                 [
                     {
                         "role": "user",
-                        "content": "Reply with exactly: pong",
+                        "content": (
+                            "Reply with exactly: pong"
+                        ),
                     }
                 ],
                 model=model,
@@ -394,24 +405,72 @@ class AIGateway:
             )
 
         except AIGatewayError as exc:
+
             latency = (
-                time.perf_counter() - started
+                time.perf_counter()
+                - started
             ) * 1000
+
+            if statistics_name:
+                try:
+                    await self.statistics.record_ping_failure(
+                        statistics_name,
+                        latency,
+                        str(exc),
+                    )
+
+                except Exception as stats_exc:
+                    print(
+                        "⚠️ ثبت Ping ناموفق بود: "
+                        f"{stats_exc}"
+                    )
 
             return False, latency, str(exc)
 
         except Exception as exc:
+
             latency = (
-                time.perf_counter() - started
+                time.perf_counter()
+                - started
             ) * 1000
+
+            if statistics_name:
+                try:
+                    await self.statistics.record_ping_failure(
+                        statistics_name,
+                        latency,
+                        str(exc),
+                    )
+
+                except Exception as stats_exc:
+                    print(
+                        "⚠️ ثبت Ping ناموفق بود: "
+                        f"{stats_exc}"
+                    )
 
             return False, latency, str(exc)
 
         latency = (
-            time.perf_counter() - started
+            time.perf_counter()
+            - started
         ) * 1000
 
+        if statistics_name:
+            try:
+                await self.statistics.record_ping_success(
+                    statistics_name,
+                    latency,
+                )
+
+            except Exception as stats_exc:
+                print(
+                    "⚠️ ثبت Ping موفق بود ولی ذخیره آمار "
+                    f"ناموفق شد: {stats_exc}"
+                )
+
         return True, latency, ""
+
+
 
 
     async def ping_remote_models(
@@ -419,7 +478,63 @@ class AIGateway:
         api_key_data: dict,
         models: list[str],
         timeout: float = 20.0,
-) -> list[tuple[str, bool, float, str]]:
+    ) -> list[tuple[str, bool, float, str]]:
+
+        configured_models = (
+            await self.models.get_all()
+        )
+
+        normalized_provider = (
+            self._normalize_provider(
+                api_key_data["provider"]
+            )
+            .strip()
+            .lower()
+        )
+
+        base_url = (
+            api_key_data.get("base_url")
+            or ""
+        ).strip().rstrip("/")
+
+        # ---------------------------------------------
+        # Map remote model_id -> internal model name
+        # فقط مدل‌هایی که واقعاً داخل ai_models هستند.
+        # ---------------------------------------------
+
+        statistics_names: dict[
+            str,
+            str,
+        ] = {}
+
+        for configured in configured_models:
+
+            configured_provider = (
+                self._normalize_provider(
+                    configured["provider"]
+                )
+                .strip()
+                .lower()
+            )
+
+            configured_base_url = (
+                configured.get("base_url")
+                or ""
+            ).strip().rstrip("/")
+
+            if (
+                configured["model_id"].strip()
+                != ""
+                and configured["model_id"].strip()
+                in models
+                and configured_provider
+                == normalized_provider
+                and configured_base_url
+                == base_url
+            ):
+                statistics_names[
+                    configured["model_id"].strip()
+                ] = configured["name"]
 
         semaphore = asyncio.Semaphore(
             self.PING_CONCURRENCY
@@ -430,12 +545,21 @@ class AIGateway:
         ) -> tuple[str, bool, float, str]:
 
             async with semaphore:
+
                 try:
+
+                    statistics_name = (
+                        statistics_names.get(
+                            model_id
+                        )
+                    )
+
                     ok, latency, error = (
                         await self.ping_remote_model(
                             api_key_data,
                             model_id,
                             timeout,
+                            statistics_name,
                         )
                     )
 
@@ -447,6 +571,7 @@ class AIGateway:
                     )
 
                 except Exception as exc:
+
                     return (
                         model_id,
                         False,
@@ -463,7 +588,6 @@ class AIGateway:
 
         return results
 
-    
 
     @staticmethod
     def _litellm_model(model: dict[str, Any]) -> str:
