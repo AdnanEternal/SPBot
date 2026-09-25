@@ -713,6 +713,81 @@ async def model_statistics(
         f"{stats['ping_last_error'] or 'None'}"
     )
 
+
+@command(
+    name="امتیاز مدل",
+    permission="owner",
+    chat_type="all",
+    description="امتیاز رضایت Owner از یک مدل را تنظیم می‌کند.",
+)
+async def set_model_owner_score(
+    self,
+    event,
+):
+    args = (
+        event.args_text or ""
+    ).strip().split()
+
+    if len(args) != 2:
+        await event.reply(
+            "❌ استفاده نادرست.\n"
+            "مثال:\n"
+            "!امتیاز مدل gemini38flash 95"
+        )
+        return
+
+    model_name = args[0]
+    score_text = args[1]
+
+    model = await self.models.get(
+        model_name
+    )
+
+    if model is None:
+        await event.reply(
+            f"❌ مدل «{model_name}» پیدا نشد."
+        )
+        return
+
+    if not score_text.isdigit():
+        await event.reply(
+            "❌ امتیاز باید یک عدد بین 0 تا 100 باشد."
+        )
+        return
+
+    score = int(score_text)
+
+    if not 0 <= score <= 100:
+        await event.reply(
+            "❌ امتیاز باید بین 0 تا 100 باشد."
+        )
+        return
+
+    try:
+        await self.store.model_statistics.set_scores(
+            model["name"],
+            owner_score=score,
+        )
+
+    except Exception as exc:
+        print(
+            f"❌ خطا در ثبت Owner Score مدل "
+            f"{model['name']}: {exc}"
+        )
+
+        await event.reply(
+            "❌ ذخیره امتیاز ناموفق بود."
+        )
+        return
+
+    await event.reply(
+        f"✅ Owner Score مدل "
+        f"«{model['name']}» روی "
+        f"{score}/100 تنظیم شد."
+    )
+
+
+
 # =========================================================
 # MEMORY MANAGEMENT
 # =========================================================

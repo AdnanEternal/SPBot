@@ -547,6 +547,10 @@ class AIModelStatisticsStore:
             ),
         )
 
+        await self.recalculate_scores(
+            normalized
+        )
+
 
     async def record_failure(
         self,
@@ -584,6 +588,193 @@ class AIModelStatisticsStore:
                 normalized,
             ),
         )
+        
+        await self.recalculate_scores(
+            normalized
+        )
+
+
+    @staticmethod
+    def _calculate_reliability_score(
+        success_count: int,
+        failure_count: int,
+    ) -> int:
+
+        total_requests = (
+            success_count
+            + failure_count
+        )
+
+        if total_requests <= 0:
+            return 50
+
+        score = (
+            success_count
+            / total_requests
+            * 100
+        )
+
+        return int(
+            round(
+                max(
+                    0,
+                    min(
+                        100,
+                        score,
+                    ),
+                )
+            )
+        )
+
+
+    @staticmethod
+    def _calculate_latency_score(
+        average_latency_ms: float,
+    ) -> int:
+
+        latency = max(
+            0.0,
+            float(average_latency_ms),
+        )
+
+        # سریع‌تر از 500ms = حداکثر امتیاز
+        if latency <= 500:
+            return 100
+
+        # کندتر از 16s = حداقل امتیاز
+        if latency >= 16000:
+            return 0
+
+        # نقاط مرجع:
+        # 500ms  -> 100
+        # 1000ms -> 90
+        # 2000ms -> 75
+        # 4000ms -> 50
+        # 8000ms -> 25
+        # 16000ms -> 0
+
+        points = (
+            (500, 100),
+            (1000, 90),
+            (2000, 75),
+            (4000, 50),
+            (8000, 25),
+            (16000, 0),
+        )
+
+        import math
+
+        log_latency = math.log2(
+            latency
+        )
+
+        for index in range(
+            len(points) - 1
+        ):
+
+            low_latency, low_score = (
+                points[index]
+            )
+
+            high_latency, high_score = (
+                points[index + 1]
+            )
+
+            if (
+                low_latency
+                <= latency
+                <= high_latency
+            ):
+
+                low_log = math.log2(
+                    low_latency
+                )
+
+                high_log = math.log2(
+                    high_latency
+                )
+
+                ratio = (
+                    log_latency - low_log
+                ) / (
+                    high_log - low_log
+                )
+
+                score = (
+                    low_score
+                    + (
+                        high_score
+                        - low_score
+                    )
+                    * ratio
+                )
+
+                return int(
+                    round(
+                        max(
+                            0,
+                            min(
+                                100,
+                                score,
+                            ),
+                        )
+                    )
+                )
+
+        return 50
+
+    async def recalculate_scores(
+        self,
+        model_name: str,
+    ) -> None:
+
+        normalized = (
+            model_name.strip().lower()
+        )
+
+        stats = await self.get(
+            normalized
+        )
+
+        if stats is None:
+            return
+
+        reliability_score = (
+            self._calculate_reliability_score(
+                stats["success_count"],
+                stats["failure_count"],
+            )
+        )
+
+        if (
+            stats["success_count"] <= 0
+        ):
+            latency_score = 50
+
+        else:
+            latency_score = (
+                self._calculate_latency_score(
+                    stats["average_latency_ms"]
+                )
+            )
+
+        await self.db.execute(
+            f"""
+            UPDATE {self.TABLE}
+            SET
+                reliability_score = ?,
+                latency_score = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE model_name = ?
+            """,
+            (
+                reliability_score,
+                latency_score,
+                normalized,
+            ),
+        )
+
+        
     @staticmethod
     def _validate_score(
         score: int,
