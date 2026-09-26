@@ -4,13 +4,12 @@ from .store import GroupSettingsStore, ViolationStore
 from core.base_plugin import BasePlugin
 from core.ttl_cache import TTLCache
 
-
 class ViolationNoticeThrottle:
     """
-    جلوگیری از ارسال اخطارهای تکراری توسط ربات.
+    جلوگیری از ارسال اخطارهای تکراری.
 
-    این کلاس فقط ارسال پیام را کنترل می‌کند و روی
-    ثبت تخلف یا اعمال مجازات تأثیری ندارد.
+    ثبت تخلف و مجازات هیچ تغییری نمی‌کنند؛
+    فقط پیام عمومی ربات throttle می‌شود.
     """
 
     TTL_SECONDS = 30
@@ -25,38 +24,16 @@ class ViolationNoticeThrottle:
             ttl_seconds=self.TTL_SECONDS,
         )
 
-    @staticmethod
-    def _normalize_reason(
-        reason: str,
-    ) -> str:
-        reason = (
-            str(reason)
-            .casefold()
-            .strip()
-        )
-
-        # score متغیر است و نباید باعث شود
-        # یک اخطار مشابه دوباره ارسال شود.
-        marker = "(score="
-
-        if marker in reason:
-            reason = reason.split(
-                marker,
-                1,
-            )[0].rstrip()
-
-        return reason
-
     def should_notify(
         self,
         group_id: int,
         user_id: int,
-        reason: str,
+        category: str,
     ) -> bool:
         key = (
             group_id,
             user_id,
-            self._normalize_reason(reason),
+            str(category).casefold().strip(),
         )
 
         if self._cache.get(key):
@@ -69,10 +46,9 @@ class ViolationNoticeThrottle:
 
         return True
 
-
 class ViolationManagerPlugin(BasePlugin):
     name = "Violation Manager"
-    version = "1.6.5"
+    version = "1.6.6"
 
     def __init__(
         self,

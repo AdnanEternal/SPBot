@@ -402,11 +402,28 @@ async def on_violation(
                 "\n❗ اعمال مجازات ناموفق بود "
                 "(ربات دسترسی لازم رو داره؟)"
             )
+    sent = None
 
-    sent = await _notify(event, message)
+    if spam_type is not None:
+        should_notify = (
+            self.notice_throttle.should_notify(
+                group_id,
+                user_id,
+                spam_type,
+            )
+        )
+    else:
+        should_notify = True
 
-    await self.event_bus.emit(
-        "timeline_system_message",
-        group_id,
-        sent
-    )
+    if should_notify:
+        sent = await _notify(
+            event,
+            message,
+        )
+
+    if sent is not None:
+        await self.event_bus.emit(
+            "timeline_system_message",
+            group_id,
+            sent,
+        )
