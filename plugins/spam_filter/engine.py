@@ -7,7 +7,9 @@ SUSPICIOUS_THRESHOLD = 35
 SPAM_THRESHOLD = 60
 HARD_SCORE_THRESHOLD = 85
 
-NEW_USER_HOURS = 24
+NEW_USER_1_HOUR = 3600
+NEW_USER_6_HOURS = 6 * 3600
+NEW_USER_24_HOURS = 24 * 3600
 
 WEIGHTS = {
     "flood": 30,
@@ -17,14 +19,8 @@ WEIGHTS = {
     "char_flood": 10,
 }
 
-_WHITESPACE_RE = re.compile(
-    r"\s+"
-)
-
-_NON_WORD_RE = re.compile(
-    r"[^\w]+",
-    re.UNICODE,
-)
+_WHITESPACE_RE = re.compile(r"\s+")
+_NON_WORD_RE = re.compile(r"[^\w]+", re.UNICODE)
 
 
 @dataclass(slots=True)
@@ -52,9 +48,7 @@ class SpamDecision:
     hard_rule: str | None = None
 
 
-def _clamp(
-    value: float,
-) -> int:
+def _clamp(value: float) -> int:
     return int(
         max(
             0,
@@ -70,10 +64,7 @@ def _threshold_score(
     value: int,
     threshold: int,
 ) -> int:
-    if (
-        threshold <= 0
-        or value <= threshold
-    ):
+    if threshold <= 0 or value <= threshold:
         return 0
 
     if value >= threshold * 2:
@@ -87,8 +78,7 @@ def _threshold_score(
     )
 
     return _clamp(
-        35
-        + progress * 65
+        35 + progress * 65
     )
 
 
@@ -110,9 +100,7 @@ def calculate_similarity(
     text: str,
     recent_texts: list[str],
 ) -> tuple[float, int]:
-    normalized = normalize_text(
-        text
-    )
+    normalized = normalize_text(text)
 
     if len(normalized) < 6:
         return 0.0, 0
@@ -120,18 +108,13 @@ def calculate_similarity(
     best = 0.0
 
     for previous in recent_texts:
-        previous_normalized = (
-            normalize_text(
-                previous
-            )
+        previous_normalized = normalize_text(
+            previous
         )
 
-        if len(previous_normalized) < 6:
-            continue
-
         if (
-            previous_normalized
-            == normalized
+            len(previous_normalized) < 6
+            or previous_normalized == normalized
         ):
             continue
 
@@ -148,16 +131,12 @@ def calculate_similarity(
 
     if best >= 0.92:
         signal = 90
-
     elif best >= 0.85:
         signal = 70
-
     elif best >= 0.75:
         signal = 45
-
     elif best >= 0.65:
         signal = 25
-
     else:
         signal = 0
 
@@ -212,6 +191,7 @@ def build_features(
 
 def calculate_score(
     features: SpamFeatures,
+    context: dict | None = None,
 ) -> int:
     score = (
         features.flood_score
@@ -235,9 +215,54 @@ def calculate_score(
         / 100
     )
 
-    return _clamp(
-        score
+    context = context or {}
+
+    external = context.get(
+        "external_signals",
+        {},
     )
+
+    # فیلترهای خارجی می‌توانند بدون اینکه
+    # Spam Filter فلسفه‌شان را بداند، کمی ریسک
+    # اضافه کنند.
+    try:
+        external_bonus = int(
+            external.get(
+                "score_bonus",
+                0,
+            )
+        )
+    except (TypeError, ValueError):
+        external_bonus = 0
+
+    external_bonus = max(
+        0,
+        min(
+            30,
+            external_bonus,
+        ),
+    )
+
+    score += external_bonus
+
+    # تازه‌وارد بودن فقط وقتی مهم می‌شود که
+    # خود رفتار کاربر هم حداقل مقداری مشکوک باشد.
+    if context.get("is_new_user"):
+        join_age = context.get(
+            "join_age_seconds"
+        )
+
+        if join_age is not None and score >= 15:
+            if join_age <= NEW_USER_1_HOUR:
+                score += 15
+
+            elif join_age <= NEW_USER_6_HOURS:
+                score += 10
+
+            elif join_age <= NEW_USER_24_HOURS:
+                score += 6
+
+    return _clamp(score)
 
 
 def evaluate_hard_rules(
@@ -251,50 +276,44 @@ def evaluate_hard_rules(
         {},
     )
 
-    # قانون ۱:
-    # پیام هم مشکوک به اسپم است و هم
-    # Content Filter آن را match کرده.
+    # هر پلاگین خارجی می‌تواند یک قانون قطعی
+    # را بدون وابستگی مستقیم به Spam Filter اعلام کند.
+    if external.get("hard_spam"):
+        return (
+            "external_hard_spam",
+            "یک قانون خارجی، اسپم شدید را تأیید کرد",
+        )
+
+    # محتوای ممنوع + حداقل رفتار اسپمی
     if (
         external.get(
             "content_filter_match"
         )
-        and score
-        >= SUSPICIOUS_THRESHOLD
+        and score >= 25
     ):
         return (
             "content_filter_plus_spam",
-            "پیام همزمان مشکوک به اسپم و مطابق فیلتر محتوایی بود",
+            "پیام هم رفتار اسپمی داشت و هم با Content Filter مطابقت داشت",
         )
 
-    # قانون ۲:
-    # کاربر تازه‌وارد + لینک در پروفایل + پیام لینک‌دار
+    # تازه‌وارد + لینک در پروفایل + لینک داخل پیام
     if (
-        context.get(
-            "is_new_user",
-            False,
-        )
-        and context.get(
-            "profile_has_link",
-            False,
-        )
+        context.get("is_new_user")
+        and context.get("profile_has_link")
         and features.link_count > 0
     ):
         return (
             "new_user_profile_link",
-            "کاربر تازه‌وارد با لینک در پروفایل، پیام لینک‌دار ارسال کرد",
+            "کاربر تازه‌وارد با لینک پروفایل، پیام لینک‌دار ارسال کرد",
         )
 
-    # قانون ۳:
-    # رفتار بسیار تهاجمی:
-    # فلاد شدید + تکرار/شباهت شدید
+    # فلاد شدید + تکرار یا شباهت شدید
     if (
         features.flood_score >= 80
         and (
-            features.repeat_score
-            >= 70
+            features.repeat_score >= 70
             or
-            features.similarity_score
-            >= 70
+            features.similarity_score >= 70
         )
     ):
         return (
@@ -311,7 +330,8 @@ def decide(
     context: dict,
 ) -> SpamDecision:
     score = calculate_score(
-        features
+        features,
+        context,
     )
 
     hard_rule = evaluate_hard_rules(

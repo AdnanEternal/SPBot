@@ -1,4 +1,7 @@
-from .engine import SpamDecision, SpamFeatures
+from .engine import (
+    SpamDecision,
+    SpamFeatures,
+)
 
 
 async def _delete_messages(
@@ -42,15 +45,18 @@ async def apply_decision(
             user_id=event.sender_id,
             score=decision.score,
             reason=decision.reason,
+            hard_rule=decision.hard_rule,
             features=features,
             context=context,
         )
         return
 
-    content_filter_match = context.get(
+    external = context.get(
         "external_signals",
         {},
-    ).get(
+    )
+
+    content_filter_match = external.get(
         "content_filter_match",
         False,
     )
@@ -62,8 +68,8 @@ async def apply_decision(
             [event.id],
         )
 
-        # اگر Content Filter هم match کرده،
-        # خودش violation را ثبت خواهد کرد.
+        # اگر Content Filter همین پیام را
+        # خودش violation کرده، دوباره تخلف نساز.
         if not content_filter_match:
             await self.event_bus.emit(
                 "violation",
@@ -81,36 +87,36 @@ async def apply_decision(
 
         return
 
-    if decision.level == "HARD_SPAM":
-        ids = self.tracker.ids_in_window(
-            event.chat_id,
-            event.sender_id,
-            delete_window_seconds,
+    # HARD_SPAM
+    ids = self.tracker.ids_in_window(
+        event.chat_id,
+        event.sender_id,
+        delete_window_seconds,
+    )
+
+    if event.id not in ids:
+        ids.append(event.id)
+
+    await _delete_messages(
+        self,
+        event,
+        ids,
+    )
+
+    self.tracker.clear_user(
+        event.chat_id,
+        event.sender_id,
+    )
+
+    if not content_filter_match:
+        await self.event_bus.emit(
+            "violation",
+            event=event,
+            group_id=event.chat_id,
+            user_id=event.sender_id,
+            reason=(
+                f"اسپم شدید: {decision.reason} "
+                f"(score={decision.score}/100)"
+            ),
+            message_ids=ids,
         )
-
-        if not ids:
-            ids = [event.id]
-
-        await _delete_messages(
-            self,
-            event,
-            ids,
-        )
-
-        self.tracker.clear_user(
-            event.chat_id,
-            event.sender_id,
-        )
-
-        if not content_filter_match:
-            await self.event_bus.emit(
-                "violation",
-                event=event,
-                group_id=event.chat_id,
-                user_id=event.sender_id,
-                reason=(
-                    f"اسپم شدید: {decision.reason} "
-                    f"(score={decision.score}/100)"
-                ),
-                message_ids=ids,
-            )

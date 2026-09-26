@@ -15,16 +15,6 @@ NEW_USER_HOURS = 24
 
 
 class SpamContextProvider:
-    """
-    اطلاعاتی که Spam Engine از خود رفتار پیام استخراج نمی‌کند.
-
-    شامل:
-    - زمان عضویت
-    - تازه‌وارد بودن
-    - وضعیت لینک موجود در پروفایل
-    - signalهای خارجی
-    """
-
     PROFILE_CACHE_TTL = 600
     PROFILE_CACHE_MAX = 2048
 
@@ -55,12 +45,11 @@ class SpamContextProvider:
             time.time(),
         )
 
-        self._profile_link_cache.pop(
+        self._profile_link_cache.delete(
             (
                 group_id,
                 user_id,
-            ),
-            None,
+            )
         )
 
     async def record_leave(
@@ -73,12 +62,11 @@ class SpamContextProvider:
             user_id,
         )
 
-        self._profile_link_cache.pop(
+        self._profile_link_cache.delete(
             (
                 group_id,
                 user_id,
-            ),
-            None,
+            )
         )
 
     async def get_join_age(
@@ -94,32 +82,9 @@ class SpamContextProvider:
         if joined_at is None:
             return None
 
-        age = (
-            time.time()
-            - joined_at
-        )
-
         return max(
             0.0,
-            age,
-        )
-
-    async def is_new_user(
-        self,
-        group_id: int,
-        user_id: int,
-    ) -> bool:
-        age = await self.get_join_age(
-            group_id,
-            user_id,
-        )
-
-        if age is None:
-            return False
-
-        return (
-            age
-            <= NEW_USER_HOURS * 3600
+            time.time() - joined_at,
         )
 
     async def profile_has_link(
@@ -145,10 +110,9 @@ class SpamContextProvider:
             print(
                 f"⚠️ دریافت پروفایل کاربر ناموفق بود: {exc}"
             )
-
             return False
 
-        profile_text_parts = []
+        parts = []
 
         for attribute in (
             "about",
@@ -163,17 +127,11 @@ class SpamContextProvider:
             )
 
             if isinstance(value, str):
-                profile_text_parts.append(
-                    value
-                )
-
-        profile_text = "\n".join(
-            profile_text_parts
-        )
+                parts.append(value)
 
         has_link = bool(
             _URL_RE.search(
-                profile_text
+                "\n".join(parts)
             )
         )
 
@@ -194,15 +152,19 @@ class SpamContextProvider:
             event.sender_id,
         )
 
+        is_new_user = (
+            join_age is not None
+            and join_age
+            <= NEW_USER_HOURS * 3600
+        )
+
         return {
             "join_age_seconds": join_age,
-            "is_new_user": (
-                join_age is not None
-                and join_age
-                <= NEW_USER_HOURS * 3600
-            ),
-            "profile_has_link": await self.profile_has_link(
-                event
+            "is_new_user": is_new_user,
+            "profile_has_link": (
+                await self.profile_has_link(event)
+                if is_new_user
+                else False
             ),
             "external_signals": dict(
                 external_signals

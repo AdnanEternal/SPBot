@@ -1,10 +1,12 @@
 from . import handlers
+
 from .context import SpamContextProvider
 from .store import (
     SpamContextStore,
     SpamSettingsStore,
     SpamWhitelistStore,
 )
+from .telemetry import SpamTelemetry
 from .tracker import (
     AdminCache,
     SpamTracker,
@@ -16,7 +18,7 @@ from core.base_plugin import BasePlugin
 class SpamFilterPlugin(BasePlugin):
     name = "Spam Filter"
 
-    version = "1.4.0"
+    version = "1.4.1"
 
     def __init__(
         self,
@@ -50,6 +52,7 @@ class SpamFilterPlugin(BasePlugin):
         )
 
         self.tracker = SpamTracker()
+        self.telemetry = SpamTelemetry()
 
         self.admin_cache = AdminCache()
 
@@ -69,3 +72,7 @@ class SpamFilterPlugin(BasePlugin):
 
     on_member_change = handlers.on_member_change
     on_message = handlers.on_message
+
+    on_spam_suspicious = (
+        handlers.on_spam_suspicious
+    )

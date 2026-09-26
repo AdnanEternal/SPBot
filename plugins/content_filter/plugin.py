@@ -35,3 +35,6 @@ class ContentFilterPlugin(BasePlugin):
     remove_word = handlers.remove_word
     list_words = handlers.list_words
     on_message = handlers.on_message
+    contribute_spam_signals = (
+    handlers.contribute_spam_signals
+)

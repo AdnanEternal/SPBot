@@ -2,12 +2,12 @@ from typing import TYPE_CHECKING
 
 from splusthon import events
 
-from core.decorators import command, on_event
+from core.decorators import command, on_event, on_bus_event
 from core.permissions import is_chat_admin
 
 from . import detection
 from .actions import apply_decision
-from .engine import build_features, decide
+from .engine import build_features, decide, calculate_score
 
 if TYPE_CHECKING:
     from .plugin import SpamFilterPlugin
@@ -289,51 +289,6 @@ async def show_settings(self: "SpamFilterPlugin", event: events.NewMessage.Event
     )
 
 
-async def _flag(self: "SpamFilterPlugin", event: events.NewMessage.Event, reason: str) -> None:
-    """
-    یه پیام رو اسپم اعلام می‌کنه: پاکش می‌کنه و رو event_bus رویداد
-    violation منتشر می‌کنه (همون مکانیزمی که content_filter هم استفاده
-    می‌کنه). خطای احتمالی موقع پاک‌کردن (مثلاً نبود دسترسی حذف) نباید
-    کل هندلر رو متوقف کنه، برای همین try/except داره.
-    """
-    try:
-        await event.delete()
-    except Exception as e:
-        print(f"⚠️ نتونستم پیام اسپم رو پاک کنم: {e}")
-
-    await self.event_bus.emit(
-        "violation",
-        event=event,
-        group_id=event.chat_id,
-        user_id=event.sender_id,
-        reason=f"اسپم: {reason}",
-    )
-
-
-async def _flag_flood(self: "SpamFilterPlugin", event: events.NewMessage.Event, window_seconds: int) -> None:
-    ids = self.tracker.ids_in_window(event.chat_id, event.sender_id, window_seconds)
-
-    # پیام‌های این بازه نباید دوباره شمرده بشن
-    self.tracker.clear_user(event.chat_id, event.sender_id)
-
-    try:
-        chat = await event.get_chat()
-        await self.client.delete_messages(chat, ids)
-    except Exception as e:
-        print(f"⚠️ نتونستم پیام‌های فلاد رو پاک کنم: {e}")
-
-    await self.event_bus.emit(
-        "violation",
-        event=event,
-        group_id=event.chat_id,
-        user_id=event.sender_id,
-        reason=(
-            f"اسپم: ارسال بیش از حد پیام "
-            f"در {window_seconds} ثانیه (فلاد)"
-        ),
-        message_ids=ids,
-    )
-
 
 @on_event(events.NewMessage(incoming=True))
 async def on_message(
@@ -346,7 +301,7 @@ async def on_message(
     ):
         return
 
-    # Whitelist
+    # 1. Whitelist
     if await self.whitelist.is_exempt(
         event.chat_id,
         event.sender_id,
@@ -359,7 +314,7 @@ async def on_message(
         event.chat_id
     )
 
-    # ثبت رفتار کاربر
+    # 2. ثبت رفتار
     repeat_count = self.tracker.register(
         event.chat_id,
         event.sender_id,
@@ -392,6 +347,7 @@ async def on_message(
         text
     )
 
+    # 3. Feature extraction
     features = build_features(
         text=text,
         repeat_count=repeat_count,
@@ -410,10 +366,7 @@ async def on_message(
         ],
     )
 
-    # -------------------------------------------------
-    # Signalهای خارجی
-    # -------------------------------------------------
-
+    # 4. Signalهای خارجی
     external_signals = {}
 
     await self.event_bus.emit(
@@ -424,25 +377,20 @@ async def on_message(
         signals=external_signals,
     )
 
-    # -------------------------------------------------
-    # Context
-    #
-    # فقط وقتی لازم است سراغ اطلاعات کاربر می‌رویم.
-    # پیام‌های کاملاً عادی API اضافی نمی‌گیرند.
-    # -------------------------------------------------
-
+    # 5. Context فقط وقتی لازم است
     preliminary_score = (
-        features.flood_score * 0.30
-        + features.repeat_score * 0.25
-        + features.similarity_score * 0.20
-        + features.link_score * 0.15
-        + features.char_flood_score * 0.10
+        calculate_score(
+            features
+        )
     )
 
     if (
-        preliminary_score >= 35
+        preliminary_score >= 20
         or external_signals.get(
             "content_filter_match"
+        )
+        or external_signals.get(
+            "hard_spam"
         )
     ):
         context = await self.context.collect(
@@ -460,6 +408,7 @@ async def on_message(
             ),
         }
 
+    # 6. تصمیم نهایی
     decision = decide(
         features=features,
         context=context,
@@ -468,10 +417,7 @@ async def on_message(
     if decision.level == "NORMAL":
         return
 
-    # -------------------------------------------------
-    # Admin protection
-    # -------------------------------------------------
-
+    # 7. محافظت از Admin
     cached_admin = self.admin_cache.get(
         event.chat_id,
         event.sender_id,
@@ -495,8 +441,8 @@ async def on_message(
             )
 
         except Exception:
-            # وقتی وضعیت کاربر مشخص نیست،
-            # مجازات نمی‌کنیم.
+            # وقتی وضعیت ادمین مشخص نیست،
+            # مجازات نکن.
             return
 
     if cached_admin:
@@ -506,6 +452,7 @@ async def on_message(
         )
         return
 
+    # 8. Action
     await apply_decision(
         self,
         event,
@@ -514,7 +461,28 @@ async def on_message(
         context,
         settings["flood_seconds"],
     )
-    
+
+@on_bus_event("spam_suspicious")
+async def on_spam_suspicious(
+    self: "SpamFilterPlugin",
+    event,
+    group_id: int,
+    user_id: int,
+    score: int,
+    reason: str,
+    hard_rule: str | None,
+    features,
+    context: dict,
+) -> None:
+    self.telemetry.add(
+        group_id=group_id,
+        user_id=user_id,
+        score=score,
+        reason=reason,
+        hard_rule=hard_rule,
+    )
+
+
 @on_event(events.ChatAction)
 async def on_member_change(
     self: "SpamFilterPlugin",
