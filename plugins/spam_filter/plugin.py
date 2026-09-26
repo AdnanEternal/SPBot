@@ -3,6 +3,7 @@ from . import handlers
 from .context import SpamContextProvider
 from .store import (
     SpamContextStore,
+    SpamRuleStore,
     SpamSettingsStore,
     SpamWhitelistStore,
 )
@@ -46,8 +47,13 @@ class SpamFilterPlugin(BasePlugin):
             self.db
         )
 
+        self.rules = SpamRuleStore(
+            self.db
+        )
+
         self.context = SpamContextProvider(
             self.context_store,
+            self.rules,
             self.client,
         )
 
@@ -60,6 +66,7 @@ class SpamFilterPlugin(BasePlugin):
         await self.settings.create_table()
         await self.whitelist.create_table()
         await self.context_store.create_table()
+        await self.rules.create_table()
 
     set_flood = handlers.set_flood
     set_max_links = handlers.set_max_links
@@ -70,9 +77,12 @@ class SpamFilterPlugin(BasePlugin):
     remove_whitelist = handlers.remove_whitelist
     list_whitelist = handlers.list_whitelist
 
+    add_bio_rule = handlers.add_bio_rule
+    remove_bio_rule = handlers.remove_bio_rule
+    list_bio_rules = handlers.list_bio_rules
+
     on_member_change = handlers.on_member_change
     on_message = handlers.on_message
-
     on_spam_suspicious = (
         handlers.on_spam_suspicious
     )

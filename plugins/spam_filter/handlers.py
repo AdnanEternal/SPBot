@@ -290,6 +290,96 @@ async def show_settings(self: "SpamFilterPlugin", event: events.NewMessage.Event
 
 
 
+from . import handlers
+
+from .context import SpamContextProvider
+from .store import (
+    SpamContextStore,
+    SpamRuleStore,
+    SpamSettingsStore,
+    SpamWhitelistStore,
+)
+from .telemetry import SpamTelemetry
+from .tracker import (
+    AdminCache,
+    SpamTracker,
+)
+
+from core.base_plugin import BasePlugin
+
+
+class SpamFilterPlugin(BasePlugin):
+    name = "Spam Filter"
+
+    version = "1.4.1"
+
+    def __init__(
+        self,
+        client,
+        command_manager,
+        db,
+        event_bus,
+    ):
+        super().__init__(
+            client,
+            command_manager,
+            db,
+            event_bus,
+        )
+
+        self.settings = SpamSettingsStore(
+            self.db
+        )
+
+        self.whitelist = SpamWhitelistStore(
+            self.db
+        )
+
+        self.context_store = SpamContextStore(
+            self.db
+        )
+
+        self.rules = SpamRuleStore(
+            self.db
+        )
+
+        self.context = SpamContextProvider(
+            self.context_store,
+            self.rules,
+            self.client,
+        )
+
+        self.tracker = SpamTracker()
+        self.telemetry = SpamTelemetry()
+
+        self.admin_cache = AdminCache()
+
+    async def on_load(self):
+        await self.settings.create_table()
+        await self.whitelist.create_table()
+        await self.context_store.create_table()
+        await self.rules.create_table()
+
+    set_flood = handlers.set_flood
+    set_max_links = handlers.set_max_links
+    set_max_repeat = handlers.set_max_repeat
+    show_settings = handlers.show_settings
+
+    add_whitelist = handlers.add_whitelist
+    remove_whitelist = handlers.remove_whitelist
+    list_whitelist = handlers.list_whitelist
+
+    add_bio_rule = handlers.add_bio_rule
+    remove_bio_rule = handlers.remove_bio_rule
+    list_bio_rules = handlers.list_bio_rules
+
+    on_member_change = handlers.on_member_change
+    on_message = handlers.on_message
+    on_spam_suspicious = (
+        handlers.on_spam_suspicious
+    )
+
+
 @on_event(events.NewMessage(incoming=True))
 async def on_message(
     self: "SpamFilterPlugin",
@@ -384,6 +474,16 @@ async def on_message(
         )
     )
 
+
+    await self.context.record_first_seen(
+        event.chat_id,
+        event.sender_id,
+    )
+
+    has_bio_rules = await self.rules.has_bio_rules(
+        event.chat_id
+    )
+
     if (
         preliminary_score >= 20
         or external_signals.get(
@@ -392,6 +492,7 @@ async def on_message(
         or external_signals.get(
             "hard_spam"
         )
+        or has_bio_rules
     ):
         context = await self.context.collect(
             event,
@@ -403,11 +504,12 @@ async def on_message(
             "join_age_seconds": None,
             "is_new_user": False,
             "profile_has_link": False,
-            "external_signals": (
-                external_signals
-            ),
+            "profile_has_splus_web_link": False,
+            "profile_has_other_link": False,
+            "matched_bio_rules": [],
+            "external_signals": external_signals,
         }
-
+        
     # 6. تصمیم نهایی
     decision = decide(
         features=features,

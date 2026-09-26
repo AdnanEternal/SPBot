@@ -3,11 +3,19 @@ import time
 
 from core.ttl_cache import TTLCache
 
-from .store import SpamContextStore
+from .store import (
+    SpamContextStore,
+    SpamRuleStore,
+)
 
 
 _URL_RE = re.compile(
-    r"https?://\S+|www\.\S+|t\.me/\S+",
+    r"https?://[^\s]+|www\.[^\s]+|t\.me/[^\s]+",
+    re.IGNORECASE,
+)
+
+_SPLUS_WEB_RE = re.compile(
+    r"https?://(?:www\.)?web\.splus\.ir(?:[/?#]|$)",
     re.IGNORECASE,
 )
 
@@ -21,17 +29,30 @@ class SpamContextProvider:
     def __init__(
         self,
         store: SpamContextStore,
+        rules: SpamRuleStore,
         client,
     ) -> None:
         self.store = store
+        self.rules = rules
         self.client = client
 
-        self._profile_link_cache = TTLCache[
+        self._profile_cache = TTLCache[
             tuple[int, int],
-            bool,
+            dict,
         ](
             max_entries=self.PROFILE_CACHE_MAX,
             ttl_seconds=self.PROFILE_CACHE_TTL,
+        )
+
+    async def record_first_seen(
+        self,
+        group_id: int,
+        user_id: int,
+    ) -> None:
+        await self.store.ensure_first_seen(
+            group_id,
+            user_id,
+            time.time(),
         )
 
     async def record_join(
@@ -45,7 +66,7 @@ class SpamContextProvider:
             time.time(),
         )
 
-        self._profile_link_cache.delete(
+        self._profile_cache.delete(
             (
                 group_id,
                 user_id,
@@ -62,7 +83,7 @@ class SpamContextProvider:
             user_id,
         )
 
-        self._profile_link_cache.delete(
+        self._profile_cache.delete(
             (
                 group_id,
                 user_id,
@@ -74,43 +95,50 @@ class SpamContextProvider:
         group_id: int,
         user_id: int,
     ) -> float | None:
-        joined_at = await self.store.get_joined_at(
-            group_id,
-            user_id,
+        reference_time = (
+            await self.store.get_reference_time(
+                group_id,
+                user_id,
+            )
         )
 
-        if joined_at is None:
+        if reference_time is None:
             return None
 
         return max(
             0.0,
-            time.time() - joined_at,
+            time.time() - reference_time,
         )
 
-    async def profile_has_link(
+    async def get_profile(
         self,
         event,
-    ) -> bool:
+    ) -> dict:
         key = (
             event.chat_id,
             event.sender_id,
         )
 
-        cached = self._profile_link_cache.get(
+        cached = self._profile_cache.get(
             key
         )
 
         if cached is not None:
-            return cached
+            return dict(cached)
 
         try:
             sender = await event.get_sender()
-
         except Exception as exc:
             print(
                 f"⚠️ دریافت پروفایل کاربر ناموفق بود: {exc}"
             )
-            return False
+
+            return {
+                "text": "",
+                "has_link": False,
+                "has_splus_web_link": False,
+                "has_other_link": False,
+            }
 
         parts = []
 
@@ -129,27 +157,61 @@ class SpamContextProvider:
             if isinstance(value, str):
                 parts.append(value)
 
-        has_link = bool(
-            _URL_RE.search(
-                "\n".join(parts)
-            )
+        profile_text = "\n".join(parts)
+
+        urls = _URL_RE.findall(
+            profile_text
         )
 
-        self._profile_link_cache.set(
+        has_splus_web_link = any(
+            _SPLUS_WEB_RE.search(url)
+            for url in urls
+        )
+
+        has_other_link = any(
+            not _SPLUS_WEB_RE.search(url)
+            for url in urls
+        )
+
+        result = {
+            "text": profile_text,
+            "has_link": bool(urls),
+            "has_splus_web_link": (
+                has_splus_web_link
+            ),
+            "has_other_link": (
+                has_other_link
+            ),
+        }
+
+        self._profile_cache.set(
             key,
-            has_link,
+            result,
         )
 
-        return has_link
+        return dict(result)
 
     async def collect(
         self,
         event,
         external_signals: dict,
     ) -> dict:
-        join_age = await self.get_join_age(
-            event.chat_id,
-            event.sender_id,
+        join_age = (
+            await self.get_join_age(
+                event.chat_id,
+                event.sender_id,
+            )
+        )
+
+        profile = await self.get_profile(
+            event
+        )
+
+        matched_bio_rules = (
+            await self.rules.match_bio(
+                event.chat_id,
+                profile["text"],
+            )
         )
 
         is_new_user = (
@@ -161,11 +223,27 @@ class SpamContextProvider:
         return {
             "join_age_seconds": join_age,
             "is_new_user": is_new_user,
+
             "profile_has_link": (
-                await self.profile_has_link(event)
-                if is_new_user
-                else False
+                profile["has_link"]
             ),
+
+            "profile_has_splus_web_link": (
+                profile[
+                    "has_splus_web_link"
+                ]
+            ),
+
+            "profile_has_other_link": (
+                profile[
+                    "has_other_link"
+                ]
+            ),
+
+            "matched_bio_rules": (
+                matched_bio_rules
+            ),
+
             "external_signals": dict(
                 external_signals
             ),

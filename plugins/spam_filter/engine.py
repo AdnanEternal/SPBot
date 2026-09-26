@@ -188,7 +188,6 @@ def build_features(
         ),
     )
 
-
 def calculate_score(
     features: SpamFeatures,
     context: dict | None = None,
@@ -222,9 +221,6 @@ def calculate_score(
         {},
     )
 
-    # فیلترهای خارجی می‌توانند بدون اینکه
-    # Spam Filter فلسفه‌شان را بداند، کمی ریسک
-    # اضافه کنند.
     try:
         external_bonus = int(
             external.get(
@@ -235,7 +231,7 @@ def calculate_score(
     except (TypeError, ValueError):
         external_bonus = 0
 
-    external_bonus = max(
+    score += max(
         0,
         min(
             30,
@@ -243,27 +239,37 @@ def calculate_score(
         ),
     )
 
-    score += external_bonus
-
-    # تازه‌وارد بودن فقط وقتی مهم می‌شود که
-    # خود رفتار کاربر هم حداقل مقداری مشکوک باشد.
-    if context.get("is_new_user"):
+    if context.get(
+        "is_new_user"
+    ):
         join_age = context.get(
             "join_age_seconds"
         )
 
-        if join_age is not None and score >= 15:
-            if join_age <= NEW_USER_1_HOUR:
+        if (
+            join_age is not None
+            and score >= 15
+        ):
+            if join_age <= 3600:
                 score += 15
-
-            elif join_age <= NEW_USER_6_HOURS:
+            elif join_age <= 6 * 3600:
                 score += 10
-
-            elif join_age <= NEW_USER_24_HOURS:
+            elif join_age <= 24 * 3600:
                 score += 6
 
-    return _clamp(score)
+    # حساسیت بیشتر برای web.splus.ir
+    # ولی لینک‌های دیگر همچنان امتیاز می‌گیرند.
+    if context.get(
+        "profile_has_splus_web_link"
+    ):
+        score += 10
 
+    elif context.get(
+        "profile_has_other_link"
+    ):
+        score += 4
+
+    return _clamp(score)
 
 def evaluate_hard_rules(
     *,
@@ -271,20 +277,36 @@ def evaluate_hard_rules(
     context: dict,
     score: int,
 ) -> tuple[str, str] | None:
+
     external = context.get(
         "external_signals",
         {},
     )
 
-    # هر پلاگین خارجی می‌تواند یک قانون قطعی
-    # را بدون وابستگی مستقیم به Spam Filter اعلام کند.
+    # قانون سفارشی Bio
+    matched_bio_rules = context.get(
+        "matched_bio_rules",
+        [],
+    )
+
+    if matched_bio_rules:
+        patterns = [
+            str(rule["pattern"])
+            for rule in matched_bio_rules
+        ]
+
+        return (
+            "custom_bio_rule",
+            "مطابقت با قانون سفارشی Bio: "
+            + "، ".join(patterns),
+        )
+
     if external.get("hard_spam"):
         return (
             "external_hard_spam",
             "یک قانون خارجی، اسپم شدید را تأیید کرد",
         )
 
-    # محتوای ممنوع + حداقل رفتار اسپمی
     if (
         external.get(
             "content_filter_match"
@@ -296,10 +318,11 @@ def evaluate_hard_rules(
             "پیام هم رفتار اسپمی داشت و هم با Content Filter مطابقت داشت",
         )
 
-    # تازه‌وارد + لینک در پروفایل + لینک داخل پیام
     if (
         context.get("is_new_user")
-        and context.get("profile_has_link")
+        and context.get(
+            "profile_has_link"
+        )
         and features.link_count > 0
     ):
         return (
@@ -307,7 +330,6 @@ def evaluate_hard_rules(
             "کاربر تازه‌وارد با لینک پروفایل، پیام لینک‌دار ارسال کرد",
         )
 
-    # فلاد شدید + تکرار یا شباهت شدید
     if (
         features.flood_score >= 80
         and (
@@ -322,7 +344,6 @@ def evaluate_hard_rules(
         )
 
     return None
-
 
 def decide(
     *,
