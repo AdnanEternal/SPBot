@@ -496,6 +496,122 @@ async def list_bio_rules(
     )
 
 
+
+
+
+
+
+@command(
+    name="اسپم لینک مجاز",
+    permission="owner",
+    chat_type="all",
+    description="یک لینک یا الگوی لینک را به whitelist اضافه می‌کند.",
+)
+async def add_link_whitelist(
+    self: "SpamFilterPlugin",
+    event: events.NewMessage.Event,
+) -> None:
+    pattern = (
+        event.args_text or ""
+    ).strip()
+
+    if not pattern:
+        await event.reply(
+            "❌ لینک مشخص نشده.\n"
+            "مثال:\n"
+            "!اسپم لینک مجاز https://example.com/"
+        )
+        return
+
+    added = await self.link_whitelist.add(
+        pattern
+    )
+
+    if not added:
+        await event.reply(
+            "ℹ️ این لینک از قبل در whitelist است."
+        )
+        return
+
+    self.context.invalidate_profile_cache()
+
+    await event.reply(
+        f"✅ لینک به whitelist اضافه شد:\n"
+        f"`{pattern}`"
+    )
+
+
+@command(
+    name="اسپم حذف لینک مجاز",
+    permission="owner",
+    chat_type="all",
+    description="یک لینک را از whitelist حذف می‌کند.",
+)
+async def remove_link_whitelist(
+    self: "SpamFilterPlugin",
+    event: events.NewMessage.Event,
+) -> None:
+    pattern = (
+        event.args_text or ""
+    ).strip()
+
+    if not pattern:
+        await event.reply(
+            "❌ لینک مشخص نشده."
+        )
+        return
+
+    removed = await self.link_whitelist.remove(
+        pattern
+    )
+
+    if not removed:
+        await event.reply(
+            "❌ این لینک در whitelist وجود ندارد."
+        )
+        return
+
+    self.context.invalidate_profile_cache()
+
+    await event.reply(
+        f"✅ لینک از whitelist حذف شد:\n"
+        f"`{pattern}`"
+    )
+
+
+@command(
+    name="اسپم لینک های مجاز",
+    permission="owner",
+    chat_type="all",
+    description="لیست لینک‌های whitelist را نشان می‌دهد.",
+)
+async def list_link_whitelist(
+    self: "SpamFilterPlugin",
+    event: events.NewMessage.Event,
+) -> None:
+    links = await self.link_whitelist.get_all()
+
+    if not links:
+        await event.reply(
+            "📋 whitelist لینک خالی است."
+        )
+        return
+
+    lines = [
+        f"{index}. `{pattern}`"
+        for index, pattern in enumerate(
+            links,
+            start=1,
+        )
+    ]
+
+    await event.reply(
+        "📋 لینک‌های مجاز Spam Filter\n\n"
+        + "\n".join(lines)
+    )
+
+
+
 @on_event(events.NewMessage(incoming=True))
 async def on_message(
     self: "SpamFilterPlugin",
@@ -543,8 +659,20 @@ async def on_message(
         )
     )
 
-    link_count = detection.count_links(
+    raw_links = detection.extract_links(
         text
+    )
+
+    whitelisted_links = []
+
+    if raw_links:
+        whitelisted_links = (
+            await self.link_whitelist.get_all()
+        )
+
+    link_count = detection.count_links(
+        text,
+        whitelisted_links,
     )
 
     char_flood = detection.has_char_flood(
@@ -596,7 +724,7 @@ async def on_message(
     # تا لینک پروفایل web.splus.ir فرصت اثرگذاری داشته باشد.
     if (
         preliminary_score >= 20
-        or link_count > 0
+        or raw_links
         or external_signals.get(
             "content_filter_match"
         )

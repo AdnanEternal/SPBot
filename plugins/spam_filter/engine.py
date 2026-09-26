@@ -265,7 +265,7 @@ def calculate_score(
     ):
         score += 10
 
-    elif context.get(
+    if context.get(
         "profile_has_other_link"
     ):
         score += 4

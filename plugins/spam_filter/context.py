@@ -3,8 +3,14 @@ import time
 
 from core.ttl_cache import TTLCache
 
+from .detection import (
+    extract_links,
+    is_whitelisted_url,
+)
+
 from .store import (
     SpamContextStore,
+    SpamLinkWhitelistStore,
     SpamRuleStore,
 )
 
@@ -39,10 +45,12 @@ class SpamContextProvider:
         self,
         store: SpamContextStore,
         rules: SpamRuleStore,
+        link_whitelist: SpamLinkWhitelistStore,
         client,
-    ) -> None:
+) -> None:
         self.store = store
         self.rules = rules
+        self.link_whitelist = link_whitelist
         self.client = client
 
         self._profile_cache = TTLCache[
@@ -52,6 +60,11 @@ class SpamContextProvider:
             max_entries=self.PROFILE_CACHE_MAX,
             ttl_seconds=self.PROFILE_CACHE_TTL,
         )
+
+
+
+    def invalidate_profile_cache(self) -> None:
+        self._profile_cache.clear()
 
     async def record_first_seen(
         self,
@@ -169,9 +182,22 @@ class SpamContextProvider:
 
         profile_text = "\n".join(parts)
 
-        urls = _URL_RE.findall(
+        all_urls = extract_links(
             profile_text
         )
+
+        whitelist = (
+            await self.link_whitelist.get_all()
+        )
+
+        urls = [
+            url
+            for url in all_urls
+            if not is_whitelisted_url(
+                url,
+                whitelist,
+            )
+        ]
 
         has_splus_web_link = any(
             _SPLUS_WEB_RE.search(url)

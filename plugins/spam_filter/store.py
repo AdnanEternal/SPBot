@@ -335,6 +335,126 @@ class SpamWhitelistStore:
 
 
 
+
+
+
+class SpamLinkWhitelistStore:
+    """
+    لینک‌هایی که Spam Filter باید نادیده بگیرد.
+
+    این whitelist سراسری است و به گروه خاصی وابسته نیست.
+    """
+
+    TABLE = "spam_link_whitelist"
+
+    CACHE_TTL_SECONDS = 900
+
+    def __init__(
+        self,
+        db: DatabaseManager,
+    ) -> None:
+        self.db = db
+
+        self._cache = TTLCache[
+            str,
+            list[str],
+        ](
+            max_entries=1,
+            ttl_seconds=self.CACHE_TTL_SECONDS,
+        )
+
+    async def create_table(self) -> None:
+        await self.db.create_table(
+            self.TABLE,
+            columns={
+                "id": (
+                    "INTEGER PRIMARY KEY AUTOINCREMENT"
+                ),
+                "pattern": (
+                    "TEXT NOT NULL"
+                ),
+            },
+            unique=[
+                (
+                    "pattern",
+                )
+            ],
+        )
+
+    async def get_all(self) -> list[str]:
+        cached = self._cache.get(
+            "all"
+        )
+
+        if cached is not None:
+            return list(cached)
+
+        rows = await self.db.select_all(
+            self.TABLE
+        )
+
+        patterns = [
+            str(row["pattern"])
+            for row in rows
+        ]
+
+        self._cache.set(
+            "all",
+            patterns,
+        )
+
+        return list(patterns)
+
+    async def add(
+        self,
+        pattern: str,
+    ) -> bool:
+        pattern = pattern.strip()
+
+        if not pattern:
+            return False
+
+        result = await self.db.insert(
+            self.TABLE,
+            {
+                "pattern": pattern,
+            },
+            or_ignore=True,
+        )
+
+        self._cache.delete(
+            "all"
+        )
+
+        return result.rowcount > 0
+
+    async def remove(
+        self,
+        pattern: str,
+    ) -> bool:
+        pattern = pattern.strip()
+
+        if not pattern:
+            return False
+
+        result = await self.db.delete(
+            self.TABLE,
+            {
+                "pattern": pattern,
+            },
+        )
+
+        self._cache.delete(
+            "all"
+        )
+
+        return result.rowcount > 0
+
+
+
+
+
+
 class SpamContextStore:
     """
     اطلاعات persistent مربوط به حضور کاربران در گروه.
