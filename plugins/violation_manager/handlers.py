@@ -304,6 +304,7 @@ async def on_violation(
     user_id: int,
     reason: str,
     message_ids: list[int] | None = None,
+    spam_type: str | None = None,
 ) -> None:
     """
     دریافت گزارش تخلف از سایر پلاگین‌ها.
@@ -362,12 +363,20 @@ async def on_violation(
     count = await self.violations.get_count(group_id, user_id)
     settings = await self.settings.get(group_id)
 
-    message = (
-        f"⚠️ {name} مرتکب تخلف شد.\n"
-        f"📌 دلیل: {reason}\n"
-        f"🔢 تعداد تخلفات: {count}\n"
-        f"🚫 سقف مجاز تخلف: {settings['max_violations']}"
-    )
+    if spam_type is not None:
+        message = (
+            f"⚠️ {name} اسپم کرده.\n"
+            f"📌 دلیل: {spam_type}"
+            f"🔢 تعداد تخلفات: {count}\n"
+            f"🚫 سقف مجاز تخلف: {settings['max_violations']}"
+        )
+    else:
+        message = (
+            f"⚠️ {name} مرتکب تخلف شد.\n"
+            f"📌 دلیل: {reason}\n"
+            f"🔢 تعداد تخلفات: {count}\n"
+            f"🚫 سقف مجاز تخلف: {settings['max_violations']}"
+        )
 
     # مجازات قبل از ارسال پیام اعمال می‌شه تا خطای پیام‌رسانی مانعش نشه.
     if count > settings["max_violations"]:

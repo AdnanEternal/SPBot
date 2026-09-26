@@ -25,6 +25,50 @@ async def _delete_messages(
             f"⚠️ نتونستم پیام‌های اسپم رو پاک کنم: {exc}"
         )
 
+def _get_spam_type(
+    decision: SpamDecision,
+    features: SpamFeatures,
+) -> str:
+    if decision.hard_rule == "custom_text_rule":
+        return "قانون سفارشی"
+
+    if decision.hard_rule == "external_hard_spam":
+        return "قانون خارجی"
+
+    if decision.hard_rule == "content_filter_plus_spam":
+        return "محتوای ممنوع"
+
+    if decision.hard_rule == "flood_plus_repetition":
+        return "فلاد و پیام تکراری"
+
+    signals = [
+        (
+            features.flood_score,
+            "فلاد",
+        ),
+        (
+            features.repeat_score,
+            "پیام تکراری",
+        ),
+        (
+            features.similarity_score,
+            "پیام‌های مشابه",
+        ),
+        (
+            features.char_flood_score,
+            "تکرار بیش از حد کاراکتر",
+        ),
+    ]
+
+    score, reason = max(
+        signals,
+        key=lambda item: item[0],
+    )
+
+    if score > 0:
+        return reason
+
+    return "الگوی اسپم"
 
 async def apply_decision(
     self,
@@ -80,6 +124,10 @@ async def apply_decision(
                     f"اسپم: {decision.reason} "
                     f"(score={decision.score}/100)"
                 ),
+                spam_type=_get_spam_type(
+                    decision,
+                    features,
+                ),
                 message_ids=[
                     event.id
                 ],
@@ -117,6 +165,10 @@ async def apply_decision(
             reason=(
                 f"اسپم شدید: {decision.reason} "
                 f"(score={decision.score}/100)"
+            ),
+            spam_type=_get_spam_type(
+                decision,
+                features,
             ),
             message_ids=ids,
         )
