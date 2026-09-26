@@ -66,7 +66,6 @@ def _resolve_spam_group_target(
     return None, clean_args
 
 
-
 @command(
     name="اسپم معاف",
     permission="admin",
@@ -222,23 +221,43 @@ async def list_whitelist(
     )
 
 
-
-
 @command(
     name="اسپم فلاد",
     permission="admin",
     chat_type="group",
-    description="حداکثر تعداد پیام مجاز در یه بازه‌ی زمانی رو تنظیم می‌کنه. مثال: !اسپم فلاد 5 10",
+    description="حداکثر تعداد پیام مجاز در یه بازه‌ی زمانی رو تنظیم می‌کنه.",
 )
-async def set_flood(self: "SpamFilterPlugin", event: events.NewMessage.Event) -> None:
+async def set_flood(
+    self: "SpamFilterPlugin",
+    event: events.NewMessage.Event,
+) -> None:
     parts = event.args_text.split()
-    if len(parts) != 2 or not all(p.isdigit() for p in parts):
-        await event.reply("مثال: !اسپم فلاد 5 10  (یعنی بیشتر از ۵ پیام تو ۱۰ ثانیه = اسپم)")
+
+    if (
+        len(parts) != 2
+        or not all(p.isdigit() for p in parts)
+    ):
+        await event.reply(
+            "مثال: !اسپم فلاد 5 10\n"
+            "(یعنی بیشتر از ۵ پیام تو ۱۰ ثانیه = اسپم)"
+        )
         return
 
-    count, seconds = int(parts[0]), int(parts[1])
-    await self.settings.set_flood(event.chat_id, count, seconds)
-    await event.reply(f"آستانه‌ی فلاد با موفقیت روی «بیشتر از {count} پیام در {seconds} ثانیه» تنظیم شد!")
+    count, seconds = (
+        int(parts[0]),
+        int(parts[1]),
+    )
+
+    await self.settings.set_flood(
+        event.chat_id,
+        count,
+        seconds,
+    )
+
+    await event.reply(
+        f"آستانه‌ی فلاد با موفقیت روی "
+        f"«بیشتر از {count} پیام در {seconds} ثانیه» تنظیم شد!"
+    )
 
 
 @command(
@@ -247,30 +266,56 @@ async def set_flood(self: "SpamFilterPlugin", event: events.NewMessage.Event) ->
     chat_type="group",
     description="حداکثر تعداد لینک مجاز تو یه پیام رو تنظیم می‌کنه.",
 )
-async def set_max_links(self: "SpamFilterPlugin", event: events.NewMessage.Event) -> None:
+async def set_max_links(
+    self: "SpamFilterPlugin",
+    event: events.NewMessage.Event,
+) -> None:
     value = event.args_text.strip()
+
     if not value.isdigit():
-        await event.reply("مثال: !اسپم لینک 3")
+        await event.reply(
+            "مثال: !اسپم لینک 3"
+        )
         return
 
-    await self.settings.set_max_links(event.chat_id, int(value))
-    await event.reply(f"حداکثر لینک مجاز تو هر پیام با موفقیت به {value} تنظیم شد!")
+    await self.settings.set_max_links(
+        event.chat_id,
+        int(value),
+    )
+
+    await event.reply(
+        f"حداکثر لینک مجاز تو هر پیام "
+        f"با موفقیت به {value} تنظیم شد!"
+    )
 
 
 @command(
     name="اسپم تکرار",
     permission="admin",
     chat_type="group",
-    description="حداکثر تعداد پیام تکراریِ پشت‌سرهم مجاز رو تنظیم می‌کنه.",
+    description="حداکثر پیام تکراریِ پشت‌سرهم مجاز رو تنظیم می‌کنه.",
 )
-async def set_max_repeat(self: "SpamFilterPlugin", event: events.NewMessage.Event) -> None:
+async def set_max_repeat(
+    self: "SpamFilterPlugin",
+    event: events.NewMessage.Event,
+) -> None:
     value = event.args_text.strip()
+
     if not value.isdigit():
-        await event.reply("مثال: !اسپم تکرار 3")
+        await event.reply(
+            "مثال: !اسپم تکرار 3"
+        )
         return
 
-    await self.settings.set_max_repeat(event.chat_id, int(value))
-    await event.reply(f"حداکثر پیام تکراری مجاز با موفقیت به {value} تنظیم شد!")
+    await self.settings.set_max_repeat(
+        event.chat_id,
+        int(value),
+    )
+
+    await event.reply(
+        f"حداکثر پیام تکراری مجاز "
+        f"با موفقیت به {value} تنظیم شد!"
+    )
 
 
 @command(
@@ -279,104 +324,23 @@ async def set_max_repeat(self: "SpamFilterPlugin", event: events.NewMessage.Even
     chat_type="group",
     description="تنظیمات فعلی فیلتر اسپم این گروه رو نشون می‌ده.",
 )
-async def show_settings(self: "SpamFilterPlugin", event: events.NewMessage.Event) -> None:
-    s = await self.settings.get(event.chat_id)
-    await event.reply(
-        "⚙️ تنظیمات فیلتر اسپم این گروه:\n\n"
-        f"فلاد: بیشتر از {s['flood_count']} پیام در {s['flood_seconds']} ثانیه\n"
-        f"لینک: بیشتر از {s['max_links']} لینک تو یه پیام\n"
-        f"تکرار: بیشتر از {s['max_repeat']} پیام یکسان پشت‌سرهم"
+async def show_settings(
+    self: "SpamFilterPlugin",
+    event: events.NewMessage.Event,
+) -> None:
+    settings = await self.settings.get(
+        event.chat_id
     )
 
-
-
-from . import handlers
-
-from .context import SpamContextProvider
-from .store import (
-    SpamContextStore,
-    SpamRuleStore,
-    SpamSettingsStore,
-    SpamWhitelistStore,
-)
-from .telemetry import SpamTelemetry
-from .tracker import (
-    AdminCache,
-    SpamTracker,
-)
-
-from core.base_plugin import BasePlugin
-
-
-class SpamFilterPlugin(BasePlugin):
-    name = "Spam Filter"
-
-    version = "1.4.1"
-
-    def __init__(
-        self,
-        client,
-        command_manager,
-        db,
-        event_bus,
-    ):
-        super().__init__(
-            client,
-            command_manager,
-            db,
-            event_bus,
-        )
-
-        self.settings = SpamSettingsStore(
-            self.db
-        )
-
-        self.whitelist = SpamWhitelistStore(
-            self.db
-        )
-
-        self.context_store = SpamContextStore(
-            self.db
-        )
-
-        self.rules = SpamRuleStore(
-            self.db
-        )
-
-        self.context = SpamContextProvider(
-            self.context_store,
-            self.rules,
-            self.client,
-        )
-
-        self.tracker = SpamTracker()
-        self.telemetry = SpamTelemetry()
-
-        self.admin_cache = AdminCache()
-
-    async def on_load(self):
-        await self.settings.create_table()
-        await self.whitelist.create_table()
-        await self.context_store.create_table()
-        await self.rules.create_table()
-
-    set_flood = handlers.set_flood
-    set_max_links = handlers.set_max_links
-    set_max_repeat = handlers.set_max_repeat
-    show_settings = handlers.show_settings
-
-    add_whitelist = handlers.add_whitelist
-    remove_whitelist = handlers.remove_whitelist
-    list_whitelist = handlers.list_whitelist
-
-    add_bio_rule = handlers.add_bio_rule
-    remove_bio_rule = handlers.remove_bio_rule
-    list_bio_rules = handlers.list_bio_rules
-
-    on_member_change = handlers.on_member_change
-    on_message = handlers.on_message
-    on_spam_suspicious = (
-        handlers.on_spam_suspicious
+    await event.reply(
+        "⚙️ تنظیمات فیلتر اسپم این گروه:\n\n"
+        f"فلاد: بیشتر از "
+        f"{settings['flood_count']} پیام در "
+        f"{settings['flood_seconds']} ثانیه\n"
+        f"لینک: بیشتر از "
+        f"{settings['max_links']} لینک تو یه پیام\n"
+        f"تکرار: بیشتر از "
+        f"{settings['max_repeat']} پیام یکسان پشت‌سرهم"
     )
 
 
@@ -384,7 +348,7 @@ class SpamFilterPlugin(BasePlugin):
     name="اسپم قانون بیو",
     permission="owner",
     chat_type="all",
-    description="یک قانون برای Bio اضافه می‌کند.",
+    description="یک قانون Bio به Spam Filter اضافه می‌کند.",
 )
 async def add_bio_rule(
     self: "SpamFilterPlugin",
@@ -406,9 +370,7 @@ async def add_bio_rule(
 
     if not pattern:
         await event.reply(
-            "❌ متن قانون مشخص نشده.\n"
-            "مثال:\n"
-            "!اسپم قانون بیو تبلیغ"
+            "❌ متن قانون مشخص نشده."
         )
         return
 
@@ -435,7 +397,7 @@ async def add_bio_rule(
     name="اسپم حذف قانون بیو",
     permission="owner",
     chat_type="all",
-    description="قانون Bio را حذف می‌کند.",
+    description="یک قانون Bio را حذف می‌کند.",
 )
 async def remove_bio_rule(
     self: "SpamFilterPlugin",
@@ -447,9 +409,7 @@ async def remove_bio_rule(
 
     if target_group is None:
         await event.reply(
-            "❌ گروه هدف مشخص نشده.\n"
-            "مثال:\n"
-            "!اسپم حذف قانون بیو تبلیغ -10024473944"
+            "❌ گروه هدف مشخص نشده."
         )
         return
 
@@ -482,7 +442,7 @@ async def remove_bio_rule(
     name="اسپم قوانین بیو",
     permission="owner",
     chat_type="all",
-    description="قوانین Bio را نشان می‌دهد.",
+    description="قوانین Bio ثبت‌شده را نشان می‌دهد.",
 )
 async def list_bio_rules(
     self: "SpamFilterPlugin",
@@ -494,9 +454,7 @@ async def list_bio_rules(
 
     if target_group is None:
         await event.reply(
-            "❌ گروه هدف مشخص نشده.\n"
-            "مثال:\n"
-            "!اسپم قوانین بیو -10024473944"
+            "❌ گروه هدف مشخص نشده."
         )
         return
 
@@ -523,22 +481,20 @@ async def list_bio_rules(
         )
         return
 
-    lines = []
-
-    for index, rule in enumerate(
-        rules,
-        start=1,
-    ):
-        lines.append(
-            f"{index}. `{rule['pattern']}` "
-            f"→ `HARD_SPAM`"
+    lines = [
+        f"{index}. `{rule['pattern']}` → `HARD_SPAM`"
+        for index, rule in enumerate(
+            rules,
+            start=1,
         )
+    ]
 
     await event.reply(
         f"📋 قوانین Bio\n"
         f"گروه: `{target_group}`\n\n"
         + "\n".join(lines)
     )
+
 
 @on_event(events.NewMessage(incoming=True))
 async def on_message(
@@ -551,7 +507,6 @@ async def on_message(
     ):
         return
 
-    # 1. Whitelist
     if await self.whitelist.is_exempt(
         event.chat_id,
         event.sender_id,
@@ -564,7 +519,6 @@ async def on_message(
         event.chat_id
     )
 
-    # 2. ثبت رفتار
     repeat_count = self.tracker.register(
         event.chat_id,
         event.sender_id,
@@ -597,7 +551,6 @@ async def on_message(
         text
     )
 
-    # 3. Feature extraction
     features = build_features(
         text=text,
         repeat_count=repeat_count,
@@ -616,7 +569,6 @@ async def on_message(
         ],
     )
 
-    # 4. Signalهای خارجی
     external_signals = {}
 
     await self.event_bus.emit(
@@ -627,13 +579,9 @@ async def on_message(
         signals=external_signals,
     )
 
-    # 5. Context فقط وقتی لازم است
-    preliminary_score = (
-        calculate_score(
-            features
-        )
+    preliminary_score = calculate_score(
+        features
     )
-
 
     await self.context.record_first_seen(
         event.chat_id,
@@ -644,8 +592,11 @@ async def on_message(
         event.chat_id
     )
 
+    # پیام لینک‌دار را هم حتماً Context می‌کنیم
+    # تا لینک پروفایل web.splus.ir فرصت اثرگذاری داشته باشد.
     if (
         preliminary_score >= 20
+        or link_count > 0
         or external_signals.get(
             "content_filter_match"
         )
@@ -665,12 +616,12 @@ async def on_message(
             "is_new_user": False,
             "profile_has_link": False,
             "profile_has_splus_web_link": False,
+            "profile_has_splus_meet_link": False,
             "profile_has_other_link": False,
             "matched_bio_rules": [],
             "external_signals": external_signals,
         }
 
-    # 6. تصمیم نهایی
     decision = decide(
         features=features,
         context=context,
@@ -679,7 +630,6 @@ async def on_message(
     if decision.level == "NORMAL":
         return
 
-    # 7. محافظت از Admin
     cached_admin = self.admin_cache.get(
         event.chat_id,
         event.sender_id,
@@ -703,8 +653,7 @@ async def on_message(
             )
 
         except Exception:
-            # وقتی وضعیت ادمین مشخص نیست،
-            # مجازات نکن.
+            # اگر وضعیت ادمین مشخص نیست، مجازات نکن.
             return
 
     if cached_admin:
@@ -714,7 +663,6 @@ async def on_message(
         )
         return
 
-    # 8. Action
     await apply_decision(
         self,
         event,
@@ -723,6 +671,7 @@ async def on_message(
         context,
         settings["flood_seconds"],
     )
+
 
 @on_bus_event("spam_suspicious")
 async def on_spam_suspicious(

@@ -319,11 +319,22 @@ def evaluate_hard_rules(
             "پیام هم رفتار اسپمی داشت و هم با Content Filter مطابقت داشت",
         )
 
+    # فقط لینک‌هایی که واقعاً سیگنال ضداسپم دارند
+    # می‌توانند این قانون را فعال کنند.
+    #
+    # splus.ir/meet عمداً در اینجا وارد نمی‌شود.
+    profile_has_actionable_link = (
+        context.get(
+            "profile_has_splus_web_link"
+        )
+        or context.get(
+            "profile_has_other_link"
+        )
+    )
+
     if (
         context.get("is_new_user")
-        and context.get(
-            "profile_has_link"
-        )
+        and profile_has_actionable_link
         and features.link_count > 0
     ):
         return (
