@@ -19,7 +19,7 @@ from core.base_plugin import BasePlugin
 class SpamFilterPlugin(BasePlugin):
     name = "Spam Filter"
 
-    version = "1.4.1"
+    version = "1.4.2"
 
     def __init__(
         self,

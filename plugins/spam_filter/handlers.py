@@ -380,6 +380,166 @@ class SpamFilterPlugin(BasePlugin):
     )
 
 
+@command(
+    name="اسپم قانون بیو",
+    permission="owner",
+    chat_type="all",
+    description="یک قانون برای Bio اضافه می‌کند.",
+)
+async def add_bio_rule(
+    self: "SpamFilterPlugin",
+    event: events.NewMessage.Event,
+) -> None:
+    target_group, args = _resolve_spam_group_target(
+        event
+    )
+
+    if target_group is None:
+        await event.reply(
+            "❌ گروه هدف مشخص نشده.\n"
+            "مثال:\n"
+            "!اسپم قانون بیو تبلیغ -10024473944"
+        )
+        return
+
+    pattern = args.strip()
+
+    if not pattern:
+        await event.reply(
+            "❌ متن قانون مشخص نشده.\n"
+            "مثال:\n"
+            "!اسپم قانون بیو تبلیغ"
+        )
+        return
+
+    added = await self.rules.add_bio_rule(
+        target_group,
+        pattern,
+    )
+
+    if not added:
+        await event.reply(
+            "ℹ️ این قانون از قبل وجود دارد."
+        )
+        return
+
+    await event.reply(
+        f"✅ قانون Bio اضافه شد.\n"
+        f"گروه: `{target_group}`\n"
+        f"عبارت: `{pattern}`\n"
+        f"اقدام: `HARD_SPAM`"
+    )
+
+
+@command(
+    name="اسپم حذف قانون بیو",
+    permission="owner",
+    chat_type="all",
+    description="قانون Bio را حذف می‌کند.",
+)
+async def remove_bio_rule(
+    self: "SpamFilterPlugin",
+    event: events.NewMessage.Event,
+) -> None:
+    target_group, args = _resolve_spam_group_target(
+        event
+    )
+
+    if target_group is None:
+        await event.reply(
+            "❌ گروه هدف مشخص نشده.\n"
+            "مثال:\n"
+            "!اسپم حذف قانون بیو تبلیغ -10024473944"
+        )
+        return
+
+    pattern = args.strip()
+
+    if not pattern:
+        await event.reply(
+            "❌ متن قانون مشخص نشده."
+        )
+        return
+
+    removed = await self.rules.remove_bio_rule(
+        target_group,
+        pattern,
+    )
+
+    if not removed:
+        await event.reply(
+            "❌ این قانون پیدا نشد."
+        )
+        return
+
+    await event.reply(
+        f"✅ قانون Bio حذف شد.\n"
+        f"عبارت: `{pattern}`"
+    )
+
+
+@command(
+    name="اسپم قوانین بیو",
+    permission="owner",
+    chat_type="all",
+    description="قوانین Bio را نشان می‌دهد.",
+)
+async def list_bio_rules(
+    self: "SpamFilterPlugin",
+    event: events.NewMessage.Event,
+) -> None:
+    target_group, args = _resolve_spam_group_target(
+        event
+    )
+
+    if target_group is None:
+        await event.reply(
+            "❌ گروه هدف مشخص نشده.\n"
+            "مثال:\n"
+            "!اسپم قوانین بیو -10024473944"
+        )
+        return
+
+    if args:
+        await event.reply(
+            "❌ استفاده نادرست."
+        )
+        return
+
+    rules = await self.rules.get_all(
+        target_group
+    )
+
+    rules = [
+        rule
+        for rule in rules
+        if rule["rule_type"] == "bio_contains"
+    ]
+
+    if not rules:
+        await event.reply(
+            f"📋 برای گروه `{target_group}` "
+            f"هیچ قانون Bio ثبت نشده."
+        )
+        return
+
+    lines = []
+
+    for index, rule in enumerate(
+        rules,
+        start=1,
+    ):
+        lines.append(
+            f"{index}. `{rule['pattern']}` "
+            f"→ `HARD_SPAM`"
+        )
+
+    await event.reply(
+        f"📋 قوانین Bio\n"
+        f"گروه: `{target_group}`\n\n"
+        + "\n".join(lines)
+    )
+
 @on_event(events.NewMessage(incoming=True))
 async def on_message(
     self: "SpamFilterPlugin",
@@ -509,7 +669,7 @@ async def on_message(
             "matched_bio_rules": [],
             "external_signals": external_signals,
         }
-        
+
     # 6. تصمیم نهایی
     decision = decide(
         features=features,

@@ -14,8 +14,17 @@ _URL_RE = re.compile(
     re.IGNORECASE,
 )
 
+# لینک عمومی پروفایل وب سروش پلاس:
+# حساسیت نسبتاً بالا
 _SPLUS_WEB_RE = re.compile(
     r"https?://(?:www\.)?web\.splus\.ir(?:[/?#]|$)",
+    re.IGNORECASE,
+)
+
+# لینک Meet سروش پلاس:
+# عمداً سیگنال بسیار ضعیف/خنثی
+_SPLUS_MEET_RE = re.compile(
+    r"https?://(?:www\.)?splus\.ir/meet(?:[/?#]|$)",
     re.IGNORECASE,
 )
 
@@ -137,6 +146,7 @@ class SpamContextProvider:
                 "text": "",
                 "has_link": False,
                 "has_splus_web_link": False,
+                "has_splus_meet_link": False,
                 "has_other_link": False,
             }
 
@@ -168,17 +178,36 @@ class SpamContextProvider:
             for url in urls
         )
 
+        has_splus_meet_link = any(
+            _SPLUS_MEET_RE.search(url)
+            for url in urls
+        )
+
+        # لینک‌های عادی همچنان سیگنال خودشان را حفظ می‌کنند،
+        # ولی meet را از دسته‌ی لینک‌های مؤثر حذف می‌کنیم.
         has_other_link = any(
             not _SPLUS_WEB_RE.search(url)
+            and not _SPLUS_MEET_RE.search(url)
             for url in urls
         )
 
         result = {
             "text": profile_text,
+
+            # وجود هر نوع لینک در پروفایل
             "has_link": bool(urls),
+
+            # لینک web.splus.ir
             "has_splus_web_link": (
                 has_splus_web_link
             ),
+
+            # لینک splus.ir/meet
+            "has_splus_meet_link": (
+                has_splus_meet_link
+            ),
+
+            # لینک‌های دیگر، به‌جز meet
             "has_other_link": (
                 has_other_link
             ),
@@ -231,6 +260,12 @@ class SpamContextProvider:
             "profile_has_splus_web_link": (
                 profile[
                     "has_splus_web_link"
+                ]
+            ),
+
+            "profile_has_splus_meet_link": (
+                profile[
+                    "has_splus_meet_link"
                 ]
             ),
 

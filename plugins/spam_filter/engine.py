@@ -257,8 +257,9 @@ def calculate_score(
             elif join_age <= 24 * 3600:
                 score += 6
 
-    # حساسیت بیشتر برای web.splus.ir
-    # ولی لینک‌های دیگر همچنان امتیاز می‌گیرند.
+    # web.splus.ir حساسیت بالاتری دارد.
+    # لینک‌های عادی همچنان امتیاز می‌گیرند.
+    # splus.ir/meet عمداً هیچ امتیاز پروفایلی نمی‌گیرد.
     if context.get(
         "profile_has_splus_web_link"
     ):
