@@ -13,6 +13,217 @@ if TYPE_CHECKING:
     from .plugin import SpamFilterPlugin
 
 
+def _is_remote_group_id(
+    value: str,
+) -> bool:
+    if not value:
+        return False
+
+    try:
+        return int(value) < 0
+    except ValueError:
+        return False
+
+
+def _extract_optional_group_target(
+    raw: str,
+) -> tuple[int | None, str]:
+    parts = raw.strip().split()
+
+    if not parts:
+        return None, ""
+
+    candidate = parts[-1]
+
+    if not _is_remote_group_id(candidate):
+        return None, raw.strip()
+
+    return (
+        int(candidate),
+        " ".join(parts[:-1]).strip(),
+    )
+
+
+def _resolve_spam_group_target(
+    event,
+) -> tuple[int | None, str]:
+    raw = (
+        event.args_text or ""
+    ).strip()
+
+    target_group, clean_args = (
+        _extract_optional_group_target(
+            raw
+        )
+    )
+
+    if target_group is not None:
+        return target_group, clean_args
+
+    if event.is_group:
+        return event.chat_id, clean_args
+
+    return None, clean_args
+
+
+
+@command(
+    name="اسپم معاف",
+    permission="admin",
+    chat_type="all",
+    description="یک کاربر را از Spam Filter معاف می‌کند.",
+)
+async def add_whitelist(
+    self: "SpamFilterPlugin",
+    event: events.NewMessage.Event,
+) -> None:
+    target_group, args = _resolve_spam_group_target(
+        event
+    )
+
+    if target_group is None:
+        await event.reply(
+            "❌ گروه هدف مشخص نشده.\n"
+            "مثال:\n"
+            "!اسپم معاف 49245702 -10024473944"
+        )
+        return
+
+    if not args.isdigit():
+        await event.reply(
+            "❌ شناسه کاربر باید عددی باشد.\n"
+            "مثال:\n"
+            "!اسپم معاف 49245702"
+        )
+        return
+
+    user_id = int(args)
+
+    added = await self.whitelist.add(
+        target_group,
+        user_id,
+    )
+
+    if not added:
+        await event.reply(
+            f"ℹ️ کاربر `{user_id}` از قبل "
+            f"از Spam Filter معاف است."
+        )
+        return
+
+    await event.reply(
+        f"✅ کاربر `{user_id}` از Spam Filter "
+        f"گروه `{target_group}` معاف شد."
+    )
+
+
+@command(
+    name="اسپم رفع معافیت",
+    permission="admin",
+    chat_type="all",
+    description="معافیت یک کاربر از Spam Filter را لغو می‌کند.",
+)
+async def remove_whitelist(
+    self: "SpamFilterPlugin",
+    event: events.NewMessage.Event,
+) -> None:
+    target_group, args = _resolve_spam_group_target(
+        event
+    )
+
+    if target_group is None:
+        await event.reply(
+            "❌ گروه هدف مشخص نشده.\n"
+            "مثال:\n"
+            "!اسپم رفع معافیت 49245702 -10024473944"
+        )
+        return
+
+    if not args.isdigit():
+        await event.reply(
+            "❌ شناسه کاربر باید عددی باشد.\n"
+            "مثال:\n"
+            "!اسپم رفع معافیت 49245702"
+        )
+        return
+
+    user_id = int(args)
+
+    removed = await self.whitelist.remove(
+        target_group,
+        user_id,
+    )
+
+    if not removed:
+        await event.reply(
+            f"ℹ️ کاربر `{user_id}` در لیست معافیت "
+            f"وجود ندارد."
+        )
+        return
+
+    await event.reply(
+        f"✅ معافیت کاربر `{user_id}` از Spam Filter "
+        f"لغو شد."
+    )
+
+
+@command(
+    name="اسپم معاف ها",
+    permission="admin",
+    chat_type="all",
+    description="لیست کاربران معاف از Spam Filter را نشان می‌دهد.",
+)
+async def list_whitelist(
+    self: "SpamFilterPlugin",
+    event: events.NewMessage.Event,
+) -> None:
+    target_group, args = _resolve_spam_group_target(
+        event
+    )
+
+    if target_group is None:
+        await event.reply(
+            "❌ گروه هدف مشخص نشده.\n"
+            "مثال:\n"
+            "!اسپم معاف ها -10024473944"
+        )
+        return
+
+    if args:
+        await event.reply(
+            "❌ استفاده نادرست.\n"
+            "مثال:\n"
+            "!اسپم معاف ها\n"
+            "یا:\n"
+            "!اسپم معاف ها -10024473944"
+        )
+        return
+
+    users = await self.whitelist.get_all(
+        target_group
+    )
+
+    if not users:
+        await event.reply(
+            f"📋 لیست معافیت Spam Filter گروه "
+            f"`{target_group}` خالی است."
+        )
+        return
+
+    lines = [
+        f"• `{user_id}`"
+        for user_id in users
+    ]
+
+    await event.reply(
+        f"📋 کاربران معاف از Spam Filter\n"
+        f"گروه: `{target_group}`\n\n"
+        + "\n".join(lines)
+    )
+
+
+
+
 @command(
     name="اسپم فلاد",
     permission="admin",
@@ -129,9 +340,18 @@ async def on_message(
     self: "SpamFilterPlugin",
     event: events.NewMessage.Event,
 ) -> None:
+
     if (
         not event.is_group
         or event.sender_id is None
+    ):
+        return
+
+    # کاربران موجود در Spam Whitelist باید کاملاً
+    # از Spam Filter عبور کنند و حتی وارد tracker هم نشوند.
+    if await self.whitelist.is_exempt(
+        event.chat_id,
+        event.sender_id,
     ):
         return
 

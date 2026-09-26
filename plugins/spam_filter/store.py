@@ -13,13 +13,6 @@ DEFAULT_MAX_REPEAT = 3
 class SpamSettingsStore:
     """
     تنظیمات فیلتر اسپم هر گروه.
-
-    برای پیام‌های عادی، تنظیمات از RAM خوانده می‌شوند
-    تا SQLite در مسیر اصلی spam detection نباشد.
-
-    Cache:
-    - حداکثر 512 گروه
-    - TTL = 15 دقیقه
     """
 
     TABLE = "spam_settings"
@@ -81,13 +74,11 @@ class SpamSettingsStore:
         self,
         group_id: int,
     ) -> dict[str, Any]:
-        # مسیر سریع
         cached = self._cache.get(group_id)
 
         if cached is not None:
             return dict(cached)
 
-        # فقط cache miss
         await self._ensure_row(group_id)
 
         row = await self.db.select_one(
@@ -189,3 +180,155 @@ class SpamSettingsStore:
                 group_id,
                 cached,
             )
+
+
+class SpamWhitelistStore:
+    """
+    کاربرانی که Spam Filter باید کاملاً نادیده‌شان بگیرد.
+
+    whitelist فقط مربوط به Spam Filter است و روی
+    content_filter / violation_manager تأثیری ندارد.
+
+    برای مسیر عادی تشخیص اسپم، اطلاعات از RAM خوانده می‌شوند
+    و SQLite فقط هنگام cache miss یا تغییر whitelist استفاده می‌شود.
+    """
+
+    TABLE = "spam_whitelist"
+
+    CACHE_MAX_GROUPS = 512
+    CACHE_TTL_SECONDS = 900
+
+    def __init__(
+        self,
+        db: DatabaseManager,
+    ) -> None:
+        self.db = db
+
+        self._cache = TTLCache[
+            int,
+            set[int],
+        ](
+            max_entries=self.CACHE_MAX_GROUPS,
+            ttl_seconds=self.CACHE_TTL_SECONDS,
+        )
+
+    async def create_table(self) -> None:
+        await self.db.create_table(
+            self.TABLE,
+            columns={
+                "id": (
+                    "INTEGER PRIMARY KEY AUTOINCREMENT"
+                ),
+                "group_id": (
+                    "INTEGER NOT NULL"
+                ),
+                "user_id": (
+                    "INTEGER NOT NULL"
+                ),
+            },
+            indexes=[
+                "group_id",
+                "user_id",
+            ],
+        )
+
+    async def _load_group(
+        self,
+        group_id: int,
+    ) -> set[int]:
+        cached = self._cache.get(group_id)
+
+        if cached is not None:
+            return set(cached)
+
+        rows = await self.db.select_all(
+            self.TABLE,
+            where={
+                "group_id": group_id,
+            },
+        )
+
+        users = {
+            int(row["user_id"])
+            for row in rows
+        }
+
+        self._cache.set(
+            group_id,
+            users,
+        )
+
+        return set(users)
+
+    async def is_exempt(
+        self,
+        group_id: int,
+        user_id: int,
+    ) -> bool:
+        users = await self._load_group(group_id)
+        return user_id in users
+
+    async def add(
+        self,
+        group_id: int,
+        user_id: int,
+    ) -> bool:
+        users = await self._load_group(group_id)
+
+        if user_id in users:
+            return False
+
+        await self.db.insert(
+            self.TABLE,
+            {
+                "group_id": group_id,
+                "user_id": user_id,
+            },
+        )
+
+        users.add(user_id)
+
+        self._cache.set(
+            group_id,
+            users,
+        )
+
+        return True
+
+    async def remove(
+        self,
+        group_id: int,
+        user_id: int,
+    ) -> bool:
+        users = await self._load_group(group_id)
+
+        if user_id not in users:
+            return False
+
+        await self.db.execute(
+            f"""
+            DELETE FROM {self.TABLE}
+            WHERE group_id = ?
+              AND user_id = ?
+            """,
+            (
+                group_id,
+                user_id,
+            ),
+        )
+
+        users.discard(user_id)
+
+        self._cache.set(
+            group_id,
+            users,
+        )
+
+        return True
+
+    async def get_all(
+        self,
+        group_id: int,
+    ) -> list[int]:
+        users = await self._load_group(group_id)
+        return sorted(users)
