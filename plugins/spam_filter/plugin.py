@@ -1,15 +1,30 @@
 from . import handlers
-from .store import SpamSettingsStore, SpamWhitelistStore
-from .tracker import AdminCache, SpamTracker
+from .context import SpamContextProvider
+from .store import (
+    SpamContextStore,
+    SpamSettingsStore,
+    SpamWhitelistStore,
+)
+from .tracker import (
+    AdminCache,
+    SpamTracker,
+)
 
 from core.base_plugin import BasePlugin
 
 
 class SpamFilterPlugin(BasePlugin):
     name = "Spam Filter"
-    version = "1.3.0"
 
-    def __init__(self, client, command_manager, db, event_bus):
+    version = "1.4.0"
+
+    def __init__(
+        self,
+        client,
+        command_manager,
+        db,
+        event_bus,
+    ):
         super().__init__(
             client,
             command_manager,
@@ -25,12 +40,23 @@ class SpamFilterPlugin(BasePlugin):
             self.db
         )
 
+        self.context_store = SpamContextStore(
+            self.db
+        )
+
+        self.context = SpamContextProvider(
+            self.context_store,
+            self.client,
+        )
+
         self.tracker = SpamTracker()
+
         self.admin_cache = AdminCache()
 
     async def on_load(self):
         await self.settings.create_table()
         await self.whitelist.create_table()
+        await self.context_store.create_table()
 
     set_flood = handlers.set_flood
     set_max_links = handlers.set_max_links
@@ -41,4 +67,5 @@ class SpamFilterPlugin(BasePlugin):
     remove_whitelist = handlers.remove_whitelist
     list_whitelist = handlers.list_whitelist
 
+    on_member_change = handlers.on_member_change
     on_message = handlers.on_message

@@ -6,9 +6,9 @@ from core.decorators import command, on_event
 from core.permissions import is_chat_admin
 
 from . import detection
+from .actions import apply_decision
+from .engine import build_features, decide
 
-# فقط برای type checker ایمپورت می‌شه، موقع اجرا نه؛ اینجوری import
-# چرخه‌ای (handlers.py <-> plugin.py) پیش نمیاد.
 if TYPE_CHECKING:
     from .plugin import SpamFilterPlugin
 
@@ -340,15 +340,13 @@ async def on_message(
     self: "SpamFilterPlugin",
     event: events.NewMessage.Event,
 ) -> None:
-
     if (
         not event.is_group
         or event.sender_id is None
     ):
         return
 
-    # کاربران موجود در Spam Whitelist باید کاملاً
-    # از Spam Filter عبور کنند و حتی وارد tracker هم نشوند.
+    # Whitelist
     if await self.whitelist.is_exempt(
         event.chat_id,
         event.sender_id,
@@ -361,6 +359,7 @@ async def on_message(
         event.chat_id
     )
 
+    # ثبت رفتار کاربر
     repeat_count = self.tracker.register(
         event.chat_id,
         event.sender_id,
@@ -368,75 +367,191 @@ async def on_message(
         text,
     )
 
-    reason = None
-    is_flood = False
-
-    link_count = detection.count_links(
-        text
-    )
-
-    if link_count > settings["max_links"]:
-        reason = (
-            "بیش از حدِ مجاز لینک تو یه پیام "
-            f"({link_count} لینک)"
-        )
-
-    elif repeat_count > settings["max_repeat"]:
-        reason = (
-            "ارسال پیام تکراری پشت‌سرهم"
-        )
-
-    elif detection.has_char_flood(text):
-        reason = (
-            "تکرار بیش‌ازحد یه کاراکتر تو پیام"
-        )
-
-    elif (
+    recent_message_count = (
         self.tracker.count_in_window(
             event.chat_id,
             event.sender_id,
             settings["flood_seconds"],
         )
-        > settings["flood_count"]
-    ):
-        is_flood = True
+    )
 
-    # پیام عادی:
-    # بدون API call و بدون permission check
-    if reason is None and not is_flood:
+    recent_texts = (
+        self.tracker.recent_texts(
+            event.chat_id,
+            event.sender_id,
+            limit=10,
+            exclude_message_id=event.id,
+        )
+    )
+
+    link_count = detection.count_links(
+        text
+    )
+
+    char_flood = detection.has_char_flood(
+        text
+    )
+
+    features = build_features(
+        text=text,
+        repeat_count=repeat_count,
+        recent_message_count=recent_message_count,
+        recent_texts=recent_texts,
+        link_count=link_count,
+        char_flood=char_flood,
+        flood_threshold=settings[
+            "flood_count"
+        ],
+        repeat_threshold=settings[
+            "max_repeat"
+        ],
+        link_threshold=settings[
+            "max_links"
+        ],
+    )
+
+    # -------------------------------------------------
+    # Signalهای خارجی
+    # -------------------------------------------------
+
+    external_signals = {}
+
+    await self.event_bus.emit(
+        "spam_signals",
+        event=event,
+        group_id=event.chat_id,
+        user_id=event.sender_id,
+        signals=external_signals,
+    )
+
+    # -------------------------------------------------
+    # Context
+    #
+    # فقط وقتی لازم است سراغ اطلاعات کاربر می‌رویم.
+    # پیام‌های کاملاً عادی API اضافی نمی‌گیرند.
+    # -------------------------------------------------
+
+    preliminary_score = (
+        features.flood_score * 0.30
+        + features.repeat_score * 0.25
+        + features.similarity_score * 0.20
+        + features.link_score * 0.15
+        + features.char_flood_score * 0.10
+    )
+
+    if (
+        preliminary_score >= 35
+        or external_signals.get(
+            "content_filter_match"
+        )
+    ):
+        context = await self.context.collect(
+            event,
+            external_signals,
+        )
+
+    else:
+        context = {
+            "join_age_seconds": None,
+            "is_new_user": False,
+            "profile_has_link": False,
+            "external_signals": (
+                external_signals
+            ),
+        }
+
+    decision = decide(
+        features=features,
+        context=context,
+    )
+
+    if decision.level == "NORMAL":
         return
 
-    # فقط پیام مشکوک به اینجا می‌رسد.
-    try:
-        chat = await event.get_chat()
+    # -------------------------------------------------
+    # Admin protection
+    # -------------------------------------------------
 
-        if await is_chat_admin(
-            self.client,
-            chat,
-            event.sender_id,
-            raise_on_error=True,
-        ):
-            self.tracker.clear_user(
+    cached_admin = self.admin_cache.get(
+        event.chat_id,
+        event.sender_id,
+    )
+
+    if cached_admin is None:
+        try:
+            chat = await event.get_chat()
+
+            cached_admin = await is_chat_admin(
+                self.client,
+                chat,
+                event.sender_id,
+                raise_on_error=True,
+            )
+
+            self.admin_cache.set(
                 event.chat_id,
                 event.sender_id,
+                cached_admin,
             )
+
+        except Exception:
+            # وقتی وضعیت کاربر مشخص نیست،
+            # مجازات نمی‌کنیم.
             return
 
-    except Exception:
-        # وقتی مطمئن نیستیم ادمین نیست،
-        # مجازات نکن.
-        return
-
-    if is_flood:
-        await _flag_flood(
-            self,
-            event,
-            settings["flood_seconds"],
+    if cached_admin:
+        self.tracker.clear_user(
+            event.chat_id,
+            event.sender_id,
         )
         return
 
-    await _flag(
+    await apply_decision(
         self,
         event,
-        reason,
+        decision,
+        features,
+        context,
+        settings["flood_seconds"],
     )
+    
+@on_event(events.ChatAction)
+async def on_member_change(
+    self: "SpamFilterPlugin",
+    event,
+) -> None:
+    if not getattr(
+        event,
+        "is_group",
+        False,
+    ):
+        return
+
+    user_id = getattr(
+        event,
+        "user_id",
+        None,
+    )
+
+    if user_id is None:
+        return
+
+    if getattr(
+        event,
+        "user_joined",
+        False,
+    ):
+        await self.context.record_join(
+            event.chat_id,
+            user_id,
+        )
+
+    elif getattr(
+        event,
+        "user_left",
+        False,
+    ):
+        await self.context.record_leave(
+            event.chat_id,
+            user_id,
+        )

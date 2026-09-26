@@ -332,3 +332,109 @@ class SpamWhitelistStore:
     ) -> list[int]:
         users = await self._load_group(group_id)
         return sorted(users)
+
+
+
+class SpamContextStore:
+    """
+    اطلاعات persistent مربوط به حضور کاربران در گروه.
+
+    فعلاً فقط زمان آخرین ورود کاربر را نگه می‌دارد.
+    """
+
+    TABLE = "spam_user_context"
+
+    async def create_table(self) -> None:
+        await self.db.create_table(
+            self.TABLE,
+            columns={
+                "id": (
+                    "INTEGER PRIMARY KEY AUTOINCREMENT"
+                ),
+                "group_id": (
+                    "INTEGER NOT NULL"
+                ),
+                "user_id": (
+                    "INTEGER NOT NULL"
+                ),
+                "joined_at": (
+                    "REAL NOT NULL"
+                ),
+            },
+            unique=[
+                (
+                    "group_id",
+                    "user_id",
+                )
+            ],
+            indexes=[
+                "group_id",
+                "user_id",
+            ],
+        )
+
+    def __init__(
+        self,
+        db: DatabaseManager,
+    ) -> None:
+        self.db = db
+
+    async def set_joined_at(
+        self,
+        group_id: int,
+        user_id: int,
+        joined_at: float,
+    ) -> None:
+        await self.db.insert(
+            self.TABLE,
+            {
+                "group_id": group_id,
+                "user_id": user_id,
+                "joined_at": joined_at,
+            },
+            or_ignore=True,
+        )
+
+        await self.db.update(
+            self.TABLE,
+            {
+                "joined_at": joined_at,
+            },
+            where={
+                "group_id": group_id,
+                "user_id": user_id,
+            },
+        )
+
+    async def get_joined_at(
+        self,
+        group_id: int,
+        user_id: int,
+    ) -> float | None:
+        row = await self.db.select_one(
+            self.TABLE,
+            where={
+                "group_id": group_id,
+                "user_id": user_id,
+            },
+        )
+
+        if not row:
+            return None
+
+        return float(
+            row["joined_at"]
+        )
+
+    async def clear_user(
+        self,
+        group_id: int,
+        user_id: int,
+    ) -> None:
+        await self.db.delete(
+            self.TABLE,
+            {
+                "group_id": group_id,
+                "user_id": user_id,
+            },
+        )

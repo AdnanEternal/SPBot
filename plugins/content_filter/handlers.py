@@ -2,7 +2,7 @@ from typing import TYPE_CHECKING
 
 from splusthon import events
 
-from core.decorators import command, on_event
+from core.decorators import command, on_event, on_bus_event
 
 if TYPE_CHECKING:
     from .plugin import ContentFilterPlugin
@@ -116,3 +116,44 @@ async def on_message(
         user_id=event.sender_id,
         reason=f"استفاده از کلمه «{matched_word}» ممنوع است.",
     )
+
+@on_bus_event("spam_signals")
+async def contribute_spam_signals(
+    self,
+    event,
+    group_id: int,
+    user_id: int,
+    signals: dict,
+) -> None:
+    if not event.is_group:
+        return
+
+    matched_word = getattr(
+        event,
+        "_content_filter_match",
+        None,
+    )
+
+    if matched_word is None:
+        matched_word = await self.words.find_match(
+            group_id,
+            event.raw_text or "",
+        )
+
+        if matched_word is not None:
+            # نتیجه را روی خود event ذخیره می‌کنیم
+            # تا on_message دوباره DB/cache را بررسی نکند.
+            event._content_filter_match = (
+                matched_word
+            )
+
+    if matched_word is None:
+        return
+
+    signals[
+        "content_filter_match"
+    ] = True
+
+    signals[
+        "content_filter_word"
+    ] = matched_word
