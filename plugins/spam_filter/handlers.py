@@ -2,12 +2,20 @@ from typing import TYPE_CHECKING
 
 from splusthon import events
 
-from core.decorators import command, on_event, on_bus_event
+from core.decorators import (
+    command,
+    on_bus_event,
+    on_event,
+)
 from core.permissions import is_chat_admin
 
 from . import detection
 from .actions import apply_decision
-from .engine import build_features, decide, calculate_score
+from .engine import (
+    build_features,
+    calculate_score,
+    decide,
+)
 
 if TYPE_CHECKING:
     from .plugin import SpamFilterPlugin
@@ -16,12 +24,9 @@ if TYPE_CHECKING:
 def _is_remote_group_id(
     value: str,
 ) -> bool:
-    if not value:
-        return False
-
     try:
         return int(value) < 0
-    except ValueError:
+    except (TypeError, ValueError):
         return False
 
 
@@ -76,43 +81,35 @@ async def add_whitelist(
     self: "SpamFilterPlugin",
     event: events.NewMessage.Event,
 ) -> None:
-    target_group, args = _resolve_spam_group_target(
-        event
+    target_group, args = (
+        _resolve_spam_group_target(event)
     )
 
     if target_group is None:
         await event.reply(
-            "❌ گروه هدف مشخص نشده.\n"
-            "مثال:\n"
-            "!اسپم معاف 49245702 -10024473944"
+            "❌ گروه هدف مشخص نشده."
         )
         return
 
     if not args.isdigit():
         await event.reply(
-            "❌ شناسه کاربر باید عددی باشد.\n"
-            "مثال:\n"
-            "!اسپم معاف 49245702"
+            "❌ شناسه کاربر باید عددی باشد."
         )
         return
 
-    user_id = int(args)
-
     added = await self.whitelist.add(
         target_group,
-        user_id,
+        int(args),
     )
 
     if not added:
         await event.reply(
-            f"ℹ️ کاربر `{user_id}` از قبل "
-            f"از Spam Filter معاف است."
+            "ℹ️ کاربر از قبل معاف است."
         )
         return
 
     await event.reply(
-        f"✅ کاربر `{user_id}` از Spam Filter "
-        f"گروه `{target_group}` معاف شد."
+        f"✅ کاربر `{args}` معاف شد."
     )
 
 
@@ -120,49 +117,41 @@ async def add_whitelist(
     name="اسپم رفع معافیت",
     permission="admin",
     chat_type="all",
-    description="معافیت یک کاربر از Spam Filter را لغو می‌کند.",
+    description="معافیت کاربر را حذف می‌کند.",
 )
 async def remove_whitelist(
     self: "SpamFilterPlugin",
     event: events.NewMessage.Event,
 ) -> None:
-    target_group, args = _resolve_spam_group_target(
-        event
+    target_group, args = (
+        _resolve_spam_group_target(event)
     )
 
     if target_group is None:
         await event.reply(
-            "❌ گروه هدف مشخص نشده.\n"
-            "مثال:\n"
-            "!اسپم رفع معافیت 49245702 -10024473944"
+            "❌ گروه هدف مشخص نشده."
         )
         return
 
     if not args.isdigit():
         await event.reply(
-            "❌ شناسه کاربر باید عددی باشد.\n"
-            "مثال:\n"
-            "!اسپم رفع معافیت 49245702"
+            "❌ شناسه کاربر باید عددی باشد."
         )
         return
 
-    user_id = int(args)
-
     removed = await self.whitelist.remove(
         target_group,
-        user_id,
+        int(args),
     )
 
     if not removed:
         await event.reply(
-            f"ℹ️ کاربر `{user_id}` در لیست معافیت "
-            f"وجود ندارد."
+            "❌ کاربر در whitelist نبود."
         )
         return
 
     await event.reply(
-        f"✅ معافیت کاربر `{user_id}` از Spam Filter "
-        f"لغو شد."
+        f"✅ معافیت `{args}` حذف شد."
     )
 
 
@@ -170,31 +159,25 @@ async def remove_whitelist(
     name="اسپم معاف ها",
     permission="admin",
     chat_type="all",
-    description="لیست کاربران معاف از Spam Filter را نشان می‌دهد.",
+    description="لیست کاربران معاف را نشان می‌دهد.",
 )
 async def list_whitelist(
     self: "SpamFilterPlugin",
     event: events.NewMessage.Event,
 ) -> None:
-    target_group, args = _resolve_spam_group_target(
-        event
+    target_group, args = (
+        _resolve_spam_group_target(event)
     )
 
     if target_group is None:
         await event.reply(
-            "❌ گروه هدف مشخص نشده.\n"
-            "مثال:\n"
-            "!اسپم معاف ها -10024473944"
+            "❌ گروه هدف مشخص نشده."
         )
         return
 
     if args:
         await event.reply(
-            "❌ استفاده نادرست.\n"
-            "مثال:\n"
-            "!اسپم معاف ها\n"
-            "یا:\n"
-            "!اسپم معاف ها -10024473944"
+            "❌ استفاده نادرست."
         )
         return
 
@@ -204,20 +187,16 @@ async def list_whitelist(
 
     if not users:
         await event.reply(
-            f"📋 لیست معافیت Spam Filter گروه "
-            f"`{target_group}` خالی است."
+            "📋 لیست معافیت خالی است."
         )
         return
 
-    lines = [
-        f"• `{user_id}`"
-        for user_id in users
-    ]
-
     await event.reply(
-        f"📋 کاربران معاف از Spam Filter\n"
-        f"گروه: `{target_group}`\n\n"
-        + "\n".join(lines)
+        "📋 کاربران معاف:\n\n"
+        + "\n".join(
+            f"• `{user_id}`"
+            for user_id in users
+        )
     )
 
 
@@ -225,7 +204,7 @@ async def list_whitelist(
     name="اسپم فلاد",
     permission="admin",
     chat_type="group",
-    description="حداکثر تعداد پیام مجاز در یه بازه‌ی زمانی رو تنظیم می‌کنه.",
+    description="تنظیم فلاد.",
 )
 async def set_flood(
     self: "SpamFilterPlugin",
@@ -235,18 +214,18 @@ async def set_flood(
 
     if (
         len(parts) != 2
-        or not all(p.isdigit() for p in parts)
+        or not all(
+            part.isdigit()
+            for part in parts
+        )
     ):
         await event.reply(
-            "مثال: !اسپم فلاد 5 10\n"
-            "(یعنی بیشتر از ۵ پیام تو ۱۰ ثانیه = اسپم)"
+            "مثال: !اسپم فلاد 5 10"
         )
         return
 
-    count, seconds = (
-        int(parts[0]),
-        int(parts[1]),
-    )
+    count = int(parts[0])
+    seconds = int(parts[1])
 
     await self.settings.set_flood(
         event.chat_id,
@@ -255,37 +234,8 @@ async def set_flood(
     )
 
     await event.reply(
-        f"آستانه‌ی فلاد با موفقیت روی "
-        f"«بیشتر از {count} پیام در {seconds} ثانیه» تنظیم شد!"
-    )
-
-
-@command(
-    name="اسپم لینک",
-    permission="admin",
-    chat_type="group",
-    description="حداکثر تعداد لینک مجاز تو یه پیام رو تنظیم می‌کنه.",
-)
-async def set_max_links(
-    self: "SpamFilterPlugin",
-    event: events.NewMessage.Event,
-) -> None:
-    value = event.args_text.strip()
-
-    if not value.isdigit():
-        await event.reply(
-            "مثال: !اسپم لینک 3"
-        )
-        return
-
-    await self.settings.set_max_links(
-        event.chat_id,
-        int(value),
-    )
-
-    await event.reply(
-        f"حداکثر لینک مجاز تو هر پیام "
-        f"با موفقیت به {value} تنظیم شد!"
+        f"✅ فلاد: بیشتر از {count} پیام "
+        f"در {seconds} ثانیه."
     )
 
 
@@ -293,7 +243,7 @@ async def set_max_links(
     name="اسپم تکرار",
     permission="admin",
     chat_type="group",
-    description="حداکثر پیام تکراریِ پشت‌سرهم مجاز رو تنظیم می‌کنه.",
+    description="تنظیم تکرار.",
 )
 async def set_max_repeat(
     self: "SpamFilterPlugin",
@@ -313,8 +263,7 @@ async def set_max_repeat(
     )
 
     await event.reply(
-        f"حداکثر پیام تکراری مجاز "
-        f"با موفقیت به {value} تنظیم شد!"
+        f"✅ حداکثر تکرار روی {value} تنظیم شد."
     )
 
 
@@ -322,7 +271,7 @@ async def set_max_repeat(
     name="تنظیمات اسپم",
     permission="admin",
     chat_type="group",
-    description="تنظیمات فعلی فیلتر اسپم این گروه رو نشون می‌ده.",
+    description="تنظیمات Spam Filter.",
 )
 async def show_settings(
     self: "SpamFilterPlugin",
@@ -333,48 +282,44 @@ async def show_settings(
     )
 
     await event.reply(
-        "⚙️ تنظیمات فیلتر اسپم این گروه:\n\n"
+        "⚙️ تنظیمات Spam Filter:\n\n"
         f"فلاد: بیشتر از "
         f"{settings['flood_count']} پیام در "
         f"{settings['flood_seconds']} ثانیه\n"
-        f"لینک: بیشتر از "
-        f"{settings['max_links']} لینک تو یه پیام\n"
         f"تکرار: بیشتر از "
         f"{settings['max_repeat']} پیام یکسان پشت‌سرهم"
     )
 
 
 @command(
-    name="اسپم قانون بیو",
+    name="اسپم ممنوع",
     permission="owner",
     chat_type="all",
-    description="یک قانون Bio به Spam Filter اضافه می‌کند.",
+    description="یک عبارت ممنوع به Rule Engine اضافه می‌کند.",
 )
-async def add_bio_rule(
+async def add_forbidden_rule(
     self: "SpamFilterPlugin",
     event: events.NewMessage.Event,
 ) -> None:
-    target_group, args = _resolve_spam_group_target(
-        event
+    target_group, pattern = (
+        _resolve_spam_group_target(event)
     )
 
     if target_group is None:
         await event.reply(
-            "❌ گروه هدف مشخص نشده.\n"
-            "مثال:\n"
-            "!اسپم قانون بیو تبلیغ -10024473944"
+            "❌ گروه هدف مشخص نشده."
         )
         return
 
-    pattern = args.strip()
+    pattern = pattern.strip()
 
     if not pattern:
         await event.reply(
-            "❌ متن قانون مشخص نشده."
+            "❌ عبارت ممنوع مشخص نشده."
         )
         return
 
-    added = await self.rules.add_bio_rule(
+    added = await self.rules.add_forbidden(
         target_group,
         pattern,
     )
@@ -386,25 +331,24 @@ async def add_bio_rule(
         return
 
     await event.reply(
-        f"✅ قانون Bio اضافه شد.\n"
-        f"گروه: `{target_group}`\n"
-        f"عبارت: `{pattern}`\n"
+        f"✅ عبارت ممنوع اضافه شد:\n"
+        f"`{pattern}`\n\n"
         f"اقدام: `HARD_SPAM`"
     )
 
 
 @command(
-    name="اسپم حذف قانون بیو",
+    name="اسپم مجاز",
     permission="owner",
     chat_type="all",
-    description="یک قانون Bio را حذف می‌کند.",
+    description="یک عبارت را از قوانین ممنوع مستثنی می‌کند.",
 )
-async def remove_bio_rule(
+async def add_allowed_rule(
     self: "SpamFilterPlugin",
     event: events.NewMessage.Event,
 ) -> None:
-    target_group, args = _resolve_spam_group_target(
-        event
+    target_group, pattern = (
+        _resolve_spam_group_target(event)
     )
 
     if target_group is None:
@@ -413,15 +357,58 @@ async def remove_bio_rule(
         )
         return
 
-    pattern = args.strip()
+    pattern = pattern.strip()
 
     if not pattern:
         await event.reply(
-            "❌ متن قانون مشخص نشده."
+            "❌ عبارت مجاز مشخص نشده."
         )
         return
 
-    removed = await self.rules.remove_bio_rule(
+    added = await self.rules.add_allowed(
+        target_group,
+        pattern,
+    )
+
+    if not added:
+        await event.reply(
+            "ℹ️ این استثنا از قبل وجود دارد."
+        )
+        return
+
+    await event.reply(
+        f"✅ استثنا اضافه شد:\n"
+        f"`{pattern}`"
+    )
+
+
+@command(
+    name="اسپم حذف ممنوع",
+    permission="owner",
+    chat_type="all",
+    description="یک قانون ممنوع را حذف می‌کند.",
+)
+async def remove_forbidden_rule(
+    self: "SpamFilterPlugin",
+    event: events.NewMessage.Event,
+) -> None:
+    target_group, pattern = (
+        _resolve_spam_group_target(event)
+    )
+
+    if target_group is None:
+        await event.reply(
+            "❌ گروه هدف مشخص نشده."
+        )
+        return
+
+    if not pattern.strip():
+        await event.reply(
+            "❌ عبارت مشخص نشده."
+        )
+        return
+
+    removed = await self.rules.remove_forbidden(
         target_group,
         pattern,
     )
@@ -433,23 +420,66 @@ async def remove_bio_rule(
         return
 
     await event.reply(
-        f"✅ قانون Bio حذف شد.\n"
-        f"عبارت: `{pattern}`"
+        f"✅ قانون ممنوع حذف شد:\n"
+        f"`{pattern}`"
     )
 
 
 @command(
-    name="اسپم قوانین بیو",
+    name="اسپم حذف مجاز",
     permission="owner",
     chat_type="all",
-    description="قوانین Bio ثبت‌شده را نشان می‌دهد.",
+    description="یک استثنا را حذف می‌کند.",
 )
-async def list_bio_rules(
+async def remove_allowed_rule(
     self: "SpamFilterPlugin",
     event: events.NewMessage.Event,
 ) -> None:
-    target_group, args = _resolve_spam_group_target(
-        event
+    target_group, pattern = (
+        _resolve_spam_group_target(event)
+    )
+
+    if target_group is None:
+        await event.reply(
+            "❌ گروه هدف مشخص نشده."
+        )
+        return
+
+    if not pattern.strip():
+        await event.reply(
+            "❌ عبارت مشخص نشده."
+        )
+        return
+
+    removed = await self.rules.remove_allowed(
+        target_group,
+        pattern,
+    )
+
+    if not removed:
+        await event.reply(
+            "❌ این استثنا پیدا نشد."
+        )
+        return
+
+    await event.reply(
+        f"✅ استثنا حذف شد:\n"
+        f"`{pattern}`"
+    )
+
+
+@command(
+    name="اسپم قوانین",
+    permission="owner",
+    chat_type="all",
+    description="تمام قوانین متنی را نشان می‌دهد.",
+)
+async def list_text_rules(
+    self: "SpamFilterPlugin",
+    event: events.NewMessage.Event,
+) -> None:
+    target_group, args = (
+        _resolve_spam_group_target(event)
     )
 
     if target_group is None:
@@ -471,145 +501,35 @@ async def list_bio_rules(
     rules = [
         rule
         for rule in rules
-        if rule["rule_type"] == "bio_contains"
+        if rule["rule_type"]
+        in (
+            "text_forbidden",
+            "text_allowed",
+        )
     ]
 
     if not rules:
         await event.reply(
-            f"📋 برای گروه `{target_group}` "
-            f"هیچ قانون Bio ثبت نشده."
+            "📋 هیچ Rule متنی ثبت نشده."
         )
         return
 
-    lines = [
-        f"{index}. `{rule['pattern']}` → `HARD_SPAM`"
-        for index, rule in enumerate(
-            rules,
-            start=1,
-        )
-    ]
+    lines = []
+
+    for rule in rules:
+        if rule["rule_type"] == "text_forbidden":
+            lines.append(
+                f"🚫 `{rule['pattern']}` → HARD_SPAM"
+            )
+        else:
+            lines.append(
+                f"✅ `{rule['pattern']}` → ALLOW"
+            )
 
     await event.reply(
-        f"📋 قوانین Bio\n"
-        f"گروه: `{target_group}`\n\n"
+        "📋 قوانین متنی:\n\n"
         + "\n".join(lines)
     )
-
-
-
-
-
-
-
-@command(
-    name="اسپم لینک مجاز",
-    permission="owner",
-    chat_type="all",
-    description="یک لینک یا الگوی لینک را به whitelist اضافه می‌کند.",
-)
-async def add_link_whitelist(
-    self: "SpamFilterPlugin",
-    event: events.NewMessage.Event,
-) -> None:
-    pattern = (
-        event.args_text or ""
-    ).strip()
-
-    if not pattern:
-        await event.reply(
-            "❌ لینک مشخص نشده.\n"
-            "مثال:\n"
-            "!اسپم لینک مجاز https://example.com/"
-        )
-        return
-
-    added = await self.link_whitelist.add(
-        pattern
-    )
-
-    if not added:
-        await event.reply(
-            "ℹ️ این لینک از قبل در whitelist است."
-        )
-        return
-
-    self.context.invalidate_profile_cache()
-
-    await event.reply(
-        f"✅ لینک به whitelist اضافه شد:\n"
-        f"`{pattern}`"
-    )
-
-
-@command(
-    name="اسپم حذف لینک مجاز",
-    permission="owner",
-    chat_type="all",
-    description="یک لینک را از whitelist حذف می‌کند.",
-)
-async def remove_link_whitelist(
-    self: "SpamFilterPlugin",
-    event: events.NewMessage.Event,
-) -> None:
-    pattern = (
-        event.args_text or ""
-    ).strip()
-
-    if not pattern:
-        await event.reply(
-            "❌ لینک مشخص نشده."
-        )
-        return
-
-    removed = await self.link_whitelist.remove(
-        pattern
-    )
-
-    if not removed:
-        await event.reply(
-            "❌ این لینک در whitelist وجود ندارد."
-        )
-        return
-
-    self.context.invalidate_profile_cache()
-
-    await event.reply(
-        f"✅ لینک از whitelist حذف شد:\n"
-        f"`{pattern}`"
-    )
-
-
-@command(
-    name="اسپم لینک های مجاز",
-    permission="owner",
-    chat_type="all",
-    description="لیست لینک‌های whitelist را نشان می‌دهد.",
-)
-async def list_link_whitelist(
-    self: "SpamFilterPlugin",
-    event: events.NewMessage.Event,
-) -> None:
-    links = await self.link_whitelist.get_all()
-
-    if not links:
-        await event.reply(
-            "📋 whitelist لینک خالی است."
-        )
-        return
-
-    lines = [
-        f"{index}. `{pattern}`"
-        for index, pattern in enumerate(
-            links,
-            start=1,
-        )
-    ]
-
-    await event.reply(
-        "📋 لینک‌های مجاز Spam Filter\n\n"
-        + "\n".join(lines)
-    )
-
 
 
 @on_event(events.NewMessage(incoming=True))
@@ -659,22 +579,6 @@ async def on_message(
         )
     )
 
-    raw_links = detection.extract_links(
-        text
-    )
-
-    whitelisted_links = []
-
-    if raw_links:
-        whitelisted_links = (
-            await self.link_whitelist.get_all()
-        )
-
-    link_count = detection.count_links(
-        text,
-        whitelisted_links,
-    )
-
     char_flood = detection.has_char_flood(
         text
     )
@@ -684,16 +588,12 @@ async def on_message(
         repeat_count=repeat_count,
         recent_message_count=recent_message_count,
         recent_texts=recent_texts,
-        link_count=link_count,
         char_flood=char_flood,
         flood_threshold=settings[
             "flood_count"
         ],
         repeat_threshold=settings[
             "max_repeat"
-        ],
-        link_threshold=settings[
-            "max_links"
         ],
     )
 
@@ -716,22 +616,21 @@ async def on_message(
         event.sender_id,
     )
 
-    has_bio_rules = await self.rules.has_bio_rules(
-        event.chat_id
+    has_forbidden_rules = (
+        await self.rules.has_forbidden(
+            event.chat_id
+        )
     )
 
-    # پیام لینک‌دار را هم حتماً Context می‌کنیم
-    # تا لینک پروفایل web.splus.ir فرصت اثرگذاری داشته باشد.
     if (
         preliminary_score >= 20
-        or raw_links
         or external_signals.get(
             "content_filter_match"
         )
         or external_signals.get(
             "hard_spam"
         )
-        or has_bio_rules
+        or has_forbidden_rules
     ):
         context = await self.context.collect(
             event,
@@ -742,11 +641,8 @@ async def on_message(
         context = {
             "join_age_seconds": None,
             "is_new_user": False,
-            "profile_has_link": False,
-            "profile_has_splus_web_link": False,
-            "profile_has_splus_meet_link": False,
-            "profile_has_other_link": False,
-            "matched_bio_rules": [],
+            "profile_text": "",
+            "matched_text_rules": [],
             "external_signals": external_signals,
         }
 
@@ -781,7 +677,6 @@ async def on_message(
             )
 
         except Exception:
-            # اگر وضعیت ادمین مشخص نیست، مجازات نکن.
             return
 
     if cached_admin:

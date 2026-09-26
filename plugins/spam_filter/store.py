@@ -11,10 +11,6 @@ DEFAULT_MAX_REPEAT = 3
 
 
 class SpamSettingsStore:
-    """
-    تنظیمات فیلتر اسپم هر گروه.
-    """
-
     TABLE = "spam_settings"
 
     CACHE_MAX_GROUPS = 512
@@ -47,6 +43,7 @@ class SpamSettingsStore:
                     f"INTEGER NOT NULL "
                     f"DEFAULT {DEFAULT_FLOOD_SECONDS}"
                 ),
+                # برای سازگاری با دیتابیس‌های قبلی
                 "max_links": (
                     f"INTEGER NOT NULL "
                     f"DEFAULT {DEFAULT_MAX_LINKS}"
@@ -74,7 +71,9 @@ class SpamSettingsStore:
         self,
         group_id: int,
     ) -> dict[str, Any]:
-        cached = self._cache.get(group_id)
+        cached = self._cache.get(
+            group_id
+        )
 
         if cached is not None:
             return dict(cached)
@@ -127,33 +126,6 @@ class SpamSettingsStore:
                 cached,
             )
 
-    async def set_max_links(
-        self,
-        group_id: int,
-        count: int,
-    ) -> None:
-        await self._ensure_row(group_id)
-
-        await self.db.update(
-            self.TABLE,
-            {
-                "max_links": count,
-            },
-            where={
-                "group_id": group_id,
-            },
-        )
-
-        cached = self._cache.get(group_id)
-
-        if cached is not None:
-            cached["max_links"] = count
-
-            self._cache.set(
-                group_id,
-                cached,
-            )
-
     async def set_max_repeat(
         self,
         group_id: int,
@@ -183,16 +155,6 @@ class SpamSettingsStore:
 
 
 class SpamWhitelistStore:
-    """
-    کاربرانی که Spam Filter باید کاملاً نادیده‌شان بگیرد.
-
-    whitelist فقط مربوط به Spam Filter است و روی
-    content_filter / violation_manager تأثیری ندارد.
-
-    برای مسیر عادی تشخیص اسپم، اطلاعات از RAM خوانده می‌شوند
-    و SQLite فقط هنگام cache miss یا تغییر whitelist استفاده می‌شود.
-    """
-
     TABLE = "spam_whitelist"
 
     CACHE_MAX_GROUPS = 512
@@ -334,139 +296,7 @@ class SpamWhitelistStore:
         return sorted(users)
 
 
-
-
-
-
-class SpamLinkWhitelistStore:
-    """
-    لینک‌هایی که Spam Filter باید نادیده بگیرد.
-
-    این whitelist سراسری است و به گروه خاصی وابسته نیست.
-    """
-
-    TABLE = "spam_link_whitelist"
-
-    CACHE_TTL_SECONDS = 900
-
-    def __init__(
-        self,
-        db: DatabaseManager,
-    ) -> None:
-        self.db = db
-
-        self._cache = TTLCache[
-            str,
-            list[str],
-        ](
-            max_entries=1,
-            ttl_seconds=self.CACHE_TTL_SECONDS,
-        )
-
-    async def create_table(self) -> None:
-        await self.db.create_table(
-            self.TABLE,
-            columns={
-                "id": (
-                    "INTEGER PRIMARY KEY AUTOINCREMENT"
-                ),
-                "pattern": (
-                    "TEXT NOT NULL"
-                ),
-            },
-            unique=[
-                (
-                    "pattern",
-                )
-            ],
-        )
-
-    async def get_all(self) -> list[str]:
-        cached = self._cache.get(
-            "all"
-        )
-
-        if cached is not None:
-            return list(cached)
-
-        rows = await self.db.select_all(
-            self.TABLE
-        )
-
-        patterns = [
-            str(row["pattern"])
-            for row in rows
-        ]
-
-        self._cache.set(
-            "all",
-            patterns,
-        )
-
-        return list(patterns)
-
-    async def add(
-        self,
-        pattern: str,
-    ) -> bool:
-        pattern = pattern.strip()
-
-        if not pattern:
-            return False
-
-        result = await self.db.insert(
-            self.TABLE,
-            {
-                "pattern": pattern,
-            },
-            or_ignore=True,
-        )
-
-        self._cache.delete(
-            "all"
-        )
-
-        return result.rowcount > 0
-
-    async def remove(
-        self,
-        pattern: str,
-    ) -> bool:
-        pattern = pattern.strip()
-
-        if not pattern:
-            return False
-
-        result = await self.db.delete(
-            self.TABLE,
-            {
-                "pattern": pattern,
-            },
-        )
-
-        self._cache.delete(
-            "all"
-        )
-
-        return result.rowcount > 0
-
-
-
-
-
-
 class SpamContextStore:
-    """
-    اطلاعات persistent مربوط به حضور کاربران در گروه.
-
-    joined_at:
-        زمان واقعی ورود، اگر Spam Filter آن را دیده باشد.
-
-    first_seen_at:
-        اولین زمانی که Spam Filter از کاربر پیامی دیده است.
-        اگر joined_at ناشناخته باشد، این مقدار مبنای عمر کاربر است.
-    """
-
     TABLE = "spam_user_context"
 
     def __init__(
@@ -507,8 +337,6 @@ class SpamContextStore:
             ],
         )
 
-        # برای دیتابیس‌های قدیمی که joined_at دارند
-        # ولی first_seen_at را ندارند.
         try:
             columns = await self.db.fetchall(
                 f"PRAGMA table_info({self.TABLE})"
@@ -529,7 +357,7 @@ class SpamContextStore:
 
         except Exception as exc:
             print(
-                f"⚠️ بررسی/migration جدول "
+                f"⚠️ migration جدول "
                 f"{self.TABLE} ناموفق بود: {exc}"
             )
 
@@ -558,9 +386,6 @@ class SpamContextStore:
             )
             return
 
-        # دیتابیس قدیمی:
-        # اگر first_seen نداریم ولی joined_at داریم،
-        # همان joined_at مبنای اولیه باشد.
         if row["first_seen_at"] is None:
             first_seen = (
                 row["joined_at"]
@@ -651,13 +476,17 @@ class SpamContextStore:
 
 class SpamRuleStore:
     """
-    قوانین سفارشی Spam Filter.
+    Rule Engine عمومی Spam Filter.
 
-    فعلاً فقط قانون:
-        bio_contains
+    text_forbidden:
+        عبارت ممنوع
 
-    action:
-        hard_spam
+    text_allowed:
+        استثنا
+
+    اگر occurrence یک قانون ممنوع با occurrence
+    یک قانون مجاز overlap داشته باشد، همان occurrence
+    از قانون ممنوع مستثنی می‌شود.
     """
 
     TABLE = "spam_custom_rules"
@@ -747,23 +576,10 @@ class SpamRuleStore:
             for item in rules
         ]
 
-    async def has_bio_rules(
+    async def _add_rule(
         self,
         group_id: int,
-    ) -> bool:
-        rules = await self.get_all(
-            group_id
-        )
-
-        return any(
-            rule["rule_type"]
-            == "bio_contains"
-            for rule in rules
-        )
-
-    async def add_bio_rule(
-        self,
-        group_id: int,
+        rule_type: str,
         pattern: str,
     ) -> bool:
         pattern = pattern.strip()
@@ -771,13 +587,27 @@ class SpamRuleStore:
         if not pattern:
             return False
 
+        pattern = pattern.casefold()
+
+        if rule_type not in (
+            "text_forbidden",
+            "text_allowed",
+        ):
+            raise ValueError(
+                f"Unknown rule type: {rule_type}"
+            )
+
         result = await self.db.insert(
             self.TABLE,
             {
                 "group_id": group_id,
-                "rule_type": "bio_contains",
+                "rule_type": rule_type,
                 "pattern": pattern,
-                "action": "hard_spam",
+                "action": (
+                    "hard_spam"
+                    if rule_type == "text_forbidden"
+                    else "allow"
+                ),
             },
             or_ignore=True,
         )
@@ -788,17 +618,45 @@ class SpamRuleStore:
 
         return result.rowcount > 0
 
-    async def remove_bio_rule(
+    async def add_forbidden(
         self,
         group_id: int,
         pattern: str,
     ) -> bool:
+        return await self._add_rule(
+            group_id,
+            "text_forbidden",
+            pattern,
+        )
+
+    async def add_allowed(
+        self,
+        group_id: int,
+        pattern: str,
+    ) -> bool:
+        return await self._add_rule(
+            group_id,
+            "text_allowed",
+            pattern,
+        )
+
+    async def _remove_rule(
+        self,
+        group_id: int,
+        rule_type: str,
+        pattern: str,
+    ) -> bool:
+        pattern = pattern.strip().casefold()
+
+        if not pattern:
+            return False
+
         result = await self.db.delete(
             self.TABLE,
             {
                 "group_id": group_id,
-                "rule_type": "bio_contains",
-                "pattern": pattern.strip(),
+                "rule_type": rule_type,
+                "pattern": pattern,
             },
         )
 
@@ -808,40 +666,180 @@ class SpamRuleStore:
 
         return result.rowcount > 0
 
-    async def match_bio(
+    async def remove_forbidden(
         self,
         group_id: int,
-        bio_text: str,
+        pattern: str,
+    ) -> bool:
+        return await self._remove_rule(
+            group_id,
+            "text_forbidden",
+            pattern,
+        )
+
+    async def remove_allowed(
+        self,
+        group_id: int,
+        pattern: str,
+    ) -> bool:
+        return await self._remove_rule(
+            group_id,
+            "text_allowed",
+            pattern,
+        )
+
+    async def has_forbidden(
+        self,
+        group_id: int,
+    ) -> bool:
+        rules = await self.get_all(
+            group_id
+        )
+
+        return any(
+            rule["rule_type"]
+            == "text_forbidden"
+            for rule in rules
+        )
+
+    @staticmethod
+    def _find_occurrences(
+        text: str,
+        pattern: str,
+    ) -> list[tuple[int, int]]:
+        result = []
+
+        start = 0
+
+        while True:
+            index = text.find(
+                pattern,
+                start,
+            )
+
+            if index == -1:
+                break
+
+            result.append(
+                (
+                    index,
+                    index + len(pattern),
+                )
+            )
+
+            start = index + 1
+
+        return result
+
+    @staticmethod
+    def _overlaps(
+        a_start: int,
+        a_end: int,
+        b_start: int,
+        b_end: int,
+    ) -> bool:
+        return (
+            a_start < b_end
+            and b_start < a_end
+        )
+
+    async def match_texts(
+        self,
+        group_id: int,
+        texts: list[tuple[str, str]],
     ) -> list[dict[str, Any]]:
         rules = await self.get_all(
             group_id
         )
 
-        if not bio_text:
+        forbidden_rules = [
+            rule
+            for rule in rules
+            if rule["rule_type"]
+            == "text_forbidden"
+        ]
+
+        allowed_rules = [
+            rule
+            for rule in rules
+            if rule["rule_type"]
+            == "text_allowed"
+        ]
+
+        if not forbidden_rules:
             return []
 
-        haystack = bio_text.casefold()
+        matches = []
 
-        matched = []
-
-        for rule in rules:
-            if (
-                rule["rule_type"]
-                != "bio_contains"
-            ):
+        for source, raw_text in texts:
+            if not raw_text:
                 continue
 
-            pattern = (
-                str(rule["pattern"])
-                .casefold()
-            )
+            text = raw_text.casefold()
 
-            if (
-                pattern
-                and pattern in haystack
-            ):
-                matched.append(
-                    rule
+            allowed_occurrences = []
+
+            for rule in allowed_rules:
+                pattern = (
+                    str(rule["pattern"])
+                    .casefold()
                 )
 
-        return matched
+                for start, end in (
+                    self._find_occurrences(
+                        text,
+                        pattern,
+                    )
+                ):
+                    allowed_occurrences.append(
+                        (
+                            start,
+                            end,
+                            pattern,
+                        )
+                    )
+
+            for rule in forbidden_rules:
+                pattern = (
+                    str(rule["pattern"])
+                    .casefold()
+                )
+
+                occurrences = (
+                    self._find_occurrences(
+                        text,
+                        pattern,
+                    )
+                )
+
+                for start, end in occurrences:
+                    exempted = any(
+                        self._overlaps(
+                            start,
+                            end,
+                            allowed_start,
+                            allowed_end,
+                        )
+                        for (
+                            allowed_start,
+                            allowed_end,
+                            _,
+                        ) in allowed_occurrences
+                    )
+
+                    if exempted:
+                        continue
+
+                    matches.append(
+                        {
+                            "rule_id": rule["id"],
+                            "pattern": rule["pattern"],
+                            "source": source,
+                            "action": rule["action"],
+                        }
+                    )
+
+                    # برای یک متن یک بار کافی است.
+                    break
+
+        return matches

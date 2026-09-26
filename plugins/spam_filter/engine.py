@@ -7,16 +7,11 @@ SUSPICIOUS_THRESHOLD = 35
 SPAM_THRESHOLD = 60
 HARD_SCORE_THRESHOLD = 85
 
-NEW_USER_1_HOUR = 3600
-NEW_USER_6_HOURS = 6 * 3600
-NEW_USER_24_HOURS = 24 * 3600
-
 WEIGHTS = {
     "flood": 30,
     "repeat": 25,
-    "similarity": 20,
-    "links": 15,
-    "char_flood": 10,
+    "similarity": 25,
+    "char_flood": 20,
 }
 
 _WHITESPACE_RE = re.compile(r"\s+")
@@ -25,7 +20,6 @@ _NON_WORD_RE = re.compile(r"[^\w]+", re.UNICODE)
 
 @dataclass(slots=True)
 class SpamFeatures:
-    link_count: int
     repeat_count: int
     recent_message_count: int
 
@@ -36,7 +30,6 @@ class SpamFeatures:
     flood_score: int
     repeat_score: int
     similarity_score: int
-    link_score: int
     char_flood_score: int
 
 
@@ -48,7 +41,9 @@ class SpamDecision:
     hard_rule: str | None = None
 
 
-def _clamp(value: float) -> int:
+def _clamp(
+    value: float,
+) -> int:
     return int(
         max(
             0,
@@ -100,7 +95,9 @@ def calculate_similarity(
     text: str,
     recent_texts: list[str],
 ) -> tuple[float, int]:
-    normalized = normalize_text(text)
+    normalized = normalize_text(
+        text
+    )
 
     if len(normalized) < 6:
         return 0.0, 0
@@ -149,11 +146,9 @@ def build_features(
     repeat_count: int,
     recent_message_count: int,
     recent_texts: list[str],
-    link_count: int,
     char_flood: bool,
     flood_threshold: int,
     repeat_threshold: int,
-    link_threshold: int,
 ) -> SpamFeatures:
     similarity, similarity_score = (
         calculate_similarity(
@@ -163,7 +158,6 @@ def build_features(
     )
 
     return SpamFeatures(
-        link_count=link_count,
         repeat_count=repeat_count,
         recent_message_count=recent_message_count,
         similarity=similarity,
@@ -177,16 +171,13 @@ def build_features(
             repeat_threshold,
         ),
         similarity_score=similarity_score,
-        link_score=_threshold_score(
-            link_count,
-            link_threshold,
-        ),
         char_flood_score=(
             100
             if char_flood
             else 0
         ),
     )
+
 
 def calculate_score(
     features: SpamFeatures,
@@ -203,10 +194,6 @@ def calculate_score(
         +
         features.similarity_score
         * WEIGHTS["similarity"]
-        / 100
-        +
-        features.link_score
-        * WEIGHTS["links"]
         / 100
         +
         features.char_flood_score
@@ -228,7 +215,10 @@ def calculate_score(
                 0,
             )
         )
-    except (TypeError, ValueError):
+    except (
+        TypeError,
+        ValueError,
+    ):
         external_bonus = 0
 
     score += max(
@@ -257,20 +247,8 @@ def calculate_score(
             elif join_age <= 24 * 3600:
                 score += 6
 
-    # web.splus.ir حساسیت بالاتری دارد.
-    # لینک‌های عادی همچنان امتیاز می‌گیرند.
-    # splus.ir/meet عمداً هیچ امتیاز پروفایلی نمی‌گیرد.
-    if context.get(
-        "profile_has_splus_web_link"
-    ):
-        score += 10
-
-    if context.get(
-        "profile_has_other_link"
-    ):
-        score += 4
-
     return _clamp(score)
+
 
 def evaluate_hard_rules(
     *,
@@ -279,28 +257,27 @@ def evaluate_hard_rules(
     score: int,
 ) -> tuple[str, str] | None:
 
+    matched_rules = context.get(
+        "matched_text_rules",
+        [],
+    )
+
+    if matched_rules:
+        first = matched_rules[0]
+
+        return (
+            "custom_text_rule",
+            (
+                "مطابقت با قانون سفارشی: "
+                f"{first['pattern']} "
+                f"(source={first['source']})"
+            ),
+        )
+
     external = context.get(
         "external_signals",
         {},
     )
-
-    # قانون سفارشی Bio
-    matched_bio_rules = context.get(
-        "matched_bio_rules",
-        [],
-    )
-
-    if matched_bio_rules:
-        patterns = [
-            str(rule["pattern"])
-            for rule in matched_bio_rules
-        ]
-
-        return (
-            "custom_bio_rule",
-            "مطابقت با قانون سفارشی Bio: "
-            + "، ".join(patterns),
-        )
 
     if external.get("hard_spam"):
         return (
@@ -319,35 +296,11 @@ def evaluate_hard_rules(
             "پیام هم رفتار اسپمی داشت و هم با Content Filter مطابقت داشت",
         )
 
-    # فقط لینک‌هایی که واقعاً سیگنال ضداسپم دارند
-    # می‌توانند این قانون را فعال کنند.
-    #
-    # splus.ir/meet عمداً در اینجا وارد نمی‌شود.
-    profile_has_actionable_link = (
-        context.get(
-            "profile_has_splus_web_link"
-        )
-        or context.get(
-            "profile_has_other_link"
-        )
-    )
-
-    if (
-        context.get("is_new_user")
-        and profile_has_actionable_link
-        and features.link_count > 0
-    ):
-        return (
-            "new_user_profile_link",
-            "کاربر تازه‌وارد با لینک پروفایل، پیام لینک‌دار ارسال کرد",
-        )
-
     if (
         features.flood_score >= 80
         and (
             features.repeat_score >= 70
-            or
-            features.similarity_score >= 70
+            or features.similarity_score >= 70
         )
     ):
         return (
@@ -356,6 +309,7 @@ def evaluate_hard_rules(
         )
 
     return None
+
 
 def decide(
     *,

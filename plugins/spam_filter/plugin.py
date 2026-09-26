@@ -3,7 +3,6 @@ from . import handlers
 from .context import SpamContextProvider
 from .store import (
     SpamContextStore,
-    SpamLinkWhitelistStore,
     SpamRuleStore,
     SpamSettingsStore,
     SpamWhitelistStore,
@@ -19,8 +18,7 @@ from core.base_plugin import BasePlugin
 
 class SpamFilterPlugin(BasePlugin):
     name = "Spam Filter"
-
-    version = "1.4.3"
+    version = "1.4.4"
 
     def __init__(
         self,
@@ -40,10 +38,6 @@ class SpamFilterPlugin(BasePlugin):
             self.db
         )
 
-        self.link_whitelist = SpamLinkWhitelistStore(
-            self.db
-        )
-
         self.whitelist = SpamWhitelistStore(
             self.db
         )
@@ -59,13 +53,11 @@ class SpamFilterPlugin(BasePlugin):
         self.context = SpamContextProvider(
             self.context_store,
             self.rules,
-            self.link_whitelist,
             self.client,
         )
 
         self.tracker = SpamTracker()
         self.telemetry = SpamTelemetry()
-
         self.admin_cache = AdminCache()
 
     async def on_load(self):
@@ -73,10 +65,8 @@ class SpamFilterPlugin(BasePlugin):
         await self.whitelist.create_table()
         await self.context_store.create_table()
         await self.rules.create_table()
-        await self.link_whitelist.create_table()
 
     set_flood = handlers.set_flood
-    set_max_links = handlers.set_max_links
     set_max_repeat = handlers.set_max_repeat
     show_settings = handlers.show_settings
 
@@ -84,12 +74,32 @@ class SpamFilterPlugin(BasePlugin):
     remove_whitelist = handlers.remove_whitelist
     list_whitelist = handlers.list_whitelist
 
-    add_bio_rule = handlers.add_bio_rule
-    remove_bio_rule = handlers.remove_bio_rule
-    list_bio_rules = handlers.list_bio_rules
+    add_forbidden_rule = (
+        handlers.add_forbidden_rule
+    )
 
-    on_member_change = handlers.on_member_change
+    add_allowed_rule = (
+        handlers.add_allowed_rule
+    )
+
+    remove_forbidden_rule = (
+        handlers.remove_forbidden_rule
+    )
+
+    remove_allowed_rule = (
+        handlers.remove_allowed_rule
+    )
+
+    list_text_rules = (
+        handlers.list_text_rules
+    )
+
+    on_member_change = (
+        handlers.on_member_change
+    )
+
     on_message = handlers.on_message
+
     on_spam_suspicious = (
         handlers.on_spam_suspicious
     )
