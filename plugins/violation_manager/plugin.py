@@ -2,26 +2,103 @@ from . import handlers
 from .store import GroupSettingsStore, ViolationStore
 
 from core.base_plugin import BasePlugin
+from core.ttl_cache import TTLCache
+
+
+class ViolationNoticeThrottle:
+    """
+    جلوگیری از ارسال اخطارهای تکراری توسط ربات.
+
+    این کلاس فقط ارسال پیام را کنترل می‌کند و روی
+    ثبت تخلف یا اعمال مجازات تأثیری ندارد.
+    """
+
+    TTL_SECONDS = 30
+    MAX_ENTRIES = 5000
+
+    def __init__(self) -> None:
+        self._cache = TTLCache[
+            tuple[int, int, str],
+            bool,
+        ](
+            max_entries=self.MAX_ENTRIES,
+            ttl_seconds=self.TTL_SECONDS,
+        )
+
+    @staticmethod
+    def _normalize_reason(
+        reason: str,
+    ) -> str:
+        reason = (
+            str(reason)
+            .casefold()
+            .strip()
+        )
+
+        # score متغیر است و نباید باعث شود
+        # یک اخطار مشابه دوباره ارسال شود.
+        marker = "(score="
+
+        if marker in reason:
+            reason = reason.split(
+                marker,
+                1,
+            )[0].rstrip()
+
+        return reason
+
+    def should_notify(
+        self,
+        group_id: int,
+        user_id: int,
+        reason: str,
+    ) -> bool:
+        key = (
+            group_id,
+            user_id,
+            self._normalize_reason(reason),
+        )
+
+        if self._cache.get(key):
+            return False
+
+        self._cache.set(
+            key,
+            True,
+        )
+
+        return True
 
 
 class ViolationManagerPlugin(BasePlugin):
-    """
-    ثبت تخلف کاربران به‌ازای هر گروه، تنظیمات سقف تخلف/نوع مجازات هر
-    گروه، و اجرای خودِ مجازات (میوت یا بن).
-
-    پلاگین‌های دیگه (مثل content_filter) یه تخلف رو با emit کردن رویداد
-    "violation" رو event_bus گزارش می‌کنن؛ این پلاگین هیچ وابستگی
-    مستقیمی بهشون نداره — اگه content_filter نصب نباشه، این پلاگین بدون
-    مشکل کار می‌کنه، فقط دیگه تخلفی از اون مسیر گزارش نمی‌شه.
-    """
-
     name = "Violation Manager"
-    version = "1.6.3"
+    version = "1.6.4"
 
-    def __init__(self, client, command_manager, db, event_bus):
-        super().__init__(client, command_manager, db, event_bus)
-        self.violations = ViolationStore(self.db)
-        self.settings = GroupSettingsStore(self.db)
+    def __init__(
+        self,
+        client,
+        command_manager,
+        db,
+        event_bus,
+    ):
+        super().__init__(
+            client,
+            command_manager,
+            db,
+            event_bus,
+        )
+
+        self.violations = ViolationStore(
+            self.db
+        )
+
+        self.settings = GroupSettingsStore(
+            self.db
+        )
+
+        self.notice_throttle = (
+            ViolationNoticeThrottle()
+        )
 
     async def on_load(self):
         await self.violations.create_table()

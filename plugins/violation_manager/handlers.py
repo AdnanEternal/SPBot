@@ -326,22 +326,36 @@ async def on_violation(
 
     name = await _display_name(event, user_id)
 
+
     if is_admin:
-
-        
-
-        sent = await _notify(
-            event,
+        message = (
             f"⚠️ {name} مرتکب تخلف شد.\n"
-            f"📌 دلیل: {reason}",
+            f"📌 دلیل: {reason}"
         )
-        await self.event_bus.emit(
-            "timeline_system_message",
+
+        sent = None
+
+        if self.notice_throttle.should_notify(
             group_id,
-            message=sent
-        )
+            user_id,
+            reason,
+        ):
+            sent = await _notify(
+                event,
+                message,
+            )
+
+        if sent is not None:
+            await self.event_bus.emit(
+                "timeline_system_message",
+                group_id,
+                message=sent,
+            )
 
         return
+
+
+
 
     await self.violations.add(group_id, user_id, reason)
 
