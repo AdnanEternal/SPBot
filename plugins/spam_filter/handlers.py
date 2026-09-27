@@ -674,7 +674,8 @@ async def on_message(
             "matched_text_rules": [],
             "external_signals": external_signals,
         }
-
+    context["flood_threshold"] = flood_threshold
+    
     decision = decide(
         features=features,
         context=context,
