@@ -1,0 +1,20 @@
+# StackHost configuration
+
+user:
+  name: "AdnanEternal"
+  github: "AdnanEternal"
+
+runtime:
+  image: "python:3.11-slim"
+
+commands:
+  package: ""
+  build:
+    - "python -m pip install --user --no-cache-dir --no-compile -r requirements.txt"
+  start: "python main.py"
+
+repository:
+  branch: "main"
+  auto_deploy: false
+
+env:
