@@ -22,6 +22,9 @@ class ViolationStore:
                 "group_id": "INTEGER NOT NULL",
                 "user_id": "INTEGER NOT NULL",
                 "reason": "TEXT NOT NULL",
+                "severity": (
+                    "INTEGER NOT NULL DEFAULT 1"
+                ),
                 "created_at": (
                     "TEXT NOT NULL "
                     "DEFAULT CURRENT_TIMESTAMP"
@@ -33,21 +36,50 @@ class ViolationStore:
             ],
         )
 
+        # Migration برای دیتابیس‌های قبلی
+        columns = await self.db.fetchall(
+            f"PRAGMA table_info({self.TABLE})"
+        )
+
+        has_severity = any(
+            row["name"] == "severity"
+            for row in columns
+        )
+
+        if not has_severity:
+            await self.db.execute(
+                f"""
+                ALTER TABLE {self.TABLE}
+                ADD COLUMN severity INTEGER
+                NOT NULL DEFAULT 1
+                """
+            )
+
     async def add(
         self,
         group_id: int,
         user_id: int,
         reason: str,
-    ) -> None:
+        severity: int = 1,
+) -> None:
+        severity = max(
+            1,
+            min(
+                10,
+                int(severity),
+            ),
+        )
+
         await self.db.insert(
             self.TABLE,
             {
                 "group_id": group_id,
                 "user_id": user_id,
                 "reason": reason,
+                "severity": severity,
             },
         )
-
+    
     async def get_count(
         self,
         group_id: int,
@@ -72,15 +104,19 @@ class ViolationStore:
             f"""
             SELECT
                 user_id,
-                COUNT(*) AS violation_count
+                COUNT(*) AS violation_count,
+                COALESCE(
+                    SUM(severity),
+                    0
+                ) AS severity_total
             FROM {self.TABLE}
             WHERE group_id = ?
             GROUP BY user_id
-            ORDER BY violation_count DESC
+            ORDER BY severity_total DESC
             """,
             (group_id,),
         )
-
+    
     async def get_all(
         self,
         group_id: int,

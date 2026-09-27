@@ -4,6 +4,7 @@ from core.decorators import command, on_bus_event, on_event
 
 from .gateway import AIGatewayError
 from .trigger import extract_trigger_text
+from .store import AIModelStatisticsStore
 from plugins.ai_gateway.utils import score_emoji
 import traceback
 import time
@@ -617,7 +618,7 @@ async def model_statistics(
         await event.reply(
             "❌ نام مدل را وارد کن.\n"
             "مثال:\n"
-            "!مدل آمار gemini38flash"
+            "!مدل آمار <model_name>"
         )
         return
 
@@ -647,11 +648,14 @@ async def model_statistics(
     owner_score = stats['owner_score']
     reliability_score = stats['reliability_score']
     latency_score = stats['latency_score']
+    overal_score = AIModelStatisticsStore.calculate_overall_score(stats)
 
     await event.reply(
         f"📊 آمار مدل «{model['name']}»\n\n"
 
         "⭐ امتیازها\n"
+        f"{score_emoji(overal_score)} Overal Score: "
+        f"{overal_score}/100\n"
         f"{score_emoji(owner_score)} Owner's consent: "
         f"{owner_score}/100\n"
         f"{score_emoji(reliability_score)} Reliability: "

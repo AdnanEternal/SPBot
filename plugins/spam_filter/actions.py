@@ -1,6 +1,7 @@
 from .engine import (
     SpamDecision,
     SpamFeatures,
+    calculate_violation_score,
 )
 
 
@@ -105,6 +106,12 @@ async def apply_decision(
         False,
     )
 
+    violation_score = (
+        calculate_violation_score(
+            decision
+        )
+    )
+
     if decision.level == "SPAM":
         await _delete_messages(
             self,
@@ -112,9 +119,10 @@ async def apply_decision(
             [event.id],
         )
 
-        # اگر Content Filter همین پیام را
-        # خودش violation کرده، دوباره تخلف نساز.
-        if not content_filter_match:
+        if (
+            not content_filter_match
+            and violation_score > 0
+        ):
             await self.event_bus.emit(
                 "violation",
                 event=event,
@@ -128,6 +136,7 @@ async def apply_decision(
                     decision,
                     features,
                 ),
+                violation_score=violation_score,
                 message_ids=[
                     event.id
                 ],
@@ -156,7 +165,10 @@ async def apply_decision(
         event.sender_id,
     )
 
-    if not content_filter_match:
+    if (
+        not content_filter_match
+        and violation_score > 0
+    ):
         await self.event_bus.emit(
             "violation",
             event=event,
@@ -170,5 +182,6 @@ async def apply_decision(
                 decision,
                 features,
             ),
+            violation_score=violation_score,
             message_ids=ids,
         )

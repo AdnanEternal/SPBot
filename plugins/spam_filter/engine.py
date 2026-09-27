@@ -91,6 +91,55 @@ def normalize_text(
     )
 
 
+
+
+
+def adaptive_flood_threshold(
+    base_threshold: int,
+    join_age_seconds: float | None,
+) -> int:
+    """
+    هرچه کاربر قدیمی‌تر باشد، Flood Threshold بالاتر می‌رود.
+
+    هدف:
+    کاربر واقعی با چند پیام سریع تنبیه نشود،
+    ولی رباتی که ده‌ها پیام پشت‌سرهم می‌فرستد همچنان خیلی سریع شناسایی شود.
+    """
+    if base_threshold <= 0:
+        return base_threshold
+
+    if join_age_seconds is None:
+        multiplier = 1.0
+
+    elif join_age_seconds < 3600:
+        # کمتر از ۱ ساعت
+        multiplier = 1.0
+
+    elif join_age_seconds < 24 * 3600:
+        # ۱ ساعت تا ۱ روز
+        multiplier = 1.25
+
+    elif join_age_seconds < 7 * 24 * 3600:
+        # ۱ تا ۷ روز
+        multiplier = 1.5
+
+    elif join_age_seconds < 30 * 24 * 3600:
+        # ۷ تا ۳۰ روز
+        multiplier = 2.0
+
+    else:
+        # بالای ۳۰ روز
+        multiplier = 3.0
+
+    return max(
+        base_threshold,
+        int(
+            round(
+                base_threshold * multiplier
+            )
+        ),
+    )
+
 def calculate_similarity(
     text: str,
     recent_texts: list[str],
@@ -229,23 +278,30 @@ def calculate_score(
         ),
     )
 
-    if context.get(
-        "is_new_user"
-    ):
-        join_age = context.get(
-            "join_age_seconds"
-        )
+    join_age = context.get(
+        "join_age_seconds"
+    )
 
-        if (
-            join_age is not None
-            and score >= 15
-        ):
-            if join_age <= 3600:
-                score += 15
-            elif join_age <= 6 * 3600:
-                score += 10
-            elif join_age <= 24 * 3600:
-                score += 6
+    if (
+        context.get("is_new_user")
+        and join_age is not None
+        and score >= 15
+    ):
+        if join_age <= 3600:
+            score += 15
+        elif join_age <= 6 * 3600:
+            score += 10
+        elif join_age <= 24 * 3600:
+            score += 6
+
+    elif join_age is not None:
+        if join_age >= 30 * 24 * 3600:
+            score -= 10
+
+        elif join_age >= 7 * 24 * 3600:
+            score -= 5
+
+    return _clamp(score)
 
     return _clamp(score)
 
@@ -309,6 +365,70 @@ def evaluate_hard_rules(
         )
 
     return None
+
+
+
+def calculate_violation_score(
+    decision: SpamDecision,
+) -> int:
+    """
+    شدت تخلف را به بازه ۰ تا ۱۰ تبدیل می‌کند.
+
+    این امتیاز فقط می‌گوید تخلف چقدر شدید بوده؛
+    ViolationManager تصمیم می‌گیرد با آن چه مجازاتی اعمال شود.
+    """
+    if decision.level not in (
+        "SPAM",
+        "HARD_SPAM",
+    ):
+        return 0
+
+    # 60 => 2
+    # 70 => 4
+    # 80 => 6
+    # 90 => 8
+    # 100 => 10
+    severity = max(
+        1,
+        round(
+            (decision.score - 50) / 5
+        ),
+    )
+
+    if decision.hard_rule == "custom_text_rule":
+        severity = max(
+            severity,
+            7,
+        )
+
+    elif decision.hard_rule == "external_hard_spam":
+        severity = max(
+            severity,
+            8,
+        )
+
+    elif decision.hard_rule == "content_filter_plus_spam":
+        severity = max(
+            severity,
+            6,
+        )
+
+    elif decision.hard_rule == "flood_plus_repetition":
+        severity = max(
+            severity,
+            7,
+        )
+
+    if decision.level == "HARD_SPAM":
+        severity += 1
+
+    return max(
+        0,
+        min(
+            10,
+            severity,
+        ),
+    )
 
 
 def decide(

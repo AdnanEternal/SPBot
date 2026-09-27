@@ -39,31 +39,47 @@ async def resolve_target(client: SoroushClient, event: Any) -> Optional[int]:
 
     return None
 
-
 async def mute_user(
     client: SoroushClient,
     chat: Any,
     user_id: int,
     hours: Optional[int] = None,
+    minutes: Optional[int] = None,
 ) -> None:
-    until_date = (
-        now_utc() + timedelta(hours=hours)
-        if hours
-        else None
-    )
+    if minutes is not None:
+        until_date = (
+            now_utc()
+            + timedelta(
+                minutes=max(
+                    1,
+                    int(minutes),
+                )
+            )
+        )
+
+    elif hours:
+        until_date = (
+            now_utc()
+            + timedelta(
+                hours=hours
+            )
+        )
+
+    else:
+        until_date = None
+
     await client.edit_permissions(
-        chat, 
+        chat,
         user_id,
-        until_date=until_date, 
+        until_date=until_date,
         send_messages=False,
         send_gifs=False,
         send_media=False,
         send_stickers=False,
         send_games=False,
         send_inline=False,
-        send_polls=False
-        )
-
+        send_polls=False,
+    )
 
 async def unmute_user(client: SoroushClient, chat: Any, user_id: int) -> None:
     await client.edit_permissions(chat, user_id, send_messages=True)

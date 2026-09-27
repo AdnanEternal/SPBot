@@ -12,6 +12,7 @@ from core.permissions import is_chat_admin
 from . import detection
 from .actions import apply_decision
 from .engine import (
+    adaptive_flood_threshold,
     build_features,
     calculate_score,
     decide,
@@ -531,7 +532,6 @@ async def list_text_rules(
         + "\n".join(lines)
     )
 
-
 @on_event(events.NewMessage(incoming=True))
 async def on_message(
     self: "SpamFilterPlugin",
@@ -583,15 +583,30 @@ async def on_message(
         text
     )
 
+    await self.context.record_first_seen(
+        event.chat_id,
+        event.sender_id,
+    )
+
+    join_age_seconds = (
+        await self.context.get_join_age(
+            event.chat_id,
+            event.sender_id,
+        )
+    )
+
+    flood_threshold = adaptive_flood_threshold(
+        settings["flood_count"],
+        join_age_seconds,
+    )
+
     features = build_features(
         text=text,
         repeat_count=repeat_count,
         recent_message_count=recent_message_count,
         recent_texts=recent_texts,
         char_flood=char_flood,
-        flood_threshold=settings[
-            "flood_count"
-        ],
+        flood_threshold=flood_threshold,
         repeat_threshold=settings[
             "max_repeat"
         ],
@@ -608,12 +623,15 @@ async def on_message(
     )
 
     preliminary_score = calculate_score(
-        features
-    )
-
-    await self.context.record_first_seen(
-        event.chat_id,
-        event.sender_id,
+        features,
+        {
+            "join_age_seconds": join_age_seconds,
+            "is_new_user": (
+                join_age_seconds is not None
+                and join_age_seconds <= 24 * 3600
+            ),
+            "external_signals": external_signals,
+        },
     )
 
     has_forbidden_rules = (
@@ -637,10 +655,23 @@ async def on_message(
             external_signals,
         )
 
+        # از مقدار قبلی استفاده کن تا لازم نباشد
+        # سن کاربر دوباره از DB خوانده شود.
+        context["join_age_seconds"] = (
+            join_age_seconds
+        )
+        context["is_new_user"] = (
+            join_age_seconds is not None
+            and join_age_seconds <= 24 * 3600
+        )
+
     else:
         context = {
-            "join_age_seconds": None,
-            "is_new_user": False,
+            "join_age_seconds": join_age_seconds,
+            "is_new_user": (
+                join_age_seconds is not None
+                and join_age_seconds <= 24 * 3600
+            ),
             "profile_text": "",
             "matched_text_rules": [],
             "external_signals": external_signals,
@@ -694,7 +725,6 @@ async def on_message(
         context,
         settings["flood_seconds"],
     )
-
 
 @on_bus_event("spam_suspicious")
 async def on_spam_suspicious(
