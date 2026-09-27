@@ -612,6 +612,6 @@ async def on_violation(
     if sent is not None:
         await self.event_bus.emit(
             "timeline_system_message",
-            group_id,
-            sent,
+            group_id=group_id,
+            message=sent,
         )
