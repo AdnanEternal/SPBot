@@ -265,27 +265,14 @@ class SpamConfirmationTracker:
             observation
         )
 
-        # SUSPICIOUS فقط evidence جمع می‌کند.
-        if decision.level not in (
-            "SPAM",
-            "HARD_SPAM",
-        ):
-            return ConfirmationResult(
-                is_confirmed=False,
-                confirmed_now=False,
-                confidence=self._confidence(
-                    list(observations)
-                ),
-                reason=(
-                    "رفتار فعلاً فقط مشکوک است."
-                ),
-            )
+
 
         # -------------------------------------------------
         # رفتارهای خیلی واضح
         # -------------------------------------------------
 
         if decision.hard_rule in {
+            "extreme_burst",
             "extreme_flood",
             "repeat_burst",
             "flood_plus_repetition",

@@ -6,6 +6,10 @@ import re
 SUSPICIOUS_THRESHOLD = 35
 SPAM_THRESHOLD = 60
 HARD_SCORE_THRESHOLD = 85
+EXTREME_FLOOD_MULTIPLIER = 3
+EXTREME_BURST_WINDOW_SECONDS = 3
+EXTREME_BURST_COUNT = 10
+
 
 WEIGHTS = {
     "flood": 30,
@@ -23,6 +27,9 @@ class SpamFeatures:
     repeat_count: int
     recent_message_count: int
 
+    burst_message_count: int
+    burst_score: int
+    
     similarity: float
 
     char_flood: bool
@@ -194,29 +201,56 @@ def build_features(
         text, 
         repeat_count, 
         recent_message_count, 
+        burst_message_count,
         recent_texts,
         char_flood, 
         flood_threshold, 
         repeat_threshold
     ):
 
-    # فقط وقتی چند پیام پشت‌سرهم داریم مقایسه‌ی شباهت معنی داره؛
-    # برای ترافیک عادی هزینه‌ی SequenceMatcher رو نمی‌دیم.
-    if recent_message_count >= 2 and recent_texts:
-        similarity, similarity_score = calculate_similarity(text, recent_texts)
+    should_calculate_similarity = (
+        recent_message_count >= 3
+        and bool(recent_texts)
+        and len(text.strip()) >= 10
+        and (
+            repeat_count >= 2
+            or recent_message_count > flood_threshold
+        )
+    )
+
+    if should_calculate_similarity:
+        similarity, similarity_score = calculate_similarity(
+            text,
+            recent_texts,
+        )
     else:
         similarity, similarity_score = 0.0, 0
 
     return SpamFeatures(
-        repeat_count=repeat_count,
-        recent_message_count=recent_message_count,
-        similarity=similarity,
-        char_flood=char_flood,
-        flood_score=_threshold_score(recent_message_count, flood_threshold),
-        repeat_score=_threshold_score(repeat_count, repeat_threshold),
-        similarity_score=similarity_score,
-        char_flood_score=100 if char_flood else 0,
-    )
+    repeat_count=repeat_count,
+    recent_message_count=recent_message_count,
+    burst_message_count=burst_message_count,
+    similarity=similarity,
+    char_flood=char_flood,
+    flood_score=_threshold_score(
+        recent_message_count,
+        flood_threshold,
+    ),
+    burst_score=(
+        100
+        if burst_message_count >= 10
+        else _threshold_score(
+            burst_message_count,
+            6,
+        )
+    ),
+    repeat_score=_threshold_score(
+        repeat_count,
+        repeat_threshold,
+    ),
+    similarity_score=similarity_score,
+    char_flood_score=100 if char_flood else 0,
+)
 
 def calculate_score(
     features: SpamFeatures,
@@ -334,7 +368,18 @@ def evaluate_hard_rules(
     # ---------------------------------------------
     # Flood فوق‌العاده شدید
     # ---------------------------------------------
-
+    if (
+        features.burst_message_count
+        >= EXTREME_BURST_COUNT
+    ):
+        return (
+            "extreme_burst",
+            (
+                "تعداد بسیار زیادی پیام "
+                "در چند ثانیه ارسال شد"
+            ),
+        )
+    
     flood_threshold = max(
         1,
         int(
@@ -345,9 +390,20 @@ def evaluate_hard_rules(
         ),
     )
 
+    base_flood_threshold = max(
+        1,
+        int(
+            context.get(
+                "base_flood_threshold",
+                5,
+            )
+        ),
+    )
+
     extreme_flood_count = max(
         12,
-        flood_threshold * 3,
+        base_flood_threshold
+        * EXTREME_FLOOD_MULTIPLIER,
     )
 
     if (
@@ -431,6 +487,12 @@ def calculate_violation_score(
         "content_filter_plus_spam"
     ):
         return 2
+
+
+    if decision.hard_rule == (
+        "extreme_burst"
+    ):
+        return 8
 
     # رفتارهای خیلی واضح
     if decision.hard_rule == (

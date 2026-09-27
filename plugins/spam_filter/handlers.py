@@ -594,10 +594,20 @@ async def on_message(
             event.sender_id,
         )
     )
+
+    base_flood_threshold = settings["flood_count"]
     
     flood_threshold = adaptive_flood_threshold(
-        settings["flood_count"],
+        base_flood_threshold,
         join_age_seconds,
+    )
+
+    burst_message_count = (
+        self.tracker.count_in_window(
+            event.chat_id,
+            event.sender_id,
+            3,
+        )
     )
 
     features = build_features(
@@ -605,6 +615,7 @@ async def on_message(
         repeat_count=repeat_count,
         recent_message_count=recent_message_count,
         recent_texts=recent_texts,
+        burst_message_count=burst_message_count,
         char_flood=char_flood,
         flood_threshold=flood_threshold,
         repeat_threshold=settings[
@@ -677,6 +688,7 @@ async def on_message(
             "external_signals": external_signals,
         }
     context["flood_threshold"] = flood_threshold
+    context["base_flood_threshold"] = base_flood_threshold
 
     decision = decide(
         features=features,
