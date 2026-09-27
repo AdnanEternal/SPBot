@@ -678,22 +678,6 @@ class SpamRuleStore:
 
 
 
-    async def get_timing(
-        self,
-        group_id: int,
-        user_id: int,
-    ):
-        return await self.db.select_one(
-            self.TABLE,
-            where={
-                "group_id": group_id,
-                "user_id": user_id,
-            },
-            columns=(
-                "joined_at, "
-                "first_seen_at"
-            ),
-        )
 
 
     async def get_all(

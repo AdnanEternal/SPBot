@@ -119,15 +119,18 @@ def adaptive_flood_threshold(
         ),
     )
 
-    # A genuinely new user gets no trust-based relaxation.
     if is_new_user:
         age_multiplier = 1.0
+
+    elif user_origin == "UNOBSERVED_JOIN":
+        # We do not know the real membership age.
+        # Keep a conservative but non-new-user threshold.
+        age_multiplier = 1.25
 
     elif join_age_seconds is None:
         age_multiplier = 1.0
 
     elif join_age_seconds < 60 * 60:
-        # Recently established through clean activity.
         age_multiplier = 1.0
 
     elif join_age_seconds < 24 * 60 * 60:
@@ -142,22 +145,18 @@ def adaptive_flood_threshold(
     else:
         age_multiplier = 2.0
 
-    trust_bonus = (
-        trust_score / 100.0
-    )
+    trust_bonus = trust_score / 100.0
 
     multiplier = min(
         3.0,
-        age_multiplier
-        + trust_bonus,
+        age_multiplier + trust_bonus,
     )
 
     return max(
         base_threshold,
         int(
             round(
-                base_threshold
-                * multiplier
+                base_threshold * multiplier
             )
         ),
     )

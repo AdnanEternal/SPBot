@@ -34,6 +34,10 @@ def classify_user_state(
     origin: str,
     clean_streak: int,
 ) -> str:
+
+    if origin == "UNOBSERVED_JOIN":
+        return "UNKNOWN"
+
     if join_age_seconds is None:
         return "UNKNOWN"
 
@@ -46,7 +50,6 @@ def classify_user_state(
         return "NEW"
 
     return "ESTABLISHED"
-
 
 class SpamTrustManager:
     def __init__(
@@ -305,52 +308,36 @@ class SpamTrustManager:
             )
 
             state.suspicious_events += 1
-
-            # Suspicion is not a confirmed violation.
-            # Trust does not decrease.
             state.clean_streak = 0
+
+            # Suspicion changes an important behavioral state.
+            # Persist it immediately so a restart cannot restore
+            # the previous clean streak.
+            await self.store.save(
+                group_id,
+                user_id,
+                state,
+            )
 
             self._cache_set(
                 key,
                 state,
             )
 
-            pending = (
-                self._pending.get(
-                    key,
-                    0,
-                )
-                + 1
-            )
-
-            self._pending[key] = pending
-
-            self._dirty_set(
+            self._dirty.pop(
                 key,
-                state,
+                None,
             )
 
-            if pending >= PERSIST_EVERY:
-                await self.store.save(
-                    group_id,
-                    user_id,
-                    state,
-                )
-
-                self._dirty.pop(
-                    key,
-                    None,
-                )
-
-                self._pending.pop(
-                    key,
-                    None,
-                )
+            self._pending.pop(
+                key,
+                None,
+            )
 
             return self._copy_state(
                 state
             )
-
+    
     async def record_violation(
         self,
         group_id: int,

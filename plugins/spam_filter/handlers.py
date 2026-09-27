@@ -1085,11 +1085,20 @@ async def on_member_change(
         user_id,
     )
 
-    if getattr(
-        event,
-        "user_joined",
-        False,
+
+    if (
+        getattr(
+            event,
+            "user_joined",
+            False,
+        )
+        or getattr(
+            event,
+            "user_added",
+            False,
+        )
     ):
+
         await self.context.record_join(
             event.chat_id,
             user_id,
@@ -1118,11 +1127,17 @@ async def on_member_change(
                 "event=JOIN"
             ),
         )
-
-    elif getattr(
-        event,
-        "user_left",
-        False,
+    elif (
+        getattr(
+            event,
+            "user_left",
+            False,
+        )
+        or getattr(
+            event,
+            "user_kicked",
+            False,
+        )
     ):
         await self.context.record_leave(
             event.chat_id,
