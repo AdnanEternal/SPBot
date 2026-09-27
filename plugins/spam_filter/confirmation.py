@@ -238,13 +238,22 @@ class SpamConfirmationTracker:
 
         # هیچ نشانه‌ی رفتاری قابل اتکایی نداریم.
         if not signals:
+            if decision.level in ("SPAM", "HARD_SPAM"):
+                return ConfirmationResult(
+                    is_confirmed=True,
+                    confirmed_now=True,
+                    confidence=60,
+                    reason=(
+                        "امتیاز کلی رفتار بدون نیاز به یک "
+                        "سیگنال قوی منفرد به سقف اسپم رسید."
+                    ),
+                )
+
             return ConfirmationResult(
                 is_confirmed=False,
                 confirmed_now=False,
                 confidence=0,
-                reason=(
-                    "نشانه‌ی رفتاری کافی وجود ندارد."
-                ),
+                reason="نشانه‌ی رفتاری کافی وجود ندارد.",
             )
 
         observation = SpamObservation(
