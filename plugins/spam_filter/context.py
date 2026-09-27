@@ -106,6 +106,7 @@ class SpamContextProvider:
         self._profile_cache.delete(key)
         self._reference_time_cache.delete(key)
 
+
     async def get_membership_context(
         self,
         group_id: int,
@@ -117,10 +118,8 @@ class SpamContextProvider:
             user_id,
         )
 
-        cached = (
-            self._reference_time_cache.get(
-                key
-            )
+        cached = self._reference_time_cache.get(
+            key
         )
 
         if cached is not None:
@@ -129,8 +128,7 @@ class SpamContextProvider:
             return (
                 max(
                     0.0,
-                    time.time()
-                    - reference_time,
+                    time.time() - reference_time,
                 ),
                 origin,
             )
@@ -146,17 +144,16 @@ class SpamContextProvider:
         joined_at = row["joined_at"]
         first_seen_at = row["first_seen_at"]
 
-        if joined_at is not None:
-            reference_time = float(
-                joined_at
-            )
-            origin = "JOIN_OBSERVED"
+        # سن کاربر باید از اولین مشاهده‌ی واقعی پیام محاسبه شود،
+        # نه صرفاً از آخرین JOIN.
+        if first_seen_at is not None:
+            reference_time = float(first_seen_at)
+            origin = "FIRST_SEEN"
 
-        elif first_seen_at is not None:
-            reference_time = float(
-                first_seen_at
-            )
-            origin = "UNOBSERVED_JOIN"
+        elif joined_at is not None:
+            # fallback برای رکوردهای قدیمی/ناقص.
+            reference_time = float(joined_at)
+            origin = "JOIN_OBSERVED"
 
         else:
             return None, "UNKNOWN"
@@ -172,11 +169,12 @@ class SpamContextProvider:
         return (
             max(
                 0.0,
-                time.time()
-                - reference_time,
+                time.time() - reference_time,
             ),
             origin,
         )
+
+
     
     async def get_join_age(
         self,
@@ -313,7 +311,7 @@ class SpamContextProvider:
                 ],
             )
         )
-        
+
         is_new_user = (
             join_age is not None
             and join_age

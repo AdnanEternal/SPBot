@@ -104,25 +104,26 @@ class PunishmentThrottle:
             user_id,
         )
 
-        previous = self._cache.get(
-            key
+        # هر نوع مجازات موفق، برای این incident تا
+        # پایان TTL جلوی مجازات دوباره را می‌گیرد.
+        return (
+            self._cache.get(key)
+            is None
         )
 
-        # اگر همین چند لحظه قبل مجازات شده و
-        # شدت جدید بیشتر نیست، دوباره مجازات نکن.
-        if (
-            previous is not None
-            and score <= previous
-        ):
-            return False
-
+    def mark_punished(
+        self,
+        group_id: int,
+        user_id: int,
+        score: int,
+    ) -> None:
         self._cache.set(
-            key,
-            score,
+            (
+                group_id,
+                user_id,
+            ),
+            int(score),
         )
-
-        return True
-
 
 punishment_throttle = PunishmentThrottle()
 
@@ -520,7 +521,7 @@ async def on_violation(
                 user_id,
                 hours=hours,
             )
-
+    
             if hours is None:
                 punishment_text = (
                     "🔇 مجازات: کاربر "
@@ -548,7 +549,11 @@ async def on_violation(
         )
 
         return
-
+    punishment_throttle.mark_punished(
+        group_id,
+        user_id,
+        violation_score,
+    )
     name = await _display_name(
         event,
         user_id,

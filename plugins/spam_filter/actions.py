@@ -89,7 +89,6 @@ def _get_spam_type(
         return reason
 
     return "الگوی اسپم"
-
 async def apply_decision(
     self,
     event,
@@ -99,6 +98,56 @@ async def apply_decision(
     delete_window_seconds: int,
 ) -> None:
 
+    # Content Filter این پیام را خودش مدیریت کرده است.
+    # دوباره حذف/Violation تولید نکن.
+    if decision.hard_rule == (
+        "content_filter_plus_spam"
+    ):
+        self.debug(
+            "ACTION",
+            (
+                f"group={event.chat_id} "
+                f"user={event.sender_id} "
+                "action=NONE "
+                "reason=CONTENT_FILTER_ALREADY_HANDLED"
+            ),
+        )
+        return
+
+    # قانون سفارشی مالک باید مستقیماً پیام را حذف کند،
+    # ولی کاربر را به‌عنوان اسپمر مجازات نکند.
+    if decision.hard_rule == (
+        "custom_text_rule"
+    ):
+        self.debug(
+            "ACTION",
+            (
+                f"group={event.chat_id} "
+                f"user={event.sender_id} "
+                "level=CUSTOM_RULE "
+                "action=DELETE"
+            ),
+        )
+
+        deleted = await _delete_messages(
+            self,
+            event,
+            [event.id],
+        )
+
+        if not deleted:
+            self.debug(
+                "ACTION",
+                (
+                    f"group={event.chat_id} "
+                    f"user={event.sender_id} "
+                    "status=STOPPED "
+                    "reason=CUSTOM_RULE_DELETE_FAILED"
+                ),
+            )
+
+        return
+
     confirmation = (
         self.confirmation.observe(
             event.chat_id,
@@ -107,6 +156,8 @@ async def apply_decision(
             features,
         )
     )
+
+    
 
     if confirmation.confirmed_now:
         confirmation_code = (
@@ -272,7 +323,8 @@ async def apply_decision(
         return
 
     violation_score = calculate_violation_score(
-        decision
+        decision,
+        context
     )
 
     if violation_score <= 0:

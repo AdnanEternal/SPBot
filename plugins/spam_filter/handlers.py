@@ -340,7 +340,7 @@ async def add_forbidden_rule(
     await event.reply(
         f"✅ عبارت ممنوع اضافه شد:\n"
         f"`{pattern}`\n\n"
-        f"اقدام: `HARD_SPAM`"
+        f"اقدام: `حذف پیام`"
     )
 
 

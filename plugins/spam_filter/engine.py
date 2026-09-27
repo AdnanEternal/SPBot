@@ -337,9 +337,29 @@ def evaluate_hard_rules(
 ) -> tuple[str, str] | None:
 
     matched_rules = context.get(
-        "matched_text_rules",
-        [],
-    )
+    "matched_text_rules",
+    [],
+)
+
+    # فقط تطابق داخل خود پیام می‌تواند باعث حذف همان پیام شود.
+    # تطابق داخل profile نباید باعث حذف پیام‌های عادی کاربر شود.
+    message_rules = [
+        rule
+        for rule in matched_rules
+        if rule.get("source") == "message"
+    ]
+
+    if message_rules:
+        first = message_rules[0]
+
+        return (
+            "custom_text_rule",
+            (
+                "مطابقت با قانون سفارشی: "
+                f"{first['pattern']} "
+                f"(source={first['source']})"
+            ),
+        )
 
     # ---------------------------------------------
     # Rule متنی، به‌تنهایی = spammer نیست
@@ -488,6 +508,7 @@ def evaluate_hard_rules(
 
 def calculate_violation_score(
     decision: SpamDecision,
+    context: dict | None = None,
 ) -> int:
 
     if decision.level not in (
@@ -496,60 +517,97 @@ def calculate_violation_score(
     ):
         return 0
 
-    # Ruleهای محتوایی به‌تنهایی
-    # نباید به مجازات سنگین برسند.
+    context = context or {}
+
+    user_state = str(
+        context.get(
+            "user_state",
+            "",
+        )
+    ).upper()
+
+    # Rule محتواییِ مشترک با Content Filter
+    # قبلاً توسط Content Filter ثبت شده است.
+    if decision.hard_rule == (
+        "content_filter_plus_spam"
+    ):
+        return 0
+
+    # Rule متنیِ مالک فقط باید باعث حذف پیام شود،
+    # نه مجازات کاربر به‌عنوان اسپمر.
     if decision.hard_rule == (
         "custom_text_rule"
     ):
         return 1
 
-    if decision.hard_rule == (
-        "content_filter_plus_spam"
-    ):
-        return 2
-
-
-    if decision.hard_rule == (
-        "extreme_burst"
-    ):
-        return 8
-
-    # رفتارهای خیلی واضح
-    if decision.hard_rule == (
-        "extreme_flood"
-    ):
+    # رفتارهای واقعاً شدید، حتی برای کاربر قدیمی،
+    # همچنان تخلف شدید باقی می‌مانند.
+    if decision.hard_rule in {
+        "extreme_burst",
+        "extreme_flood",
+        "external_hard_spam",
+    }:
         return 8
 
     if decision.hard_rule == (
         "repeat_burst"
     ):
-        return 8
+        severity = 8
 
-    if decision.hard_rule == (
+    elif decision.hard_rule == (
         "flood_plus_repetition"
     ):
-        return 7
+        severity = 7
 
-    # تبدیل score رفتار به severity
-    severity = max(
-        1,
-        round(
-            (
-                decision.score - 50
-            ) / 5
-        ),
-    )
+    else:
+        severity = max(
+            1,
+            round(
+                (
+                    decision.score - 50
+                ) / 5
+            ),
+        )
 
-    severity = max(
+        severity = max(
+            1,
+            min(
+                10,
+                severity,
+            ),
+        )
+
+    # کاربر قدیمی را برای الگوهای عادیِ اسپم
+    # وارد مسیر مجازات شدید نکن.
+    # بات‌های واقعی همچنان از extreme_* عبور می‌کنند.
+    if (
+        user_state == "ESTABLISHED"
+        and decision.hard_rule in {
+            "repeat_burst",
+            "flood_plus_repetition",
+        }
+    ):
+        severity = min(
+            severity,
+            5,
+        )
+
+    elif (
+        user_state == "ESTABLISHED"
+        and decision.hard_rule is None
+    ):
+        severity = min(
+            severity,
+            5,
+        )
+
+    return max(
         1,
         min(
             10,
             severity,
         ),
     )
-
-    return severity
-
 def decide(
     *,
     features: SpamFeatures,
