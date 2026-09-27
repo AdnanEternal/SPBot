@@ -595,7 +595,7 @@ async def on_message(
         )
     )
 
-    flood_threshold = settings["flood_count"],
+    flood_threshold = settings["flood_count"]
     
 
     features = build_features(
