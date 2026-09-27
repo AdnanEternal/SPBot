@@ -684,36 +684,25 @@ async def on_message(
     if decision.level == "NORMAL":
         return
 
-    cached_admin = self.admin_cache.get(
-        event.chat_id,
-        event.sender_id,
-    )
+    try:
+        chat = await event.get_chat()
 
-    if cached_admin is None:
-        try:
-            chat = await event.get_chat()
+        is_admin = await is_chat_admin(
+            self.client,
+            chat,
+            event.sender_id,
+            raise_on_error=True,
+        )
 
-            is_admin = await is_chat_admin(
-                self.client,
-                chat,
-                event.sender_id,
-                raise_on_error=True,
-            )
+    except Exception:
+        return
 
-        except Exception:
-            return
-
-        if is_admin:
-            self.tracker.clear_user(event.chat_id, event.sender_id)
-            return
-        
-    if cached_admin:
+    if is_admin:
         self.tracker.clear_user(
             event.chat_id,
             event.sender_id,
         )
         return
-
     await apply_decision(
         self,
         event,
