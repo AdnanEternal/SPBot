@@ -617,7 +617,6 @@ async def on_message(
     trust_state = await self.trust.get(
         event.chat_id,
         event.sender_id,
-        user_origin,
     )
 
     user_state = classify_user_state(
@@ -626,51 +625,71 @@ async def on_message(
         clean_streak=trust_state.clean_streak,
     )
 
-    is_new_user = (
-        user_state == "NEW"
-    )
-    age_state = (
-        "UNKNOWN"
-        if join_age_seconds is None
-        else (
-            "NEW"
-            if join_age_seconds <= 24 * 3600
-            else "KNOWN"
-        )
+    previous_user_state = (
+        self._debug_last_user_state.get(key)
     )
 
-    previous_age_state = (
-        self._debug_last_age_state.get(key)
-    )
-
-    if previous_age_state != age_state:
-        age_text = (
-            "unknown"
-            if join_age_seconds is None
-            else f"{join_age_seconds:.1f}s"
-        )
-
+    if (
+        previous_user_state is not None
+        and previous_user_state != user_state
+    ):
         self.debug(
-            "USER",
+            "USER_STATE",
             (
                 f"group={event.chat_id} "
                 f"user={event.sender_id} "
-                f"state={user_state} "
-                f"origin={user_origin} "
-                f"age={(
-                    'unknown'
-                    if join_age_seconds is None
-                    else f'{join_age_seconds:.1f}s'
-                )} "
-                f"trust={trust_state.trust_score:.1f} "
-                f"clean_streak={trust_state.clean_streak} "
-                f"clean_messages={trust_state.clean_messages}"
+                f"transition={previous_user_state}"
+                f"->{user_state}"
             ),
         )
 
-        self._debug_last_age_state[key] = (
-            age_state
+    self._debug_last_user_state[key] = (
+        user_state
+    )
+
+    previous_origin = (
+        self._debug_last_origin.get(key)
+    )
+
+    if (
+        previous_origin is not None
+        and previous_origin != user_origin
+    ):
+        self.debug(
+            "USER_ORIGIN",
+            (
+                f"group={event.chat_id} "
+                f"user={event.sender_id} "
+                f"transition={previous_origin}"
+                f"->{user_origin}"
+            ),
         )
+
+    self._debug_last_origin[key] = (
+        user_origin
+    )
+
+    self.debug(
+        "USER",
+        (
+            f"group={event.chat_id} "
+            f"user={event.sender_id} "
+            f"state={user_state} "
+            f"origin={user_origin} "
+            f"age={(
+                'unknown'
+                if join_age_seconds is None
+                else f'{join_age_seconds:.1f}s'
+            )} "
+            f"trust={trust_state.trust_score:.1f} "
+            f"clean_streak={trust_state.clean_streak} "
+            f"clean_messages={trust_state.clean_messages}"
+        ),
+    )
+
+    is_new_user = (
+        user_state == "NEW"
+    )
 
     base_flood_threshold = settings[
         "flood_count"
@@ -706,20 +725,21 @@ async def on_message(
     )
 
     self.debug(
-        "USER",
+        "METRICS",
         (
             f"group={event.chat_id} "
             f"user={event.sender_id} "
-            f"state={user_state} "
-            f"origin={user_origin} "
-            f"age={(
-                'unknown'
-                if join_age_seconds is None
-                else f'{join_age_seconds:.1f}s'
-            )} "
-            f"trust={trust_state.trust_score:.1f} "
-            f"clean_streak={trust_state.clean_streak} "
-            f"clean_messages={trust_state.clean_messages}"
+            f"message={event.id} "
+            f"recent={recent_message_count} "
+            f"burst={burst_message_count} "
+            f"repeat={repeat_count} "
+            f"flood_score={features.flood_score} "
+            f"burst_score={features.burst_score} "
+            f"repeat_score={features.repeat_score} "
+            f"similarity_score={features.similarity_score} "
+            f"char_flood_score={features.char_flood_score} "
+            f"flood_threshold={flood_threshold} "
+            f"trust={trust_state.trust_score:.1f}"
         ),
     )
 
@@ -737,10 +757,7 @@ async def on_message(
         features,
         {
             "join_age_seconds": join_age_seconds,
-            "is_new_user": (
-                join_age_seconds is not None
-                and join_age_seconds <= 24 * 3600
-            ),
+            "is_new_user": is_new_user,
             "external_signals": external_signals,
         },
     )
@@ -783,17 +800,13 @@ async def on_message(
         )
 
         context["is_new_user"] = (
-            join_age_seconds is not None
-            and join_age_seconds <= 24 * 3600
+            is_new_user
         )
 
     else:
         context = {
             "join_age_seconds": join_age_seconds,
-            "is_new_user": (
-                join_age_seconds is not None
-                and join_age_seconds <= 24 * 3600
-            ),
+            "is_new_user": is_new_user,
             "profile_text": "",
             "matched_text_rules": [],
             "external_signals": external_signals,
@@ -802,24 +815,54 @@ async def on_message(
     context["flood_threshold"] = (
         flood_threshold
     )
+
     context["base_flood_threshold"] = (
         base_flood_threshold
     )
-    
-    context["user_origin"] = user_origin
-    context["user_state"] = user_state
+
+    context["user_origin"] = (
+        user_origin
+    )
+
+    context["user_state"] = (
+        user_state
+    )
+
     context["trust_score"] = (
         trust_state.trust_score
     )
+
     context["clean_streak"] = (
         trust_state.clean_streak
     )
-
 
     decision = decide(
         features=features,
         context=context,
     )
+
+    if decision.hard_rule:
+        reason_code = (
+            decision.hard_rule
+        )
+
+    elif decision.level == "SUSPICIOUS":
+        reason_code = (
+            "score_suspicious_threshold"
+        )
+
+    elif decision.level == "SPAM":
+        reason_code = (
+            "score_spam_threshold"
+        )
+
+    elif decision.level == "HARD_SPAM":
+        reason_code = (
+            "score_hard_threshold"
+        )
+
+    else:
+        reason_code = "no_spam_signal"
 
     self.debug(
         "DECISION",
@@ -830,7 +873,7 @@ async def on_message(
             f"level={decision.level} "
             f"score={decision.score} "
             f"hard_rule={decision.hard_rule or '-'} "
-            f"reason={decision.reason or '-'}"
+            f"reason_code={reason_code}"
         ),
     )
 
@@ -839,19 +882,6 @@ async def on_message(
     )
 
     if (
-        previous_status == "SUSPICIOUS"
-        and decision.level == "NORMAL"
-    ):
-        self.debug(
-            "STATE",
-            (
-                f"group={event.chat_id} "
-                f"user={event.sender_id} "
-                "transition=SUSPICIOUS->NORMAL"
-            ),
-        )
-
-    elif (
         previous_status is not None
         and previous_status != decision.level
     ):
@@ -880,17 +910,6 @@ async def on_message(
             ),
         )
 
-    elif decision.level == "HARD_SPAM":
-        self.debug(
-            "HARD_SPAM",
-            (
-                f"group={event.chat_id} "
-                f"user={event.sender_id} "
-                f"score={decision.score} "
-                f"hard_rule={decision.hard_rule or '-'}"
-            ),
-        )
-
     elif decision.level == "SPAM":
         self.debug(
             "SPAM",
@@ -902,11 +921,61 @@ async def on_message(
             ),
         )
 
+    elif decision.level == "HARD_SPAM":
+        self.debug(
+            "HARD_SPAM",
+            (
+                f"group={event.chat_id} "
+                f"user={event.sender_id} "
+                f"score={decision.score} "
+                f"hard_rule={decision.hard_rule or '-'}"
+            ),
+        )
+
     if decision.level == "NORMAL":
-        await self.trust.record_clean(
-            event.chat_id,
-            event.sender_id,
-            trust_state,
+        updated_trust = (
+            await self.trust.record_clean(
+                event.chat_id,
+                event.sender_id,
+            )
+        )
+
+        new_user_state = (
+            classify_user_state(
+                join_age_seconds=join_age_seconds,
+                origin=user_origin,
+                clean_streak=(
+                    updated_trust.clean_streak
+                ),
+            )
+        )
+
+        if new_user_state != user_state:
+            self.debug(
+                "USER_STATE",
+                (
+                    f"group={event.chat_id} "
+                    f"user={event.sender_id} "
+                    f"transition={user_state}"
+                    f"->{new_user_state} "
+                    "trigger=clean_activity"
+                ),
+            )
+
+            self._debug_last_user_state[key] = (
+                new_user_state
+            )
+
+        self.debug(
+            "TRUST",
+            (
+                f"group={event.chat_id} "
+                f"user={event.sender_id} "
+                "event=CLEAN "
+                f"trust={updated_trust.trust_score:.1f} "
+                f"clean_streak={updated_trust.clean_streak} "
+                f"clean_messages={updated_trust.clean_messages}"
+            ),
         )
 
         return
@@ -927,8 +996,8 @@ async def on_message(
             (
                 f"group={event.chat_id} "
                 f"user={event.sender_id} "
-                f"status=FAILED "
-                f"error={type(exc).__name__}"
+                "status=FAILED "
+                f"error_type={type(exc).__name__}"
             ),
         )
         return
@@ -947,6 +1016,7 @@ async def on_message(
             event.chat_id,
             event.sender_id,
         )
+
         return
 
     self.debug(
@@ -967,7 +1037,6 @@ async def on_message(
         context,
         settings["flood_seconds"],
     )
-
 
 @on_bus_event("spam_suspicious")
 async def on_spam_suspicious(
@@ -1011,6 +1080,11 @@ async def on_member_change(
     if user_id is None:
         return
 
+    key = (
+        event.chat_id,
+        user_id,
+    )
+
     if getattr(
         event,
         "user_joined",
@@ -1021,6 +1095,30 @@ async def on_member_change(
             user_id,
         )
 
+        await self.trust.reset_clean_streak(
+            event.chat_id,
+            user_id,
+        )
+
+        self._debug_last_user_state.pop(
+            key,
+            None,
+        )
+
+        self._debug_last_origin.pop(
+            key,
+            None,
+        )
+
+        self.debug(
+            "MEMBER",
+            (
+                f"group={event.chat_id} "
+                f"user={user_id} "
+                "event=JOIN"
+            ),
+        )
+
     elif getattr(
         event,
         "user_left",
@@ -1029,4 +1127,28 @@ async def on_member_change(
         await self.context.record_leave(
             event.chat_id,
             user_id,
+        )
+
+        self._debug_last_user_state.pop(
+            key,
+            None,
+        )
+
+        self._debug_last_origin.pop(
+            key,
+            None,
+        )
+
+        self._debug_last_status.pop(
+            key,
+            None,
+        )
+
+        self.debug(
+            "MEMBER",
+            (
+                f"group={event.chat_id} "
+                f"user={user_id} "
+                "event=LEAVE"
+            ),
         )

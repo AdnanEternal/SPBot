@@ -11,18 +11,17 @@ from .store import (
 
 from .trust import SpamTrustManager
 from .telemetry import SpamTelemetry
-from .tracker import SpamTracker 
-
+from .tracker import SpamTracker
 
 from .confirmation import (
     SpamConfirmationTracker,
 )
-from core.base_plugin import BasePlugin
 
+from core.base_plugin import BasePlugin
 
 class SpamFilterPlugin(BasePlugin):
     name = "Spam Filter"
-    version = "1.5.5"
+    version = "1.5.6"
 
 
 
@@ -48,6 +47,21 @@ class SpamFilterPlugin(BasePlugin):
             str,
         ] = {}
 
+
+        self._debug_last_status: dict[
+            tuple[int, int],
+            str,
+        ] = {}
+
+        self._debug_last_user_state: dict[
+            tuple[int, int],
+            str,
+        ] = {}
+
+        self._debug_last_origin: dict[
+            tuple[int, int],
+            str,
+        ] = {}
 
         self.trust_store = SpamTrustStore(
             self.db

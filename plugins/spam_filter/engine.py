@@ -99,8 +99,6 @@ def normalize_text(
     )
 
 
-
-
 def adaptive_flood_threshold(
     base_threshold: int,
     join_age_seconds: float | None,
@@ -121,26 +119,28 @@ def adaptive_flood_threshold(
         ),
     )
 
+    # A genuinely new user gets no trust-based relaxation.
     if is_new_user:
-        base_multiplier = 1.0
-
-    elif user_origin == "LEGACY_OR_UNKNOWN":
-        base_multiplier = 1.75
+        age_multiplier = 1.0
 
     elif join_age_seconds is None:
-        base_multiplier = 1.0
+        age_multiplier = 1.0
 
-    elif join_age_seconds < 24 * 3600:
-        base_multiplier = 1.25
+    elif join_age_seconds < 60 * 60:
+        # Recently established through clean activity.
+        age_multiplier = 1.0
 
-    elif join_age_seconds < 7 * 24 * 3600:
-        base_multiplier = 1.50
+    elif join_age_seconds < 24 * 60 * 60:
+        age_multiplier = 1.25
 
-    elif join_age_seconds < 30 * 24 * 3600:
-        base_multiplier = 1.75
+    elif join_age_seconds < 7 * 24 * 60 * 60:
+        age_multiplier = 1.50
+
+    elif join_age_seconds < 30 * 24 * 60 * 60:
+        age_multiplier = 1.75
 
     else:
-        base_multiplier = 2.0
+        age_multiplier = 2.0
 
     trust_bonus = (
         trust_score / 100.0
@@ -148,7 +148,8 @@ def adaptive_flood_threshold(
 
     multiplier = min(
         3.0,
-        base_multiplier + trust_bonus,
+        age_multiplier
+        + trust_bonus,
     )
 
     return max(
@@ -160,6 +161,7 @@ def adaptive_flood_threshold(
             )
         ),
     )
+
 
 def calculate_similarity(
     text: str,
