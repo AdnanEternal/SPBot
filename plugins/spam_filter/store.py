@@ -367,6 +367,22 @@ class SpamContextStore:
         user_id: int,
         seen_at: float,
     ) -> None:
+        result = await self.db.insert(
+            self.TABLE,
+            {
+                "group_id": group_id,
+                "user_id": user_id,
+                "first_seen_at": seen_at,
+            },
+            or_ignore=True,
+        )
+
+        # اگر همین فراخوانی ردیف را ساخت، کار تمام است.
+        if result.rowcount > 0:
+            return
+
+        # ردیف از قبل وجود داشته؛ ممکن است first_seen_at قبلاً
+        # مقدار نداشته باشد، پس رفتار قبلی را حفظ می‌کنیم.
         row = await self.db.select_one(
             self.TABLE,
             where={
@@ -376,14 +392,6 @@ class SpamContextStore:
         )
 
         if row is None:
-            await self.db.insert(
-                self.TABLE,
-                {
-                    "group_id": group_id,
-                    "user_id": user_id,
-                    "first_seen_at": seen_at,
-                },
-            )
             return
 
         if row["first_seen_at"] is None:
@@ -403,6 +411,7 @@ class SpamContextStore:
                     "user_id": user_id,
                 },
             )
+
 
     async def set_joined_at(
         self,
