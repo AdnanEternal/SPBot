@@ -38,11 +38,82 @@ class SpamContextProvider:
 
         self._reference_time_cache = TTLCache[
             tuple[int, int],
-            float,
+            tuple[float, str],
         ](
             max_entries=self.REFERENCE_TIME_CACHE_MAX,
             ttl_seconds=self.REFERENCE_TIME_CACHE_TTL,
         )
+
+    async def get_membership_context(
+        self,
+        group_id: int,
+        user_id: int,
+    ) -> tuple[float | None, str]:
+
+        key = (
+            group_id,
+            user_id,
+        )
+
+        cached = self._reference_time_cache.get(
+            key
+        )
+
+        if cached is not None:
+            reference_time, origin = cached
+
+            return (
+                max(
+                    0.0,
+                    time.time() - reference_time,
+                ),
+                origin,
+            )
+
+        row = await self.store.get_timing(
+            group_id,
+            user_id,
+        )
+
+        if row is None:
+            return None, "UNKNOWN"
+
+        joined_at = row["joined_at"]
+        first_seen_at = row["first_seen_at"]
+
+        if joined_at is not None:
+            reference_time = float(
+                joined_at
+            )
+
+            origin = "JOIN_OBSERVED"
+
+        elif first_seen_at is not None:
+            reference_time = float(
+                first_seen_at
+            )
+
+            origin = "LEGACY_OR_UNKNOWN"
+
+        else:
+            return None, "UNKNOWN"
+
+        self._reference_time_cache.set(
+            key,
+            (
+                reference_time,
+                origin,
+            ),
+        )
+
+        return (
+            max(
+                0.0,
+                time.time() - reference_time,
+            ),
+            origin,
+        )
+
 
     async def record_first_seen(
         self,
@@ -118,39 +189,14 @@ class SpamContextProvider:
         group_id: int,
         user_id: int,
     ) -> float | None:
-        key = (
+
+        age, _ = await self.get_membership_context(
             group_id,
             user_id,
         )
 
-        reference_time = (
-            self._reference_time_cache.get(
-                key
-            )
-        )
-
-        if reference_time is None:
-            reference_time = (
-                await self.store.get_reference_time(
-                    group_id,
-                    user_id,
-                )
-            )
-
-            if reference_time is not None:
-                self._reference_time_cache.set(
-                    key,
-                    reference_time,
-                )
-
-        if reference_time is None:
-            return None
-
-        return max(
-            0.0,
-            time.time() - reference_time,
-        )
-
+        return age
+    
     async def get_profile(
         self,
         event,
@@ -172,7 +218,10 @@ class SpamContextProvider:
 
         except Exception as exc:
             print(
-                f"⚠️ دریافت پروفایل ناموفق بود: {exc}"
+                f"[SpamFilter][PROFILE] "
+                f"status=failed "
+                f"error={type(exc).__name__}: {exc}",
+                flush=True,
             )
 
             result = {
@@ -280,3 +329,6 @@ class SpamContextProvider:
                 external_signals
             ),
         }
+
+
+    

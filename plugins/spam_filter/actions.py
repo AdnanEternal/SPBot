@@ -4,7 +4,6 @@ from .engine import (
     calculate_violation_score,
 )
 
-
 async def _delete_messages(
     self,
     event,
@@ -21,9 +20,26 @@ async def _delete_messages(
             message_ids,
         )
 
+        self.debug(
+            "DELETE",
+            (
+                f"group={event.chat_id} "
+                f"user={event.sender_id} "
+                f"message_ids={message_ids} "
+                "status=success"
+            ),
+        )
+
     except Exception as exc:
-        print(
-            f"⚠️ نتونستم پیام‌های اسپم رو پاک کنم: {exc}"
+        self.debug(
+            "DELETE",
+            (
+                f"group={event.chat_id} "
+                f"user={event.sender_id} "
+                f"message_ids={message_ids} "
+                f"status=failed "
+                f"error={type(exc).__name__}: {exc}"
+            ),
         )
 
 def _get_spam_type(
@@ -89,6 +105,18 @@ async def apply_decision(
         )
     )
 
+    self.debug(
+        "CONFIRMATION",
+        (
+            f"group={event.chat_id} "
+            f"user={event.sender_id} "
+            f"is_confirmed={confirmation.is_confirmed} "
+            f"confirmed_now={confirmation.confirmed_now} "
+            f"confidence={confirmation.confidence} "
+            f"reason={confirmation.reason}"
+        ),
+    )
+
     # ---------------------------------------------
     # SUSPICIOUS:
     # فقط telemetry / evidence
@@ -96,12 +124,41 @@ async def apply_decision(
     # ---------------------------------------------
 
     if decision.level == "SUSPICIOUS":
+
+        trust_state = await self.trust.get(
+            event.chat_id,
+            event.sender_id,
+            context.get(
+                "user_origin",
+                "UNKNOWN",
+            ),
+        )
+
+        await self.trust.record_suspicious(
+            event.chat_id,
+            event.sender_id,
+            trust_state,
+        )
+
         self.telemetry.add(
             group_id=event.chat_id,
             user_id=event.sender_id,
             score=decision.score,
             reason=decision.reason,
             hard_rule=decision.hard_rule,
+        )
+
+        
+    
+
+        self.debug(
+            "ACTION",
+            (
+                f"group={event.chat_id} "
+                f"user={event.sender_id} "
+                "action=TELEMETRY_ONLY "
+                "reason=SUSPICIOUS"
+            ),
         )
 
         return
@@ -123,6 +180,18 @@ async def apply_decision(
             hard_rule=decision.hard_rule,
         )
 
+        self.debug(
+            "ACTION",
+            (
+                f"group={event.chat_id} "
+                f"user={event.sender_id} "
+                f"level={decision.level} "
+                "action=NONE "
+                "reason=NOT_CONFIRMED"
+            ),
+        )
+
+
         return
 
     # ---------------------------------------------
@@ -132,6 +201,15 @@ async def apply_decision(
     ids: list[int] = []
 
     if decision.level == "SPAM":
+        self.debug(
+            "ACTION",
+            (
+                f"group={event.chat_id} "
+                f"user={event.sender_id} "
+                f"level={decision.level} "
+                "action=DELETE"
+            ),
+        )
 
         await _delete_messages(
             self,
@@ -149,6 +227,16 @@ async def apply_decision(
 
         if event.id not in ids:
             ids.append(event.id)
+
+        self.debug(
+            "ACTION",
+            (
+                f"group={event.chat_id} "
+                f"user={event.sender_id} "
+                f"level={decision.level} "
+                "action=DELETE"
+            ),
+        )
 
         await _delete_messages(
             self,
@@ -178,6 +266,50 @@ async def apply_decision(
 
     if violation_score <= 0:
         return
+
+    self.debug(
+        "VIOLATION",
+        (
+            f"group={event.chat_id} "
+            f"user={event.sender_id} "
+            f"severity={violation_score} "
+            f"confidence={confirmation.confidence} "
+            f"message_ids={(
+                [event.id]
+                if decision.level == "SPAM"
+                else ids
+            )}"
+        ),
+    )
+
+    trust_state = await self.trust.get(
+        event.chat_id,
+        event.sender_id,
+        context.get(
+            "user_origin",
+            "UNKNOWN",
+        ),
+    )
+
+    await self.trust.record_violation(
+        event.chat_id,
+        event.sender_id,
+        trust_state,
+        violation_score,
+    )
+
+    self.debug(
+        "TRUST",
+        (
+            f"group={event.chat_id} "
+            f"user={event.sender_id} "
+            f"event=VIOLATION "
+            f"severity={violation_score} "
+            f"trust={trust_state.trust_score:.1f} "
+            f"clean_streak={trust_state.clean_streak}"
+        ),
+    )
+
 
     await self.event_bus.emit(
         "violation",

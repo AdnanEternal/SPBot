@@ -6,7 +6,10 @@ from .store import (
     SpamRuleStore,
     SpamSettingsStore,
     SpamWhitelistStore,
+    SpamTrustStore,
 )
+
+from .trust import SpamTrustManager
 from .telemetry import SpamTelemetry
 from .tracker import SpamTracker 
 
@@ -19,7 +22,12 @@ from core.base_plugin import BasePlugin
 
 class SpamFilterPlugin(BasePlugin):
     name = "Spam Filter"
-    version = "1.5.4"
+    version = "1.5.5"
+
+
+
+    DEBUG_LOGGING = True
+
 
     def __init__(
         self,
@@ -34,6 +42,26 @@ class SpamFilterPlugin(BasePlugin):
             db,
             event_bus,
         )
+
+        self._debug_last_status: dict[
+            tuple[int, int],
+            str,
+        ] = {}
+
+
+        self.trust_store = SpamTrustStore(
+            self.db
+        )
+
+        self.trust = SpamTrustManager(
+            self.trust_store
+        )
+
+        self._debug_last_age_state: dict[
+            tuple[int, int],
+            str,
+        ] = {}
+
         self.confirmation = (
             SpamConfirmationTracker()
         )
@@ -62,13 +90,32 @@ class SpamFilterPlugin(BasePlugin):
 
         self.tracker = SpamTracker()
         self.telemetry = SpamTelemetry()
-        
+
+    def debug(
+        self,
+        category: str,
+        message: str,
+    ) -> None:
+        if not self.DEBUG_LOGGING:
+            return
+
+        print(
+            f"[SpamFilter][{category}] {message}",
+            flush=True,
+        )
 
     async def on_load(self):
         await self.settings.create_table()
         await self.whitelist.create_table()
         await self.context_store.create_table()
         await self.rules.create_table()
+        await self.trust_store.create_table()
+        
+
+
+    async def on_disable(self):
+        await self.trust.flush()
+
 
     set_flood = handlers.set_flood
     set_max_repeat = handlers.set_max_repeat

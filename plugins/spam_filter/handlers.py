@@ -7,6 +7,8 @@ from core.decorators import (
     on_bus_event,
     on_event,
 )
+
+
 from core.permissions import is_chat_admin
 
 from . import detection
@@ -16,6 +18,10 @@ from .engine import (
     build_features,
     calculate_score,
     decide,
+)
+
+from .trust import (
+    classify_user_state,
 )
 
 if TYPE_CHECKING:
@@ -543,10 +549,23 @@ async def on_message(
     ):
         return
 
+    key = (
+        event.chat_id,
+        event.sender_id,
+    )
+
     if await self.whitelist.is_exempt(
         event.chat_id,
         event.sender_id,
     ):
+        self.debug(
+            "SKIP",
+            (
+                f"group={event.chat_id} "
+                f"user={event.sender_id} "
+                "reason=whitelisted"
+            ),
+        )
         return
 
     text = event.raw_text or ""
@@ -588,18 +607,81 @@ async def on_message(
         event.sender_id,
     )
 
-    join_age_seconds = (
-        await self.context.get_join_age(
+    join_age_seconds, user_origin = (
+        await self.context.get_membership_context(
             event.chat_id,
             event.sender_id,
         )
     )
 
-    base_flood_threshold = settings["flood_count"]
-    
+    trust_state = await self.trust.get(
+        event.chat_id,
+        event.sender_id,
+        user_origin,
+    )
+
+    user_state = classify_user_state(
+        join_age_seconds=join_age_seconds,
+        origin=user_origin,
+        clean_streak=trust_state.clean_streak,
+    )
+
+    is_new_user = (
+        user_state == "NEW"
+    )
+    age_state = (
+        "UNKNOWN"
+        if join_age_seconds is None
+        else (
+            "NEW"
+            if join_age_seconds <= 24 * 3600
+            else "KNOWN"
+        )
+    )
+
+    previous_age_state = (
+        self._debug_last_age_state.get(key)
+    )
+
+    if previous_age_state != age_state:
+        age_text = (
+            "unknown"
+            if join_age_seconds is None
+            else f"{join_age_seconds:.1f}s"
+        )
+
+        self.debug(
+            "USER",
+            (
+                f"group={event.chat_id} "
+                f"user={event.sender_id} "
+                f"state={user_state} "
+                f"origin={user_origin} "
+                f"age={(
+                    'unknown'
+                    if join_age_seconds is None
+                    else f'{join_age_seconds:.1f}s'
+                )} "
+                f"trust={trust_state.trust_score:.1f} "
+                f"clean_streak={trust_state.clean_streak} "
+                f"clean_messages={trust_state.clean_messages}"
+            ),
+        )
+
+        self._debug_last_age_state[key] = (
+            age_state
+        )
+
+    base_flood_threshold = settings[
+        "flood_count"
+    ]
+
     flood_threshold = adaptive_flood_threshold(
         base_flood_threshold,
         join_age_seconds,
+        trust_score=trust_state.trust_score,
+        user_origin=user_origin,
+        is_new_user=is_new_user,
     )
 
     burst_message_count = (
@@ -621,6 +703,24 @@ async def on_message(
         repeat_threshold=settings[
             "max_repeat"
         ],
+    )
+
+    self.debug(
+        "USER",
+        (
+            f"group={event.chat_id} "
+            f"user={event.sender_id} "
+            f"state={user_state} "
+            f"origin={user_origin} "
+            f"age={(
+                'unknown'
+                if join_age_seconds is None
+                else f'{join_age_seconds:.1f}s'
+            )} "
+            f"trust={trust_state.trust_score:.1f} "
+            f"clean_streak={trust_state.clean_streak} "
+            f"clean_messages={trust_state.clean_messages}"
+        ),
     )
 
     external_signals = {}
@@ -651,7 +751,7 @@ async def on_message(
         )
     )
 
-    if (
+    needs_context = (
         preliminary_score >= 20
         or external_signals.get(
             "content_filter_match"
@@ -660,17 +760,28 @@ async def on_message(
             "hard_spam"
         )
         or has_forbidden_rules
-    ):
+    )
+
+    self.debug(
+        "CONTEXT",
+        (
+            f"group={event.chat_id} "
+            f"user={event.sender_id} "
+            f"preliminary_score={preliminary_score} "
+            f"load_full_context={bool(needs_context)}"
+        ),
+    )
+
+    if needs_context:
         context = await self.context.collect(
             event,
             external_signals,
         )
 
-        # از مقدار قبلی استفاده کن تا لازم نباشد
-        # سن کاربر دوباره از DB خوانده شود.
         context["join_age_seconds"] = (
             join_age_seconds
         )
+
         context["is_new_user"] = (
             join_age_seconds is not None
             and join_age_seconds <= 24 * 3600
@@ -687,15 +798,117 @@ async def on_message(
             "matched_text_rules": [],
             "external_signals": external_signals,
         }
-    context["flood_threshold"] = flood_threshold
-    context["base_flood_threshold"] = base_flood_threshold
+
+    context["flood_threshold"] = (
+        flood_threshold
+    )
+    context["base_flood_threshold"] = (
+        base_flood_threshold
+    )
+    
+    context["user_origin"] = user_origin
+    context["user_state"] = user_state
+    context["trust_score"] = (
+        trust_state.trust_score
+    )
+    context["clean_streak"] = (
+        trust_state.clean_streak
+    )
+
 
     decision = decide(
         features=features,
         context=context,
     )
 
+    self.debug(
+        "DECISION",
+        (
+            f"group={event.chat_id} "
+            f"user={event.sender_id} "
+            f"message={event.id} "
+            f"level={decision.level} "
+            f"score={decision.score} "
+            f"hard_rule={decision.hard_rule or '-'} "
+            f"reason={decision.reason or '-'}"
+        ),
+    )
+
+    previous_status = (
+        self._debug_last_status.get(key)
+    )
+
+    if (
+        previous_status == "SUSPICIOUS"
+        and decision.level == "NORMAL"
+    ):
+        self.debug(
+            "STATE",
+            (
+                f"group={event.chat_id} "
+                f"user={event.sender_id} "
+                "transition=SUSPICIOUS->NORMAL"
+            ),
+        )
+
+    elif (
+        previous_status is not None
+        and previous_status != decision.level
+    ):
+        self.debug(
+            "STATE",
+            (
+                f"group={event.chat_id} "
+                f"user={event.sender_id} "
+                f"transition={previous_status}"
+                f"->{decision.level}"
+            ),
+        )
+
+    self._debug_last_status[key] = (
+        decision.level
+    )
+
+    if decision.level == "SUSPICIOUS":
+        self.debug(
+            "SUSPICIOUS",
+            (
+                f"group={event.chat_id} "
+                f"user={event.sender_id} "
+                f"score={decision.score} "
+                f"hard_rule={decision.hard_rule or '-'}"
+            ),
+        )
+
+    elif decision.level == "HARD_SPAM":
+        self.debug(
+            "HARD_SPAM",
+            (
+                f"group={event.chat_id} "
+                f"user={event.sender_id} "
+                f"score={decision.score} "
+                f"hard_rule={decision.hard_rule or '-'}"
+            ),
+        )
+
+    elif decision.level == "SPAM":
+        self.debug(
+            "SPAM",
+            (
+                f"group={event.chat_id} "
+                f"user={event.sender_id} "
+                f"score={decision.score} "
+                f"hard_rule={decision.hard_rule or '-'}"
+            ),
+        )
+
     if decision.level == "NORMAL":
+        await self.trust.record_clean(
+            event.chat_id,
+            event.sender_id,
+            trust_state,
+        )
+
         return
 
     try:
@@ -708,15 +921,44 @@ async def on_message(
             raise_on_error=True,
         )
 
-    except Exception:
+    except Exception as exc:
+        self.debug(
+            "ADMIN_CHECK",
+            (
+                f"group={event.chat_id} "
+                f"user={event.sender_id} "
+                f"status=FAILED "
+                f"error={type(exc).__name__}"
+            ),
+        )
         return
 
     if is_admin:
+        self.debug(
+            "SKIP",
+            (
+                f"group={event.chat_id} "
+                f"user={event.sender_id} "
+                "reason=admin"
+            ),
+        )
+
         self.tracker.clear_user(
             event.chat_id,
             event.sender_id,
         )
         return
+
+    self.debug(
+        "ACTION",
+        (
+            f"group={event.chat_id} "
+            f"user={event.sender_id} "
+            f"level={decision.level} "
+            "status=apply_decision"
+        ),
+    )
+
     await apply_decision(
         self,
         event,
@@ -725,6 +967,7 @@ async def on_message(
         context,
         settings["flood_seconds"],
     )
+
 
 @on_bus_event("spam_suspicious")
 async def on_spam_suspicious(

@@ -483,6 +483,133 @@ class SpamContextStore:
         )
 
 
+    async def get_timing(
+        self,
+        group_id: int,
+        user_id: int,
+    ):
+        return await self.db.select_one(
+            self.TABLE,
+            where={
+                "group_id": group_id,
+                "user_id": user_id,
+            },
+            columns=(
+                "joined_at, "
+                "first_seen_at"
+            ),
+        )
+
+
+class SpamTrustStore:
+    TABLE = "spam_user_trust"
+
+    def __init__(
+        self,
+        db: DatabaseManager,
+    ) -> None:
+        self.db = db
+
+    async def create_table(self) -> None:
+        await self.db.create_table(
+            self.TABLE,
+            columns={
+                "id": (
+                    "INTEGER PRIMARY KEY AUTOINCREMENT"
+                ),
+                "group_id": (
+                    "INTEGER NOT NULL"
+                ),
+                "user_id": (
+                    "INTEGER NOT NULL"
+                ),
+                "trust_score": (
+                    "REAL NOT NULL DEFAULT 0"
+                ),
+                "clean_messages": (
+                    "INTEGER NOT NULL DEFAULT 0"
+                ),
+                "clean_streak": (
+                    "INTEGER NOT NULL DEFAULT 0"
+                ),
+                "suspicious_events": (
+                    "INTEGER NOT NULL DEFAULT 0"
+                ),
+                "violation_count": (
+                    "INTEGER NOT NULL DEFAULT 0"
+                ),
+                "updated_at": (
+                    "REAL NOT NULL DEFAULT 0"
+                ),
+            },
+            unique=[
+                (
+                    "group_id",
+                    "user_id",
+                )
+            ],
+            indexes=[
+                "group_id",
+                "user_id",
+            ],
+        )
+
+    async def get(
+        self,
+        group_id: int,
+        user_id: int,
+    ):
+        return await self.db.select_one(
+            self.TABLE,
+            where={
+                "group_id": group_id,
+                "user_id": user_id,
+            },
+        )
+
+    async def save(
+        self,
+        group_id: int,
+        user_id: int,
+        state,
+    ) -> None:
+        import time
+
+        await self.db.execute(
+            f"""
+            INSERT INTO {self.TABLE} (
+                group_id,
+                user_id,
+                trust_score,
+                clean_messages,
+                clean_streak,
+                suspicious_events,
+                violation_count,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(group_id, user_id)
+            DO UPDATE SET
+                trust_score = excluded.trust_score,
+                clean_messages = excluded.clean_messages,
+                clean_streak = excluded.clean_streak,
+                suspicious_events = excluded.suspicious_events,
+                violation_count = excluded.violation_count,
+                updated_at = excluded.updated_at
+            """,
+            (
+                group_id,
+                user_id,
+                state.trust_score,
+                state.clean_messages,
+                state.clean_streak,
+                state.suspicious_events,
+                state.violation_count,
+                time.time(),
+            ),
+        )
+
+
 class SpamRuleStore:
     """
     Rule Engine عمومی Spam Filter.
@@ -548,6 +675,26 @@ class SpamRuleStore:
                 "group_id",
             ],
         )
+
+
+
+    async def get_timing(
+        self,
+        group_id: int,
+        user_id: int,
+    ):
+        return await self.db.select_one(
+            self.TABLE,
+            where={
+                "group_id": group_id,
+                "user_id": user_id,
+            },
+            columns=(
+                "joined_at, "
+                "first_seen_at"
+            ),
+        )
+
 
     async def get_all(
         self,

@@ -2344,17 +2344,7 @@ async def on_message(
                     )
                 )
 
-        # -------------------------------------------------
-        # DEBUG
-        # -------------------------------------------------
 
-        print(
-            f"✅ BOOBY TRIGGERED | "
-            f"group={event.chat_id} | "
-            f"trigger={trigger!r} | "
-            f"trigger_text={trigger_text!r} | "
-            f"text={text!r}"
-        )
 
 
         
@@ -2760,6 +2750,10 @@ async def on_violation_deleted(
     user_id: int,
     reason: str,
     message_ids: list[int] | None = None,
+    spam_type: str | None = None,
+    violation_score: int = 1,
+    confidence: int = 0,
+    source: str = "unknown",
 ) -> None:
 
     if not self.timeline_enabled:

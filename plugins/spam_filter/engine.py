@@ -101,49 +101,62 @@ def normalize_text(
 
 
 
-
 def adaptive_flood_threshold(
     base_threshold: int,
     join_age_seconds: float | None,
+    *,
+    trust_score: float = 0.0,
+    user_origin: str = "UNKNOWN",
+    is_new_user: bool = False,
 ) -> int:
-    """
-    هرچه کاربر قدیمی‌تر باشد، Flood Threshold بالاتر می‌رود.
 
-    هدف:
-    کاربر واقعی با چند پیام سریع تنبیه نشود،
-    ولی رباتی که ده‌ها پیام پشت‌سرهم می‌فرستد همچنان خیلی سریع شناسایی شود.
-    """
     if base_threshold <= 0:
         return base_threshold
 
-    if join_age_seconds is None:
-        multiplier = 1.0
+    trust_score = max(
+        0.0,
+        min(
+            100.0,
+            float(trust_score),
+        ),
+    )
 
-    elif join_age_seconds < 3600:
-        # کمتر از ۱ ساعت
-        multiplier = 1.0
+    if is_new_user:
+        base_multiplier = 1.0
+
+    elif user_origin == "LEGACY_OR_UNKNOWN":
+        base_multiplier = 1.75
+
+    elif join_age_seconds is None:
+        base_multiplier = 1.0
 
     elif join_age_seconds < 24 * 3600:
-        # ۱ ساعت تا ۱ روز
-        multiplier = 1.25
+        base_multiplier = 1.25
 
     elif join_age_seconds < 7 * 24 * 3600:
-        # ۱ تا ۷ روز
-        multiplier = 1.5
+        base_multiplier = 1.50
 
     elif join_age_seconds < 30 * 24 * 3600:
-        # ۷ تا ۳۰ روز
-        multiplier = 2.0
+        base_multiplier = 1.75
 
     else:
-        # بالای ۳۰ روز
-        multiplier = 3.0
+        base_multiplier = 2.0
+
+    trust_bonus = (
+        trust_score / 100.0
+    )
+
+    multiplier = min(
+        3.0,
+        base_multiplier + trust_bonus,
+    )
 
     return max(
         base_threshold,
         int(
             round(
-                base_threshold * multiplier
+                base_threshold
+                * multiplier
             )
         ),
     )
