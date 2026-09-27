@@ -8,21 +8,18 @@ from .store import (
     SpamWhitelistStore,
 )
 from .telemetry import SpamTelemetry
-from .tracker import (
-    AdminCache,
-    SpamTracker,
-)
+from .tracker import SpamTracker 
+
 
 from .confirmation import (
     SpamConfirmationTracker,
 )
-
 from core.base_plugin import BasePlugin
 
 
 class SpamFilterPlugin(BasePlugin):
     name = "Spam Filter"
-    version = "1.4.7"
+    version = "1.4.8"
 
     def __init__(
         self,
@@ -37,7 +34,6 @@ class SpamFilterPlugin(BasePlugin):
             db,
             event_bus,
         )
-
         self.confirmation = (
             SpamConfirmationTracker()
         )
@@ -66,7 +62,7 @@ class SpamFilterPlugin(BasePlugin):
 
         self.tracker = SpamTracker()
         self.telemetry = SpamTelemetry()
-        self.admin_cache = AdminCache()
+        
 
     async def on_load(self):
         await self.settings.create_table()

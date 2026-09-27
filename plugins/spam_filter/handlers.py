@@ -675,7 +675,7 @@ async def on_message(
             "external_signals": external_signals,
         }
     context["flood_threshold"] = flood_threshold
-    
+
     decision = decide(
         features=features,
         context=context,
@@ -693,22 +693,20 @@ async def on_message(
         try:
             chat = await event.get_chat()
 
-            cached_admin = await is_chat_admin(
+            is_admin = await is_chat_admin(
                 self.client,
                 chat,
                 event.sender_id,
                 raise_on_error=True,
             )
 
-            self.admin_cache.set(
-                event.chat_id,
-                event.sender_id,
-                cached_admin,
-            )
-
         except Exception:
             return
 
+        if is_admin:
+            self.tracker.clear_user(event.chat_id, event.sender_id)
+            return
+        
     if cached_admin:
         self.tracker.clear_user(
             event.chat_id,

@@ -190,43 +190,33 @@ def calculate_similarity(
 
 
 def build_features(
-    *,
-    text: str,
-    repeat_count: int,
-    recent_message_count: int,
-    recent_texts: list[str],
-    char_flood: bool,
-    flood_threshold: int,
-    repeat_threshold: int,
-) -> SpamFeatures:
-    similarity, similarity_score = (
-        calculate_similarity(
-            text,
-            recent_texts,
-        )
-    )
+        *, 
+        text, 
+        repeat_count, 
+        recent_message_count, 
+        recent_texts,
+        char_flood, 
+        flood_threshold, 
+        repeat_threshold
+    ):
+
+    # فقط وقتی چند پیام پشت‌سرهم داریم مقایسه‌ی شباهت معنی داره؛
+    # برای ترافیک عادی هزینه‌ی SequenceMatcher رو نمی‌دیم.
+    if recent_message_count >= 2 and recent_texts:
+        similarity, similarity_score = calculate_similarity(text, recent_texts)
+    else:
+        similarity, similarity_score = 0.0, 0
 
     return SpamFeatures(
         repeat_count=repeat_count,
         recent_message_count=recent_message_count,
         similarity=similarity,
         char_flood=char_flood,
-        flood_score=_threshold_score(
-            recent_message_count,
-            flood_threshold,
-        ),
-        repeat_score=_threshold_score(
-            repeat_count,
-            repeat_threshold,
-        ),
+        flood_score=_threshold_score(recent_message_count, flood_threshold),
+        repeat_score=_threshold_score(repeat_count, repeat_threshold),
         similarity_score=similarity_score,
-        char_flood_score=(
-            100
-            if char_flood
-            else 0
-        ),
+        char_flood_score=100 if char_flood else 0,
     )
-
 
 def calculate_score(
     features: SpamFeatures,
