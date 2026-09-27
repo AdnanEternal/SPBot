@@ -414,22 +414,25 @@ async def on_violation(
     message_ids: list[int] | None = None,
     spam_type: str | None = None,
     violation_score: int = 1,
+    confidence: int = 0,
+    source: str = "unknown",
 ) -> None:
-    """
-    دریافت تخلف از پلاگین‌ها.
 
-    violation_score:
-        0  = نادیده گرفتن
-        1..5 = تخلف نرم
-        6..10 = تخلف سخت
-    """
     violation_score = (
         _normalize_violation_score(
             violation_score
         )
     )
 
-    # امتیاز صفر یعنی این Event عملاً تخلف محسوب نمی‌شود.
+    confidence = max(
+        0,
+        min(
+            100,
+            int(confidence),
+        ),
+    )
+
+    # 0 یعنی اصلاً violation نیست.
     if violation_score <= 0:
         return
 
@@ -443,10 +446,107 @@ async def on_violation(
             raise_on_error=True,
         )
 
-    except Exception as e:
+    except Exception as exc:
         print(
-            f"⚠️ پردازش تخلف متوقف شد: {e}"
+            f"⚠️ پردازش تخلف متوقف شد: {exc}"
         )
+        return
+
+    # ادمین‌ها مجازات نمی‌شوند.
+    if is_admin:
+        return
+
+    # ---------------------------------------------
+    # اول همیشه سابقه را ثبت کن.
+    # ---------------------------------------------
+
+    await self.violations.add(
+        group_id,
+        user_id,
+        reason,
+        severity=violation_score,
+        source=source,
+        confidence=confidence,
+    )
+
+    # ---------------------------------------------
+    # تخلف ضعیف فقط سابقه است.
+    # ---------------------------------------------
+
+    if violation_score < 7:
+        return
+
+    # ---------------------------------------------
+    # از اینجا به بعد violation قطعی است.
+    # نوع مجازات = انتخاب ادمین
+    # ---------------------------------------------
+
+    settings = await self.settings.get(
+        group_id
+    )
+
+    if not punishment_throttle.should_punish(
+        group_id,
+        user_id,
+        violation_score,
+    ):
+        return
+
+    punishment_text = None
+
+    try:
+
+        if settings["punishment_type"] == "ban":
+
+            await moderation.ban_user(
+                self.client,
+                chat,
+                user_id,
+            )
+
+            punishment_text = (
+                "🔨 مجازات: کاربر بن شد."
+            )
+
+        elif settings["punishment_type"] == "mute":
+
+            hours = settings[
+                "mute_hours"
+            ]
+
+            await moderation.mute_user(
+                self.client,
+                chat,
+                user_id,
+                hours=hours,
+            )
+
+            if hours is None:
+                punishment_text = (
+                    "🔇 مجازات: کاربر "
+                    "به‌صورت دائمی میوت شد."
+                )
+
+            else:
+                punishment_text = (
+                    "🔇 مجازات: کاربر میوت شد "
+                    f"({hours} ساعت)."
+                )
+
+        else:
+            print(
+                "⚠️ نوع مجازات ناشناخته است: "
+                f"{settings['punishment_type']}"
+            )
+
+            return
+
+    except Exception as exc:
+
+        print(
+            f"❌ اعمال مجازات ناموفق بود: {exc}"
+        )
+
         return
 
     name = await _display_name(
@@ -454,164 +554,28 @@ async def on_violation(
         user_id,
     )
 
-    if is_admin:
-        message = (
-            f"⚠️ {name} مرتکب تخلف شد.\n"
-            f"📌 دلیل: {reason}"
+    message = (
+        f"⚠️ {name} اسپم کرده.\n"
+        f"📌 دلیل: "
+        f"{spam_type or reason}\n"
+        f"🎯 اطمینان: "
+        f"{confidence}/100\n"
+        f"{punishment_text}"
+    )
+
+    if self.notice_throttle.should_notify(
+        group_id,
+        user_id,
+        spam_type or reason,
+    ):
+        sent = await _notify(
+            event,
+            message,
         )
 
-        if self.notice_throttle.should_notify(
-            group_id,
-            user_id,
-            spam_type or reason,
-        ):
-            sent = await _notify(
-                event,
-                message,
+        if sent is not None:
+            await self.event_bus.emit(
+                "timeline_system_message",
+                group_id=group_id,
+                message=sent,
             )
-
-            if sent is not None:
-                await self.event_bus.emit(
-                    "timeline_system_message",
-                    group_id,
-                    message=sent,
-                )
-
-        return
-
-    # ثبت سابقه + شدت
-    await self.violations.add(
-        group_id,
-        user_id,
-        reason,
-        severity=violation_score,
-    )
-
-    count = await self.violations.get_count(
-        group_id,
-        user_id,
-    )
-
-    settings = await self.settings.get(
-        group_id
-    )
-
-    is_hard = (
-        violation_score > SOFT_SCORE_MAX
-    )
-
-    # تخلف نرم فقط وقتی به مرحله‌ی
-    # مجازات برسد که چند بار تکرار شده باشد.
-    #
-    # تخلف سخت از همان بار اول می‌تواند
-    # مجازات خودکار بگیرد.
-    should_punish = (
-        is_hard
-        or count > settings[
-            "max_violations"
-        ]
-    )
-
-    punishment_text = None
-
-    if should_punish:
-        if punishment_throttle.should_punish(
-            group_id,
-            user_id,
-            violation_score,
-        ):
-            try:
-                # بن فقط برای تخلف خیلی شدید
-                # و بعد از تکرار تخلف فعال می‌شود.
-                if (
-                    settings["punishment_type"]
-                    == "ban"
-                    and count
-                    > settings["max_violations"]
-                    and violation_score >= 9
-                ):
-                    await moderation.ban_user(
-                        self.client,
-                        chat,
-                        user_id,
-                    )
-
-                    punishment_text = (
-                        "🔨 مجازات: کاربر بن شد."
-                    )
-
-                else:
-                    minutes = (
-                        _mute_minutes_for_score(
-                            violation_score
-                        )
-                    )
-
-                    await moderation.mute_user(
-                        self.client,
-                        chat,
-                        user_id,
-                        minutes=minutes,
-                    )
-
-                    punishment_text = (
-                        "🔇 مجازات: کاربر میوت شد "
-                        f"({minutes} دقیقه)."
-                    )
-
-            except Exception as e:
-                print(
-                    f"❌ اعمال مجازات ناموفق بود: {e}"
-                )
-
-                punishment_text = (
-                    "❗ اعمال مجازات ناموفق بود "
-                    "(ربات دسترسی لازم رو داره؟)"
-                )
-
-    # -------------------------
-    # پیام عمومی
-    # -------------------------
-
-    if spam_type is not None:
-        message = (
-            f"⚠️ {name} اسپم کرده.\n"
-            f"📌 دلیل: {spam_type}"
-        )
-
-    else:
-        message = (
-            f"⚠️ {name} مرتکب تخلف شد.\n"
-            f"📌 دلیل: {reason}\n"
-            f"🔢 تعداد تخلفات: {count}\n"
-            f"🚫 سقف مجاز تخلف: "
-            f"{settings['max_violations']}"
-        )
-
-    if punishment_text is not None:
-        message += (
-            f"\n{punishment_text}"
-        )
-
-    should_notify = (
-        self.notice_throttle.should_notify(
-            group_id,
-            user_id,
-            spam_type or reason,
-        )
-    )
-
-    if not should_notify:
-        return
-
-    sent = await _notify(
-        event,
-        message,
-    )
-
-    if sent is not None:
-        await self.event_bus.emit(
-            "timeline_system_message",
-            group_id=group_id,
-            message=sent,
-        )

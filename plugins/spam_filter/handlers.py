@@ -595,10 +595,8 @@ async def on_message(
         )
     )
 
-    flood_threshold = adaptive_flood_threshold(
-        settings["flood_count"],
-        join_age_seconds,
-    )
+    flood_threshold = settings["flood_count"],
+    
 
     features = build_features(
         text=text,

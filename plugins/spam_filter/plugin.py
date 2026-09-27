@@ -13,12 +13,16 @@ from .tracker import (
     SpamTracker,
 )
 
+from .confirmation import (
+    SpamConfirmationTracker,
+)
+
 from core.base_plugin import BasePlugin
 
 
 class SpamFilterPlugin(BasePlugin):
     name = "Spam Filter"
-    version = "1.4.6"
+    version = "1.4.7"
 
     def __init__(
         self,
@@ -32,6 +36,10 @@ class SpamFilterPlugin(BasePlugin):
             command_manager,
             db,
             event_bus,
+        )
+
+        self.confirmation = (
+            SpamConfirmationTracker()
         )
 
         self.settings = SpamSettingsStore(

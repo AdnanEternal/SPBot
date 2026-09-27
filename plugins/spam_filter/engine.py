@@ -278,32 +278,11 @@ def calculate_score(
         ),
     )
 
-    join_age = context.get(
-        "join_age_seconds"
-    )
 
-    if (
-        context.get("is_new_user")
-        and join_age is not None
-        and score >= 15
-    ):
-        if join_age <= 3600:
-            score += 15
-        elif join_age <= 6 * 3600:
-            score += 10
-        elif join_age <= 24 * 3600:
-            score += 6
-
-    elif join_age is not None:
-        if join_age >= 30 * 24 * 3600:
-            score -= 10
-
-        elif join_age >= 7 * 24 * 3600:
-            score -= 5
 
     return _clamp(score)
 
-    return _clamp(score)
+
 
 
 def evaluate_hard_rules(
@@ -317,6 +296,10 @@ def evaluate_hard_rules(
         "matched_text_rules",
         [],
     )
+
+    # ---------------------------------------------
+    # Rule متنی، به‌تنهایی = spammer نیست
+    # ---------------------------------------------
 
     if matched_rules:
         first = matched_rules[0]
@@ -341,16 +324,83 @@ def evaluate_hard_rules(
             "یک قانون خارجی، اسپم شدید را تأیید کرد",
         )
 
+    # ---------------------------------------------
+    # Content Filter + رفتار اسپمی
+    # به‌تنهایی نباید مستقیم مجازات ایجاد کند.
+    # ---------------------------------------------
+
     if (
-        external.get(
-            "content_filter_match"
-        )
+        external.get("content_filter_match")
         and score >= 25
     ):
         return (
             "content_filter_plus_spam",
-            "پیام هم رفتار اسپمی داشت و هم با Content Filter مطابقت داشت",
+            (
+                "پیام هم رفتار اسپمی داشت "
+                "و هم با Content Filter مطابقت داشت"
+            ),
         )
+
+    # ---------------------------------------------
+    # Flood فوق‌العاده شدید
+    # ---------------------------------------------
+
+    flood_threshold = max(
+        1,
+        int(
+            context.get(
+                "flood_threshold",
+                5,
+            )
+        ),
+    )
+
+    extreme_flood_count = max(
+        12,
+        flood_threshold * 3,
+    )
+
+    if (
+        features.recent_message_count
+        >= extreme_flood_count
+    ):
+        return (
+            "extreme_flood",
+            (
+                "تعداد بسیار زیادی پیام "
+                "در بازه‌ی کوتاه ارسال شد"
+            ),
+        )
+
+    # ---------------------------------------------
+    # تکرار شدید
+    # ---------------------------------------------
+
+    repeat_burst_count = max(
+        6,
+        flood_threshold * 2,
+    )
+
+    if (
+        features.repeat_count
+        >= repeat_burst_count
+        and features.recent_message_count
+        >= max(
+            6,
+            flood_threshold,
+        )
+    ):
+        return (
+            "repeat_burst",
+            (
+                "تعداد زیادی پیام یکسان "
+                "در بازه‌ی کوتاه ارسال شد"
+            ),
+        )
+
+    # ---------------------------------------------
+    # Flood + تکرار / شباهت
+    # ---------------------------------------------
 
     if (
         features.flood_score >= 80
@@ -361,75 +411,72 @@ def evaluate_hard_rules(
     ):
         return (
             "flood_plus_repetition",
-            "فلاد شدید همراه با تکرار یا شباهت زیاد پیام‌ها",
+            (
+                "فلاد شدید همراه با تکرار "
+                "یا شباهت زیاد پیام‌ها"
+            ),
         )
 
     return None
 
 
-
 def calculate_violation_score(
     decision: SpamDecision,
 ) -> int:
-    """
-    شدت تخلف را به بازه ۰ تا ۱۰ تبدیل می‌کند.
 
-    این امتیاز فقط می‌گوید تخلف چقدر شدید بوده؛
-    ViolationManager تصمیم می‌گیرد با آن چه مجازاتی اعمال شود.
-    """
     if decision.level not in (
         "SPAM",
         "HARD_SPAM",
     ):
         return 0
 
-    # 60 => 2
-    # 70 => 4
-    # 80 => 6
-    # 90 => 8
-    # 100 => 10
+    # Ruleهای محتوایی به‌تنهایی
+    # نباید به مجازات سنگین برسند.
+    if decision.hard_rule == (
+        "custom_text_rule"
+    ):
+        return 1
+
+    if decision.hard_rule == (
+        "content_filter_plus_spam"
+    ):
+        return 2
+
+    # رفتارهای خیلی واضح
+    if decision.hard_rule == (
+        "extreme_flood"
+    ):
+        return 8
+
+    if decision.hard_rule == (
+        "repeat_burst"
+    ):
+        return 8
+
+    if decision.hard_rule == (
+        "flood_plus_repetition"
+    ):
+        return 7
+
+    # تبدیل score رفتار به severity
     severity = max(
         1,
         round(
-            (decision.score - 50) / 5
+            (
+                decision.score - 50
+            ) / 5
         ),
     )
 
-    if decision.hard_rule == "custom_text_rule":
-        severity = max(
-            severity,
-            7,
-        )
-
-    elif decision.hard_rule == "external_hard_spam":
-        severity = max(
-            severity,
-            8,
-        )
-
-    elif decision.hard_rule == "content_filter_plus_spam":
-        severity = max(
-            severity,
-            6,
-        )
-
-    elif decision.hard_rule == "flood_plus_repetition":
-        severity = max(
-            severity,
-            7,
-        )
-
-    if decision.level == "HARD_SPAM":
-        severity += 1
-
-    return max(
-        0,
+    severity = max(
+        1,
         min(
             10,
             severity,
         ),
     )
 
+    return severity
 
 def decide(
     *,
@@ -449,6 +496,22 @@ def decide(
 
     if hard_rule is not None:
         name, reason = hard_rule
+
+        # این‌ها تخلف هستند، ولی به‌تنهایی اثبات
+        # نمی‌کنند که کاربر اسپمر است.
+        if name in {
+            "custom_text_rule",
+            "content_filter_plus_spam",
+        }:
+            return SpamDecision(
+                level="SPAM",
+                score=max(
+                    score,
+                    60,
+                ),
+                reason=reason,
+                hard_rule=name,
+            )
 
         return SpamDecision(
             level="HARD_SPAM",

@@ -29,6 +29,16 @@ class ViolationStore:
                     "TEXT NOT NULL "
                     "DEFAULT CURRENT_TIMESTAMP"
                 ),
+                "source": (
+                    "TEXT NOT NULL "
+                    "DEFAULT 'unknown'"
+                ),
+
+                "confidence": (
+                    "INTEGER NOT NULL "
+                    "DEFAULT 0 "
+                    "CHECK(confidence BETWEEN 0 AND 100)"
+                ),
             },
             indexes=[
                 "group_id",
@@ -41,17 +51,31 @@ class ViolationStore:
             f"PRAGMA table_info({self.TABLE})"
         )
 
-        has_severity = any(
-            row["name"] == "severity"
+        column_names = {
+            row["name"]
             for row in columns
-        )
+        }
 
-        if not has_severity:
+        migrations = {
+            "source": (
+                "TEXT NOT NULL "
+                "DEFAULT 'unknown'"
+            ),
+            "confidence": (
+                "INTEGER NOT NULL "
+                "DEFAULT 0"
+            ),
+        }
+
+        for column, definition in migrations.items():
+
+            if column in column_names:
+                continue
+
             await self.db.execute(
                 f"""
                 ALTER TABLE {self.TABLE}
-                ADD COLUMN severity INTEGER
-                NOT NULL DEFAULT 1
+                ADD COLUMN {column} {definition}
                 """
             )
 
@@ -61,13 +85,31 @@ class ViolationStore:
         user_id: int,
         reason: str,
         severity: int = 1,
-) -> None:
+        source: str = "unknown",
+        confidence: int = 0,
+    ) -> None:
+
         severity = max(
             1,
             min(
                 10,
                 int(severity),
             ),
+        )
+
+        confidence = max(
+            0,
+            min(
+                100,
+                int(confidence),
+            ),
+        )
+
+        source = (
+            str(source or "unknown")
+            .strip()
+            [:64]
+            or "unknown"
         )
 
         await self.db.insert(
@@ -77,8 +119,11 @@ class ViolationStore:
                 "user_id": user_id,
                 "reason": reason,
                 "severity": severity,
+                "source": source,
+                "confidence": confidence,
             },
         )
+
     
     async def get_count(
         self,

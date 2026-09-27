@@ -79,21 +79,31 @@ async def apply_decision(
     context: dict,
     delete_window_seconds: int,
 ) -> None:
-    if decision.level == "NORMAL":
-        return
+
+    confirmation = (
+        self.confirmation.observe(
+            event.chat_id,
+            event.sender_id,
+            decision,
+            features,
+        )
+    )
+
+    # ---------------------------------------------
+    # فقط مشکوک:
+    # هیچ حذف/مجازاتی
+    # ---------------------------------------------
 
     if decision.level == "SUSPICIOUS":
-        await self.event_bus.emit(
-            "spam_suspicious",
-            event=event,
+
+        self.telemetry.add(
             group_id=event.chat_id,
             user_id=event.sender_id,
             score=decision.score,
             reason=decision.reason,
             hard_rule=decision.hard_rule,
-            features=features,
-            context=context,
         )
+
         return
 
     external = context.get(
@@ -101,87 +111,88 @@ async def apply_decision(
         {},
     )
 
-    content_filter_match = external.get(
-        "content_filter_match",
-        False,
-    )
-
-    violation_score = (
-        calculate_violation_score(
-            decision
-        )
-    )
+    # ---------------------------------------------
+    # SPAM
+    # ---------------------------------------------
 
     if decision.level == "SPAM":
+
         await _delete_messages(
             self,
             event,
             [event.id],
         )
 
-        if (
-            not content_filter_match
-            and violation_score > 0
-        ):
-            await self.event_bus.emit(
-                "violation",
-                event=event,
-                group_id=event.chat_id,
-                user_id=event.sender_id,
-                reason=(
-                    f"اسپم: {decision.reason} "
-                    f"(score={decision.score}/100)"
-                ),
-                spam_type=_get_spam_type(
-                    decision,
-                    features,
-                ),
-                violation_score=violation_score,
-                message_ids=[
-                    event.id
-                ],
-            )
+    # ---------------------------------------------
+    # HARD_SPAM
+    # ---------------------------------------------
 
+    elif decision.level == "HARD_SPAM":
+
+        ids = self.tracker.ids_in_window(
+            event.chat_id,
+            event.sender_id,
+            delete_window_seconds,
+        )
+
+        if event.id not in ids:
+            ids.append(event.id)
+
+        await _delete_messages(
+            self,
+            event,
+            ids,
+        )
+
+        self.tracker.clear_user(
+            event.chat_id,
+            event.sender_id,
+        )
+
+    else:
         return
 
-    # HARD_SPAM
-    ids = self.tracker.ids_in_window(
-        event.chat_id,
-        event.sender_id,
-        delete_window_seconds,
+    # ---------------------------------------------
+    # هنوز مطمئن نیستیم
+    # پیام حذف شد ولی مجازات نداریم.
+    # ---------------------------------------------
+
+    if not confirmation.confirmed_now:
+        return
+
+    # ---------------------------------------------
+    # Confirmation موفق شد.
+    #
+    # از اینجا به بعد این واقعاً یک violation
+    # قابل مجازات است.
+    # ---------------------------------------------
+
+    violation_score = max(
+        7,
+        calculate_violation_score(
+            decision
+        ),
     )
 
-    if event.id not in ids:
-        ids.append(event.id)
-
-    await _delete_messages(
-        self,
-        event,
-        ids,
+    await self.event_bus.emit(
+        "violation",
+        event=event,
+        group_id=event.chat_id,
+        user_id=event.sender_id,
+        reason=(
+            f"رفتار اسپمی تأیید شد: "
+            f"{confirmation.reason}"
+        ),
+        spam_type=_get_spam_type(
+            decision,
+            features,
+        ),
+        violation_score=violation_score,
+        confidence=confirmation.confidence,
+        source="spam_filter",
+        message_ids=(
+            [event.id]
+            if decision.level == "SPAM"
+            else ids
+        ),
     )
-
-    self.tracker.clear_user(
-        event.chat_id,
-        event.sender_id,
-    )
-
-    if (
-        not content_filter_match
-        and violation_score > 0
-    ):
-        await self.event_bus.emit(
-            "violation",
-            event=event,
-            group_id=event.chat_id,
-            user_id=event.sender_id,
-            reason=(
-                f"اسپم شدید: {decision.reason} "
-                f"(score={decision.score}/100)"
-            ),
-            spam_type=_get_spam_type(
-                decision,
-                features,
-            ),
-            violation_score=violation_score,
-            message_ids=ids,
-        )
