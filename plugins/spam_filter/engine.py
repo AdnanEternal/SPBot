@@ -12,10 +12,11 @@ EXTREME_BURST_COUNT = 10
 
 
 WEIGHTS = {
-    "flood": 30,
+    "flood": 25,
+    "burst": 20,
     "repeat": 25,
-    "similarity": 25,
-    "char_flood": 20,
+    "similarity": 20,
+    "char_flood": 10,
 }
 
 _WHITESPACE_RE = re.compile(r"\s+")
@@ -256,9 +257,14 @@ def calculate_score(
     features: SpamFeatures,
     context: dict | None = None,
 ) -> int:
+    
     score = (
         features.flood_score
         * WEIGHTS["flood"]
+        / 100
+        +
+        features.burst_score
+        * WEIGHTS["burst"]
         / 100
         +
         features.repeat_score
