@@ -90,12 +90,12 @@ async def apply_decision(
     )
 
     # ---------------------------------------------
-    # فقط مشکوک:
-    # هیچ حذف/مجازاتی
+    # SUSPICIOUS:
+    # فقط telemetry / evidence
+    # هیچ حذف یا مجازاتی
     # ---------------------------------------------
 
     if decision.level == "SUSPICIOUS":
-
         self.telemetry.add(
             group_id=event.chat_id,
             user_id=event.sender_id,
@@ -106,14 +106,30 @@ async def apply_decision(
 
         return
 
-    external = context.get(
-        "external_signals",
-        {},
-    )
+    # ---------------------------------------------
+    # هنوز رفتار به اندازه کافی تأیید نشده
+    # بنابراین حتی SPAM هم حذف نمی‌شود.
+    # ---------------------------------------------
+
+    if not confirmation.is_confirmed:
+        self.telemetry.add(
+            group_id=event.chat_id,
+            user_id=event.sender_id,
+            score=decision.score,
+            reason=(
+                f"{decision.reason} | "
+                "برای تأیید شواهد بیشتری لازم است."
+            ),
+            hard_rule=decision.hard_rule,
+        )
+
+        return
 
     # ---------------------------------------------
-    # SPAM
+    # از اینجا به بعد رفتار تأیید شده است.
     # ---------------------------------------------
+
+    ids: list[int] = []
 
     if decision.level == "SPAM":
 
@@ -122,10 +138,6 @@ async def apply_decision(
             event,
             [event.id],
         )
-
-    # ---------------------------------------------
-    # HARD_SPAM
-    # ---------------------------------------------
 
     elif decision.level == "HARD_SPAM":
 
@@ -153,26 +165,19 @@ async def apply_decision(
         return
 
     # ---------------------------------------------
-    # هنوز مطمئن نیستیم
-    # پیام حذف شد ولی مجازات نداریم.
+    # فقط وقتی confirmation در همین incident
+    # تازه انجام شده باشد، violation جدید بساز.
     # ---------------------------------------------
 
     if not confirmation.confirmed_now:
         return
 
-    # ---------------------------------------------
-    # Confirmation موفق شد.
-    #
-    # از اینجا به بعد این واقعاً یک violation
-    # قابل مجازات است.
-    # ---------------------------------------------
-
-    violation_score = max(
-        7,
-        calculate_violation_score(
-            decision
-        ),
+    violation_score = calculate_violation_score(
+        decision
     )
+
+    if violation_score <= 0:
+        return
 
     await self.event_bus.emit(
         "violation",

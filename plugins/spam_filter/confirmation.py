@@ -329,14 +329,7 @@ class SpamConfirmationTracker:
         recent = [
             observation
             for observation in observations
-            if (
-                observation.timestamp >= cutoff
-                and observation.level
-                in (
-                    "SPAM",
-                    "HARD_SPAM",
-                )
-            )
+            if observation.timestamp >= cutoff
         ]
 
         union = (
