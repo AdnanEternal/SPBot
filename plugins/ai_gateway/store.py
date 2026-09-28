@@ -828,6 +828,7 @@ class AIModelStatisticsStore:
 
 class AIModelStore:
     TABLE = "ai_models"
+    KEY_TABLE = "ai_model_api_keys"
 
     def __init__(self, db: DatabaseManager) -> None:
         self.db = db
@@ -840,7 +841,6 @@ class AIModelStore:
             ttl_seconds=300,
         )
 
-
     async def create_table(self) -> None:
         await self.db.create_table(
             self.TABLE,
@@ -852,11 +852,67 @@ class AIModelStore:
                 "api_key": "TEXT",
                 "base_url": "TEXT",
                 "is_active": "INTEGER NOT NULL DEFAULT 0",
-                "created_at": "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP",
-                "updated_at": "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP",
+                "created_at": (
+                    "TEXT NOT NULL "
+                    "DEFAULT CURRENT_TIMESTAMP"
+                ),
+                "updated_at": (
+                    "TEXT NOT NULL "
+                    "DEFAULT CURRENT_TIMESTAMP"
+                ),
             },
-            indexes=["is_active", "provider"],
+            indexes=[
+                "is_active",
+                "provider",
+            ],
         )
+
+        # ---------------------------------------------
+        # API Keys for each model
+        # ---------------------------------------------
+
+        await self.db.create_table(
+            self.KEY_TABLE,
+            columns={
+                "id": "INTEGER PRIMARY KEY AUTOINCREMENT",
+                "model_name": "TEXT NOT NULL",
+                "api_key": "TEXT NOT NULL",
+                "created_at": (
+                    "TEXT NOT NULL "
+                    "DEFAULT CURRENT_TIMESTAMP"
+                ),
+            },
+            unique=[
+                ("model_name", "api_key"),
+            ],
+            indexes=[
+                "model_name",
+            ],
+        )
+
+        # ---------------------------------------------
+        # Migration:
+        # کلید فعلی هر مدل -> Key 1
+        # ---------------------------------------------
+
+        rows = await self.db.fetchall(
+            f"""
+            SELECT name, api_key
+            FROM {self.TABLE}
+            WHERE api_key IS NOT NULL
+              AND TRIM(api_key) != ''
+            """
+        )
+
+        for row in rows:
+            await self.db.insert(
+                self.KEY_TABLE,
+                {
+                    "model_name": row["name"],
+                    "api_key": row["api_key"],
+                },
+                or_ignore=True,
+            )
 
     async def add(
         self,
@@ -866,25 +922,58 @@ class AIModelStore:
         api_key: Optional[str],
         base_url: Optional[str],
     ) -> None:
+
+        normalized_name = name.strip().lower()
+
+        clean_api_key = (
+            api_key.strip()
+            if api_key
+            else None
+        )
+
         await self.db.insert(
             self.TABLE,
             {
-                "name": name.strip().lower(),
+                "name": normalized_name,
                 "provider": provider.strip(),
                 "model_id": model_id.strip(),
-                "api_key": api_key,
-                "base_url": base_url.strip() if base_url else None,
+                "api_key": clean_api_key,
+                "base_url": (
+                    base_url.strip()
+                    if base_url
+                    else None
+                ),
             },
         )
 
-    async def get(self, name: str) -> Optional[dict[str, Any]]:
+        # اولین API Key = Key 1
+        if clean_api_key:
+            await self.db.insert(
+                self.KEY_TABLE,
+                {
+                    "model_name": normalized_name,
+                    "api_key": clean_api_key,
+                },
+            )
+
+    async def get(
+        self,
+        name: str,
+    ) -> Optional[dict[str, Any]]:
+
         row = await self.db.select_one(
             self.TABLE,
-            where={"name": name.strip().lower()},
+            where={
+                "name": name.strip().lower()
+            },
         )
+
         return dict(row) if row else None
 
-    async def get_all(self) -> list[dict[str, Any]]:
+    async def get_all(
+        self,
+    ) -> list[dict[str, Any]]:
+
         rows = await self.db.fetchall(
             f"""
             SELECT *
@@ -892,11 +981,16 @@ class AIModelStore:
             ORDER BY is_active DESC, name ASC
             """
         )
-        return [dict(row) for row in rows]
+
+        return [
+            dict(row)
+            for row in rows
+        ]
 
     async def get_active(
         self,
     ) -> Optional[dict[str, Any]]:
+
         cached = self._active_cache.get(
             "active"
         )
@@ -906,7 +1000,9 @@ class AIModelStore:
 
         row = await self.db.select_one(
             self.TABLE,
-            where={"is_active": 1},
+            where={
+                "is_active": 1
+            },
         )
 
         if row is None:
@@ -929,14 +1025,20 @@ class AIModelStore:
         self,
         name: str,
     ) -> bool:
-        normalized = name.strip().lower()
+
+        normalized = (
+            name.strip().lower()
+        )
 
         async with self.db.maintenance_lock:
+
             if self.db.connection is None:
                 raise RuntimeError(
                     "Database connection is not available"
                 )
+
             cursor = None
+
             try:
                 await self.db.connection.execute(
                     f"""
@@ -983,19 +1085,127 @@ class AIModelStore:
                 except Exception:
                     pass
 
+    async def get_api_keys(
+        self,
+        model_name: str,
+    ) -> list[str]:
+
+        normalized = (
+            model_name.strip().lower()
+        )
+
+        rows = await self.db.fetchall(
+            f"""
+            SELECT api_key
+            FROM {self.KEY_TABLE}
+            WHERE model_name = ?
+            ORDER BY id ASC
+            """,
+            (normalized,),
+        )
+
+        keys = [
+            str(row["api_key"])
+            for row in rows
+            if row["api_key"]
+        ]
+
+        # سازگاری با دیتابیس‌های خیلی قدیمی
+        if not keys:
+            model = await self.get(
+                normalized
+            )
+
+            if model and model.get("api_key"):
+                return [
+                    model["api_key"]
+                ]
+
+        return keys
+
+    async def add_api_key(
+        self,
+        model_name: str,
+        api_key: str,
+    ) -> int | None:
+
+        normalized = (
+            model_name.strip().lower()
+        )
+
+        model = await self.get(
+            normalized
+        )
+
+        if model is None:
+            return None
+
+        api_key = (
+            api_key.strip()
+        )
+
+        if not api_key:
+            raise ValueError(
+                "API Key نمی‌تواند خالی باشد."
+            )
+
+        result = await self.db.insert(
+            self.KEY_TABLE,
+            {
+                "model_name": normalized,
+                "api_key": api_key,
+            },
+            or_ignore=True,
+        )
+
+        # کلید قبلاً برای همین مدل وجود داشته
+        if result.rowcount <= 0:
+            return 0
+
+        keys = await self.get_api_keys(
+            normalized
+        )
+
+        return len(keys)
+
     async def delete(
         self,
         name: str,
     ) -> bool:
-        cursor = await self.db.delete(
-            self.TABLE,
-            {"name": name.strip().lower()},
+
+        normalized = (
+            name.strip().lower()
         )
 
-        deleted = cursor.rowcount > 0
+        model = await self.get(
+            normalized
+        )
+
+        if model is None:
+            return False
+
+        await self.db.delete(
+            self.KEY_TABLE,
+            {
+                "model_name": normalized
+            },
+        )
+
+        cursor = await self.db.delete(
+            self.TABLE,
+            {
+                "name": normalized
+            },
+        )
+
+        deleted = (
+            cursor.rowcount > 0
+        )
 
         if deleted:
-            self._active_cache.delete("active")
+            self._active_cache.delete(
+                "active"
+            )
 
         return deleted
 
@@ -1004,9 +1214,27 @@ class AIModelStore:
         name: str,
         api_key: Optional[str],
     ) -> bool:
-        model = await self.get(name)
+
+        normalized = (
+            name.strip().lower()
+        )
+
+        model = await self.get(
+            normalized
+        )
+
         if model is None:
             return False
+
+        clean_api_key = (
+            api_key.strip()
+            if api_key
+            else None
+        )
+
+        # ---------------------------------------------
+        # legacy api_key = Key 1
+        # ---------------------------------------------
 
         await self.db.execute(
             f"""
@@ -1016,18 +1244,56 @@ class AIModelStore:
             WHERE name = ?
             """,
             (
-                api_key, 
-                name.strip().lower()
+                clean_api_key,
+                normalized,
             ),
         )
+
+        # ---------------------------------------------
+        # اگر Key 1 وجود دارد، همان را آپدیت کن
+        # اگر ندارد، بساز
+        # ---------------------------------------------
+
+        first_key = await self.db.fetchone(
+            f"""
+            SELECT id
+            FROM {self.KEY_TABLE}
+            WHERE model_name = ?
+            ORDER BY id ASC
+            LIMIT 1
+            """,
+            (normalized,),
+        )
+
+        if first_key is not None:
+
+            await self.db.execute(
+                f"""
+                UPDATE {self.KEY_TABLE}
+                SET api_key = ?
+                WHERE id = ?
+                """,
+                (
+                    clean_api_key,
+                    first_key["id"],
+                ),
+            )
+
+        elif clean_api_key:
+
+            await self.db.insert(
+                self.KEY_TABLE,
+                {
+                    "model_name": normalized,
+                    "api_key": clean_api_key,
+                },
+            )
 
         self._active_cache.delete(
             "active"
         )
 
         return True
-
-
 class AIGroupSettingsStore:
     TABLE = "ai_group_settings"
     GLOBAL_GROUP_ID = 0

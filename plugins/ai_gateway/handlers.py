@@ -1003,12 +1003,11 @@ async def memory_message_limit(
 # MODEL MANAGEMENT
 # =========================================================
 
-
 @command(
     name="مدل افزودن",
     permission="owner",
     chat_type="all",
-    description="افزودن مدل AI با استفاده از API Key ذخیره‌شده یا اطلاعات کامل.",
+    description="افزودن یک مدل AI و API Key شماره 1 آن.",
 )
 async def add_model(
     self,
@@ -1018,88 +1017,15 @@ async def add_model(
         event.args_text or ""
     ).strip().split()
 
-    if not args:
-        await event.reply(
-            "فرمت‌ها:\n\n"
-            "🔹 استفاده از API Key ذخیره‌شده:\n"
-            "!مدل افزودن <نام_مدل> <نام_API_Key> <model_id>\n\n"
-            "مثال:\n"
-            "!مدل افزودن gpt5 zai glm-4.5\n\n"
-            "🔹 وارد کردن اطلاعات کامل:\n"
-            "!مدل افزودن <نام_مدل> <provider> "
-            "<model_id> <API_KEY> [BASE_URL]"
-        )
-        return
-
-    if len(args) == 3:
-        model_name = args[0]
-        api_key_name = args[1]
-        model_id = args[2]
-
-        api_key_data = (
-            await self.api_keys.get(
-                api_key_name
-            )
-        )
-
-        if api_key_data is None:
-            await event.reply(
-                f"❌ API Key "
-                f"«{api_key_name}» پیدا نشد."
-            )
-            return
-
-        provider = api_key_data[
-            "provider"
-        ]
-
-        api_key = api_key_data[
-            "api_key"
-        ]
-
-        base_url = api_key_data[
-            "base_url"
-        ]
-
-        try:
-            await self.models.add(
-                name=model_name,
-                provider=provider,
-                model_id=model_id,
-                api_key=api_key,
-                base_url=base_url,
-            )
-
-        except Exception as exc:
-            await event.reply(
-                f"❌ خطا در افزودن مدل:\n{exc}"
-            )
-            return
-
-        try:
-            await event.delete()
-
-        except Exception:
-            pass
-
-        await event.reply(
-            f"✅ مدل «{model_name}» اضافه شد.\n"
-            f"🔑 API Key: {api_key_name}\n"
-            f"🤖 Model ID: {model_id}"
-        )
-
-        return
-
     if len(args) < 4:
         await event.reply(
-            "❌ پارامترهای کافی وارد نشده.\n\n"
-            "استفاده از API Key ذخیره‌شده:\n"
-            "!مدل افزودن <نام_مدل> "
-            "<نام_API_Key> <model_id>\n\n"
-            "یا اطلاعات کامل:\n"
-            "!مدل افزودن <نام_مدل> "
-            "<provider> <model_id> "
-            "<API_KEY> [BASE_URL]"
+            "❌ استفاده نادرست.\n\n"
+            "فرمت:\n"
+            "!مدل افزودن <نام_مدل> <provider> "
+            "<model_id> <API_KEY> [BASE_URL]\n\n"
+            "مثال:\n"
+            "!مدل افزودن gpt5luna openai "
+            "gpt-5-luna sk-xxxxx https://api.example.com/v1"
         )
         return
 
@@ -1114,16 +1040,18 @@ async def add_model(
         else None
     )
 
+    if not api_key.strip():
+        await event.reply(
+            "❌ API Key نمی‌تواند خالی باشد."
+        )
+        return
+
     try:
         await self.models.add(
             name=model_name,
             provider=provider,
             model_id=model_id,
-            api_key=(
-                None
-                if api_key == "-"
-                else api_key
-            ),
+            api_key=api_key,
             base_url=base_url,
         )
 
@@ -1135,12 +1063,77 @@ async def add_model(
 
     try:
         await event.delete()
-
     except Exception:
         pass
 
     await event.reply(
-        f"✅ مدل «{model_name}» اضافه شد."
+        f"✅ مدل «{model_name}» اضافه شد.\n"
+        f"🔑 API Key: #1\n"
+        f"🤖 Model ID: {model_id}"
+    )
+
+
+@command(
+    name="مدل کلید افزودن",
+    permission="owner",
+    chat_type="all",
+    description="یک API Key جدید به مدل اضافه می‌کند.",
+)
+async def add_model_api_key(
+    self,
+    event,
+):
+    args = (
+        event.args_text or ""
+    ).strip().split()
+
+    if len(args) != 2:
+        await event.reply(
+            "❌ استفاده نادرست.\n\n"
+            "فرمت:\n"
+            "!مدل کلید افزودن <نام_مدل> <API_KEY>\n\n"
+            "مثال:\n"
+            "!مدل کلید افزودن gpt5luna sk-xxxxx"
+        )
+        return
+
+    model_name = args[0]
+    api_key = args[1]
+
+    try:
+        key_number = (
+            await self.models.add_api_key(
+                model_name,
+                api_key,
+            )
+        )
+
+    except Exception as exc:
+        await event.reply(
+            f"❌ افزودن API Key ناموفق بود:\n{exc}"
+        )
+        return
+
+    if key_number is None:
+        await event.reply(
+            f"❌ مدل «{model_name}» پیدا نشد."
+        )
+        return
+
+    if key_number == 0:
+        await event.reply(
+            "⚠️ این API Key قبلاً برای این مدل ثبت شده است."
+        )
+        return
+
+    try:
+        await event.delete()
+    except Exception:
+        pass
+
+    await event.reply(
+        f"✅ API Key شماره #{key_number} "
+        f"به مدل «{model_name}» اضافه شد."
     )
 
 
@@ -1274,18 +1267,38 @@ async def model_info(
         )
         return
 
+    api_keys = await self.models.get_api_keys(
+        model["name"]
+    )
+
+    key_lines = []
+
+    for index, api_key in enumerate(
+        api_keys,
+        start=1,
+    ):
+        key_lines.append(
+            f"  #{index}: "
+            f"{mask_secret(api_key)}"
+        )
+
+    if not key_lines:
+        key_lines = [
+            "  هیچ API Key ثبت نشده"
+        ]
+
     await event.reply(
         f"🤖 {model['name']}\n"
         f"Provider: {model['provider']}\n"
         f"Model ID: {model['model_id']}\n"
         f"Base URL: "
-        f"{model['base_url'] or 'پیش فرض'}\n"
-        f"API Key: "
-        f"{mask_secret(model['api_key'])}\n"
+        f"{model['base_url'] or 'پیش فرض'}\n\n"
+        f"🔑 API Keys ({len(api_keys)}):\n"
+        + "\n".join(key_lines)
+        + "\n\n"
         f"Active: "
         f"{'بله' if model['is_active'] else 'خیر'}"
     )
-
 
 @command(
     name="مدل کلید",
