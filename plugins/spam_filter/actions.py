@@ -98,8 +98,7 @@ async def apply_decision(
     delete_window_seconds: int,
 ) -> None:
 
-    # Content Filter این پیام را خودش مدیریت کرده است.
-    # دوباره حذف/Violation تولید نکن.
+    # Content Filter قبلاً این پیام را مدیریت کرده است.
     if decision.hard_rule == (
         "content_filter_plus_spam"
     ):
@@ -114,8 +113,7 @@ async def apply_decision(
         )
         return
 
-    # قانون سفارشی مالک باید مستقیماً پیام را حذف کند،
-    # ولی کاربر را به‌عنوان اسپمر مجازات نکند.
+    # Rule متنی مالک مستقل از تشخیص spammer است.
     if decision.hard_rule == (
         "custom_text_rule"
     ):
@@ -157,8 +155,6 @@ async def apply_decision(
         )
     )
 
-    
-
     if confirmation.confirmed_now:
         confirmation_code = (
             decision.hard_rule
@@ -187,6 +183,10 @@ async def apply_decision(
         ),
     )
 
+    # ---------------------------------------------
+    # SUSPICIOUS = فقط telemetry/trust
+    # ---------------------------------------------
+
     if decision.level == "SUSPICIOUS":
 
         updated_trust = (
@@ -204,7 +204,8 @@ async def apply_decision(
                 "event=SUSPICIOUS "
                 f"trust={updated_trust.trust_score:.1f} "
                 f"clean_streak={updated_trust.clean_streak} "
-                f"suspicious_events={updated_trust.suspicious_events}"
+                f"suspicious_events="
+                f"{updated_trust.suspicious_events}"
             ),
         )
 
@@ -228,7 +229,13 @@ async def apply_decision(
 
         return
 
+    # ---------------------------------------------
+    # هنوز ثابت نشده که کاربر اسپمر است.
+    # هیچ پیامی حذف نشود.
+    # ---------------------------------------------
+
     if not confirmation.is_confirmed:
+
         self.telemetry.add(
             group_id=event.chat_id,
             user_id=event.sender_id,
@@ -249,6 +256,10 @@ async def apply_decision(
         )
 
         return
+
+    # ---------------------------------------------
+    # از اینجا به بعد کاربر واقعاً confirmed است.
+    # ---------------------------------------------
 
     ids: list[int] = []
     deleted = False
@@ -288,7 +299,8 @@ async def apply_decision(
                 f"group={event.chat_id} "
                 f"user={event.sender_id} "
                 "level=HARD_SPAM "
-                "action=DELETE"
+                "action=DELETE "
+                f"count={len(ids)}"
             ),
         )
 
@@ -319,12 +331,14 @@ async def apply_decision(
         )
         return
 
+    # فقط همان لحظه‌ای که confirmation حاصل شده
+    # violation جدید ثبت کن.
     if not confirmation.confirmed_now:
         return
 
     violation_score = calculate_violation_score(
         decision,
-        context
+        context,
     )
 
     if violation_score <= 0:
@@ -357,7 +371,8 @@ async def apply_decision(
             f"severity={violation_score} "
             f"trust={updated_trust.trust_score:.1f} "
             f"clean_streak={updated_trust.clean_streak} "
-            f"violation_count={updated_trust.violation_count}"
+            f"violation_count="
+            f"{updated_trust.violation_count}"
         ),
     )
 

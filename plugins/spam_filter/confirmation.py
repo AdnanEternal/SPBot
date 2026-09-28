@@ -5,17 +5,20 @@ from collections import defaultdict, deque
 from dataclasses import dataclass
 
 
-# شواهد قدیمی بعد از این مدت دیگر برای تأیید اسپمر بودن
-# اهمیت زیادی ندارند.
 OBSERVATION_WINDOW_SECONDS = 45
-
-# برای اینکه دو رفتار مستقل را "هم‌زمان" در نظر بگیریم.
 CONFIRMATION_WINDOW_SECONDS = 30
-
-# بعد از تأیید، همان incident را دوباره مجازات نکن.
 CONFIRMED_COOLDOWN_SECONDS = 120
 
 MAX_OBSERVATIONS = 32
+
+# برای تأیید با چند نوع رفتار مستقل
+MULTI_SIGNAL_MIN_OBSERVATIONS = 4
+MULTI_SIGNAL_MIN_UNIQUE_SIGNALS = 2
+MULTI_SIGNAL_MIN_TOTAL_SCORE = 180
+
+# برای حالتی که فقط یک نوع رفتار دیده می‌شود
+SINGLE_SIGNAL_MIN_OBSERVATIONS = 6
+SINGLE_SIGNAL_MIN_TOTAL_SCORE = 450
 
 
 @dataclass(slots=True, frozen=True)
@@ -37,11 +40,10 @@ class ConfirmationResult:
 
 class SpamConfirmationTracker:
     """
-    تشخیص می‌دهد که آیا رفتارهای اخیر یک کاربر
-    برای تأیید اسپمر بودن کافی هستند یا نه.
+    فقط مشخص می‌کند آیا شواهد کافی برای تأیید اسپم بودن
+    کاربر وجود دارد یا نه.
 
-    این کلاس قرار نیست مجازات کند.
-    فقط Evidence جمع می‌کند.
+    این کلاس خودش هیچ مجازاتی انجام نمی‌دهد.
     """
 
     def __init__(self) -> None:
@@ -58,6 +60,7 @@ class SpamConfirmationTracker:
 
     @staticmethod
     def _signals(
+        decision,
         features,
     ) -> frozenset[str]:
 
@@ -69,6 +72,13 @@ class SpamConfirmationTracker:
             0,
         ) >= 70:
             signals.add("flood")
+
+        if getattr(
+            features,
+            "burst_score",
+            0,
+        ) >= 70:
+            signals.add("burst")
 
         if getattr(
             features,
@@ -90,6 +100,16 @@ class SpamConfirmationTracker:
             0,
         ) >= 100:
             signals.add("char_flood")
+
+        # اگر یک منبع خارجی صراحتاً hard_spam گفته،
+        # آن را هم به‌عنوان evidence ثبت کن؛
+        # ولی دیگر به‌تنهایی باعث confirmation نمی‌شود.
+        if getattr(
+            decision,
+            "hard_rule",
+            None,
+        ) == "external_hard_spam":
+            signals.add("external_hard_spam")
 
         return frozenset(signals)
 
@@ -147,21 +167,23 @@ class SpamConfirmationTracker:
             )
         )
 
-        strong_count = len(observations)
+        observation_count = len(
+            observations
+        )
 
         confidence = (
-            50
+            40
             + int(max_score * 0.35)
             + min(
-                20,
+                25,
                 len(unique_signals) * 8,
             )
             + min(
-                20,
+                30,
                 max(
                     0,
-                    strong_count - 1,
-                ) * 10,
+                    observation_count - 1,
+                ) * 5,
             )
         )
 
@@ -193,9 +215,9 @@ class SpamConfirmationTracker:
             now,
         )
 
-        # -------------------------------------------------
-        # کاربر قبلاً در همین incident تأیید شده.
-        # -------------------------------------------------
+        # ---------------------------------------------
+        # قبلاً همین incident تأیید شده است.
+        # ---------------------------------------------
 
         confirmed_until = (
             self._confirmed_until.get(key)
@@ -210,14 +232,15 @@ class SpamConfirmationTracker:
                 confirmed_now=False,
                 confidence=95,
                 reason=(
-                    "کاربر در وضعیت تأییدشده‌ی فعلی است."
+                    "کاربر قبلاً در همین "
+                    "incident تأیید شده است."
                 ),
             )
 
-        # -------------------------------------------------
-        # Rule متنی به‌تنهایی ثابت نمی‌کند کاربر اسپمر است.
-        # مثلاً یک کاربر عادی ممکن است یک عبارت ممنوع بفرستد.
-        # -------------------------------------------------
+        # ---------------------------------------------
+        # قانون متنی مالک = spam confirmation نیست.
+        # این مسیر در actions جداگانه مدیریت می‌شود.
+        # ---------------------------------------------
 
         if decision.hard_rule == (
             "custom_text_rule"
@@ -227,33 +250,28 @@ class SpamConfirmationTracker:
                 confirmed_now=False,
                 confidence=0,
                 reason=(
-                    "قانون متنی به‌تنهایی نشانه‌ی "
-                    "اسپمر بودن نیست."
+                    "قانون متنی به‌تنهایی "
+                    "اسپم بودن کاربر را ثابت نمی‌کند."
                 ),
             )
 
         signals = self._signals(
-            features
+            decision,
+            features,
         )
 
-        # هیچ نشانه‌ی رفتاری قابل اتکایی نداریم.
+        # هیچ evidence رفتاری نداریم.
+        # مهم: حتی SPAM/HARD_SPAM هم دیگر
+        # بدون evidence مستقیماً confirmed نمی‌شوند.
         if not signals:
-            if decision.level in ("SPAM", "HARD_SPAM"):
-                return ConfirmationResult(
-                    is_confirmed=True,
-                    confirmed_now=True,
-                    confidence=60,
-                    reason=(
-                        "امتیاز کلی رفتار بدون نیاز به یک "
-                        "سیگنال قوی منفرد به سقف اسپم رسید."
-                    ),
-                )
-
             return ConfirmationResult(
                 is_confirmed=False,
                 confirmed_now=False,
                 confidence=0,
-                reason="نشانه‌ی رفتاری کافی وجود ندارد.",
+                reason=(
+                    "هیچ نشانه‌ی رفتاری کافی "
+                    "برای تأیید وجود ندارد."
+                ),
             )
 
         observation = SpamObservation(
@@ -274,48 +292,9 @@ class SpamConfirmationTracker:
             observation
         )
 
-
-
-        # -------------------------------------------------
-        # رفتارهای خیلی واضح
-        # -------------------------------------------------
-
-        if decision.hard_rule in {
-            "extreme_burst",
-            "extreme_flood",
-            "repeat_burst",
-            "flood_plus_repetition",
-        }:
-            self._confirmed_until[key] = (
-                now
-                + CONFIRMED_COOLDOWN_SECONDS
-            )
-
-            confidence = (
-                98
-                if decision.hard_rule
-                == "extreme_flood"
-                else max(
-                    92,
-                    self._confidence(
-                        list(observations)
-                    ),
-                )
-            )
-
-            return ConfirmationResult(
-                is_confirmed=True,
-                confirmed_now=True,
-                confidence=confidence,
-                reason=(
-                    "الگوی رفتاری بسیار قوی "
-                    "و قابل‌تأیید شناسایی شد."
-                ),
-            )
-
-        # -------------------------------------------------
-        # تأیید با چند رفتار مستقل
-        # -------------------------------------------------
+        # ---------------------------------------------
+        # فقط observationهای بازه‌ی confirmation
+        # ---------------------------------------------
 
         cutoff = (
             now
@@ -323,53 +302,64 @@ class SpamConfirmationTracker:
         )
 
         recent = [
-            observation
-            for observation in observations
-            if observation.timestamp >= cutoff
+            item
+            for item in observations
+            if item.timestamp >= cutoff
         ]
 
-        union = (
-            set().union(
-                *(
-                    observation.signals
-                    for observation in recent
-                )
+        if not recent:
+            return ConfirmationResult(
+                is_confirmed=False,
+                confirmed_now=False,
+                confidence=0,
+                reason="شواهد اخیر کافی نیست.",
             )
-            if recent
-            else set()
+
+        union = set().union(
+            *(
+                item.signals
+                for item in recent
+            )
         )
 
         total_score = sum(
-            observation.score
-            for observation in recent
+            item.score
+            for item in recent
         )
 
-        flood_heavy = any(
-            (
-                "flood" in observation.signals
-                and observation.score >= 25
-            )
-            for observation in recent
-        )
+        # ---------------------------------------------
+        # حالت اول:
+        # چند رفتار مستقل در چند پیام
+        # ---------------------------------------------
 
-        # دو رفتار نسبتاً قوی + دو نوع نشانه‌ی مستقل
         multi_signal_confirmation = (
-            len(recent) >= 2
-            and len(union) >= 2
-            and total_score >= 120
+            len(recent)
+            >= MULTI_SIGNAL_MIN_OBSERVATIONS
+            and len(union)
+            >= MULTI_SIGNAL_MIN_UNIQUE_SIGNALS
+            and total_score
+            >= MULTI_SIGNAL_MIN_TOTAL_SCORE
         )
 
-        # چند burst واقعی، مخصوصاً وقتی flood وجود داشته باشد.
-        repeated_flood_confirmation = (
-            len(recent) >= 3
-            and len(union) >= 1
-            and flood_heavy
-            and total_score >= 80
+        # ---------------------------------------------
+        # حالت دوم:
+        # یک رفتار واحد ولی به‌شدت تکرارشده
+        #
+        # مثلاً flood شدید یا repeat شدید.
+        # برای جلوگیری از false positive عمداً
+        # evidence بیشتری لازم دارد.
+        # ---------------------------------------------
+
+        single_signal_confirmation = (
+            len(recent)
+            >= SINGLE_SIGNAL_MIN_OBSERVATIONS
+            and total_score
+            >= SINGLE_SIGNAL_MIN_TOTAL_SCORE
         )
 
         if (
             multi_signal_confirmation
-            or repeated_flood_confirmation
+            or single_signal_confirmation
         ):
             self._confirmed_until[key] = (
                 now
@@ -381,15 +371,22 @@ class SpamConfirmationTracker:
                 self._confidence(recent),
             )
 
+            if multi_signal_confirmation:
+                reason = (
+                    "چند نشانه‌ی مستقل در چند پیام "
+                    "رفتار اسپمی را تأیید کردند."
+                )
+            else:
+                reason = (
+                    "یک الگوی رفتاری به‌شدت "
+                    "و به‌صورت مکرر مشاهده شد."
+                )
+
             return ConfirmationResult(
                 is_confirmed=True,
                 confirmed_now=True,
                 confidence=confidence,
-                reason=(
-                    "چند نشانه‌ی مستقل در یک "
-                    "بازه‌ی کوتاه رفتار اسپمی "
-                    "را تأیید کردند."
-                ),
+                reason=reason,
             )
 
         return ConfirmationResult(
@@ -399,7 +396,8 @@ class SpamConfirmationTracker:
                 recent
             ),
             reason=(
-                "برای تأیید، شواهد بیشتری لازم است."
+                "برای تأیید اسپمر بودن، "
+                "شواهد بیشتری لازم است."
             ),
         )
 
