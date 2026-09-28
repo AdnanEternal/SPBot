@@ -94,6 +94,13 @@ class SpamTrustManager:
     def _from_row(
         row,
     ) -> SpamTrustState:
+        try:
+            repeat_events = int(
+                row["repeat_events"]
+            )
+        except (KeyError, IndexError):
+            repeat_events = 0
+
         return SpamTrustState(
             trust_score=float(
                 row["trust_score"]
@@ -110,7 +117,7 @@ class SpamTrustManager:
             violation_count=int(
                 row["violation_count"]
             ),
-            
+            repeat_events=repeat_events,
         )
 
     def _cache_set(

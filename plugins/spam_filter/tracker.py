@@ -13,7 +13,7 @@ State کوتاه‌مدت Spam Filter.
 import time
 from collections import defaultdict, deque
 from typing import Optional
-import random
+
 
 class SpamTracker:
     CLEANUP_EVERY = 500
