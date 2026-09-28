@@ -402,6 +402,11 @@ class PluginUpdateManager:
             )
 
             try:
+                # برای جلوگیری از استفاده از module cache
+                self.plugin_manager._remove_plugin_modules(
+                    plugin_id
+                )
+
                 await self.plugin_manager.load_plugin(
                     plugin_id
                 )

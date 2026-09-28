@@ -62,12 +62,19 @@ class GitHubManager:
         entries = await self.list_directory(
             remote_path
         )
-
+        
         for entry in entries:
             name = entry.get("name")
             entry_type = entry.get("type")
 
             if not name:
+                continue
+
+            # فایل‌های تولیدشده‌ی Python نباید از GitHub دانلود شوند.
+            if (
+                name == "__pycache__"
+                or name.endswith(".pyc")
+            ):
                 continue
 
             child_remote_path = (
@@ -87,11 +94,8 @@ class GitHubManager:
             elif entry_type == "file":
                 await self.download_file(
                     remote_path=child_remote_path,
-                    local_path=str(
-                        child_local_path
-                    ),
+                    local_path=str(child_local_path),
                 )
-
     async def check_connection(self) -> bool:
         url = (
             f"{self.BASE_URL}/repos/"

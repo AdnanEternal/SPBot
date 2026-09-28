@@ -109,6 +109,8 @@ class PluginManager:
     def _find_plugin_class(
         self,
         plugin_folder: Path,
+        *,
+        raise_on_import_error: bool = False,
     ) -> Optional[Type[BasePlugin]]:
 
         package_name = (
@@ -117,18 +119,26 @@ class PluginManager:
         plugin_module_name = (
             f"{package_name}.plugin"
         )
-
+            
         try:
             module = importlib.import_module(
                 plugin_module_name
             )
 
-        except Exception:
+        except Exception as exc:
             print(
                 f"\n❌ خطا در import پلاگین "
                 f"'{plugin_folder.name}'"
             )
             traceback.print_exc()
+
+            if raise_on_import_error:
+                raise RuntimeError(
+                    f"import پلاگین "
+                    f"'{plugin_folder.name}' شکست خورد: "
+                    f"{type(exc).__name__}: {exc}"
+                ) from exc
+
             return None
 
         plugin_classes = [
@@ -338,7 +348,8 @@ class PluginManager:
         importlib.invalidate_caches()
 
         plugin_class = self._find_plugin_class(
-            plugin_folder
+            plugin_folder,
+            raise_on_import_error=True,
         )
 
         if plugin_class is None:
