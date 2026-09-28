@@ -935,6 +935,21 @@ async def on_message(
         )
 
     if decision.level == "NORMAL":
+    # A message can be NORMAL while still carrying weak spam evidence.
+    # Such a message must not be rewarded as CLEAN.
+        if preliminary_score > 0:
+            self.debug(
+                "TRUST",
+                (
+                    f"group={event.chat_id} "
+                    f"user={event.sender_id} "
+                    "event=NEUTRAL "
+                    "reason=behavioral_evidence "
+                    f"score={preliminary_score}"
+                ),
+            )
+            return
+
         updated_trust = (
             await self.trust.record_clean(
                 event.chat_id,

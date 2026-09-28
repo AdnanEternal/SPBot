@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from difflib import SequenceMatcher
+import math
 import re
 
 
@@ -14,10 +15,14 @@ EXTREME_BURST_COUNT = 10
 WEIGHTS = {
     "flood": 25,
     "burst": 20,
-    "repeat": 25,
+    "repeat": 10,
     "similarity": 20,
     "char_flood": 10,
 }
+
+# Repeat is evidence, not a decision threshold.
+# The curve grows continuously and slowly, then saturates.
+REPEAT_EVIDENCE_SCALE = 35.0
 
 _WHITESPACE_RE = re.compile(r"\s+")
 _NON_WORD_RE = re.compile(r"[^\w]+", re.UNICODE)
@@ -62,6 +67,35 @@ def _clamp(
         )
     )
 
+def _repeat_evidence_score(
+    repeat_count: int,
+    repeat_reference: int,
+) -> int:
+    """Map repeated identical messages to a small, continuous evidence score."""
+
+    if repeat_count <= 1:
+        return 0
+
+    reference = max(
+        1,
+        int(repeat_reference),
+    )
+
+    excess = max(
+        0,
+        repeat_count - reference,
+    )
+
+    return _clamp(
+        100.0
+        * (
+            1.0
+            - math.exp(
+                -excess
+                / REPEAT_EVIDENCE_SCALE,
+            )
+        )
+    )
 
 def _threshold_score(
     value: int,
@@ -259,7 +293,7 @@ def build_features(
             6,
         )
     ),
-    repeat_score=_threshold_score(
+    repeat_score=_repeat_evidence_score(
         repeat_count,
         repeat_threshold,
     ),
