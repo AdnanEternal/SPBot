@@ -87,20 +87,12 @@ class SpamTrustManager:
             clean_streak=state.clean_streak,
             suspicious_events=state.suspicious_events,
             violation_count=state.violation_count,
-            
         )
 
     @staticmethod
     def _from_row(
         row,
     ) -> SpamTrustState:
-        try:
-            repeat_events = int(
-                row["repeat_events"]
-            )
-        except (KeyError, IndexError):
-            repeat_events = 0
-
         return SpamTrustState(
             trust_score=float(
                 row["trust_score"]
@@ -117,9 +109,8 @@ class SpamTrustManager:
             violation_count=int(
                 row["violation_count"]
             ),
-            repeat_events=repeat_events,
         )
-
+    
     def _cache_set(
         self,
         key: tuple[int, int],
@@ -182,7 +173,6 @@ class SpamTrustManager:
                 clean_streak=0,
                 suspicious_events=0,
                 violation_count=0,
-                
             )
 
             await self.store.save(
@@ -334,6 +324,8 @@ class SpamTrustManager:
             state.suspicious_events += 1
             state.clean_streak = 0
 
+            # هر Repeat Incident باید Trust را کاهش دهد،
+            # ولی سقف کاهش هر incident محدود است.
             trust_loss = min(
                 4.0,
                 1.0
@@ -349,6 +341,7 @@ class SpamTrustManager:
                 - trust_loss,
             )
 
+            # این تغییر رفتاری باید فوراً پایدار شود.
             await self.store.save(
                 group_id,
                 user_id,
@@ -373,6 +366,7 @@ class SpamTrustManager:
             return self._copy_state(
                 state
             )
+
     async def record_suspicious(
         self,
         group_id: int,

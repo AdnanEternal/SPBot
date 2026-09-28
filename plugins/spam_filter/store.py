@@ -579,9 +579,6 @@ class SpamTrustStore:
                 "violation_count": (
                     "INTEGER NOT NULL DEFAULT 0"
                 ),
-                "repeat_events": (
-                    "INTEGER NOT NULL DEFAULT 0"
-                ),
                 "updated_at": (
                     "REAL NOT NULL DEFAULT 0"
                 ),
@@ -598,24 +595,6 @@ class SpamTrustStore:
             ],
         )
 
-        # Migration برای دیتابیس‌های قدیمی
-        columns = await self.db.fetchall(
-            f"PRAGMA table_info({self.TABLE})"
-        )
-
-        column_names = {
-            row["name"]
-            for row in columns
-        }
-
-        if "repeat_events" not in column_names:
-            await self.db.execute(
-                f"""
-                ALTER TABLE {self.TABLE}
-                ADD COLUMN repeat_events
-                INTEGER NOT NULL DEFAULT 0
-                """
-            )
     async def get(
         self,
         group_id: int,
@@ -628,7 +607,6 @@ class SpamTrustStore:
                 "user_id": user_id,
             },
         )
-
     async def save(
         self,
         group_id: int,
@@ -647,10 +625,9 @@ class SpamTrustStore:
                 clean_streak,
                 suspicious_events,
                 violation_count,
-                repeat_events,
                 updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(group_id, user_id)
             DO UPDATE SET
                 trust_score = excluded.trust_score,
@@ -658,7 +635,6 @@ class SpamTrustStore:
                 clean_streak = excluded.clean_streak,
                 suspicious_events = excluded.suspicious_events,
                 violation_count = excluded.violation_count,
-                repeat_events = excluded.repeat_events,
                 updated_at = excluded.updated_at
             """,
             (
@@ -669,7 +645,6 @@ class SpamTrustStore:
                 state.clean_streak,
                 state.suspicious_events,
                 state.violation_count,
-                state.repeat_events,
                 time.time(),
             ),
         )
