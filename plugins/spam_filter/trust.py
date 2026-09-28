@@ -26,6 +26,7 @@ class SpamTrustState:
     clean_streak: int
     suspicious_events: int
     violation_count: int
+    repeat_events: int
 
 
 def classify_user_state(
@@ -87,6 +88,7 @@ class SpamTrustManager:
             clean_streak=state.clean_streak,
             suspicious_events=state.suspicious_events,
             violation_count=state.violation_count,
+            repeat_events=state.repeat_events,
         )
 
     @staticmethod
@@ -108,6 +110,9 @@ class SpamTrustManager:
             ),
             violation_count=int(
                 row["violation_count"]
+            ),
+            repeat_events=int(
+                row["repeat_events"]
             ),
         )
 
@@ -173,6 +178,7 @@ class SpamTrustManager:
                 clean_streak=0,
                 suspicious_events=0,
                 violation_count=0,
+                repeat_events=0,
             )
 
             await self.store.save(
@@ -289,6 +295,81 @@ class SpamTrustManager:
             return self._copy_state(
                 state
             )
+
+
+
+
+
+    async def record_repeat_behavior(
+        self,
+        group_id: int,
+        user_id: int,
+        repeat_score: int,
+    ) -> SpamTrustState:
+
+        async with self._lock:
+            key = (
+                group_id,
+                user_id,
+            )
+
+            state = await self._get_or_create_unlocked(
+                group_id,
+                user_id,
+            )
+
+            repeat_score = max(
+                0,
+                min(
+                    100,
+                    int(repeat_score),
+                ),
+            )
+
+            state.repeat_events += 1
+            state.suspicious_events += 1
+            state.clean_streak = 0
+
+            trust_loss = min(
+                4.0,
+                1.0
+                + (
+                    repeat_score
+                    / 50.0
+                ),
+            )
+
+            state.trust_score = max(
+                0.0,
+                state.trust_score
+                - trust_loss,
+            )
+
+            await self.store.save(
+                group_id,
+                user_id,
+                state,
+            )
+
+            self._cache_set(
+                key,
+                state,
+            )
+
+            self._dirty.pop(
+                key,
+                None,
+            )
+
+            self._pending.pop(
+                key,
+                None,
+            )
+
+            return self._copy_state(
+                state
+            )
+
 
     async def record_suspicious(
         self,

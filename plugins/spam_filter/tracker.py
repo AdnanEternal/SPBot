@@ -13,7 +13,7 @@ State کوتاه‌مدت Spam Filter.
 import time
 from collections import defaultdict, deque
 from typing import Optional
-
+import random
 
 class SpamTracker:
     CLEANUP_EVERY = 500
@@ -35,6 +35,11 @@ class SpamTracker:
         self._last_text: dict[
             tuple[int, int],
             tuple[str, int],
+        ] = {}
+
+        self._repeat_stage: dict[
+            tuple[int, int],
+            int,
         ] = {}
 
         self._register_calls = 0
@@ -82,6 +87,7 @@ class SpamTracker:
             repeat_count += 1
         else:
             repeat_count = 1
+            self._repeat_stage[key] = 0
 
         self._last_text[key] = (
             text,
@@ -89,7 +95,6 @@ class SpamTracker:
         )
 
         return repeat_count
-
     def clear_user(
         self,
         group_id: int,
@@ -106,6 +111,11 @@ class SpamTracker:
         )
 
         self._last_text.pop(
+            key,
+            None,
+        )
+
+        self._repeat_stage.pop(
             key,
             None,
         )
@@ -184,6 +194,94 @@ class SpamTracker:
                 break
 
         return result
+
+
+    def repeat_stage(
+        self,
+        group_id: int,
+        user_id: int,
+    ) -> int:
+        return self._repeat_stage.get(
+            (
+                group_id,
+                user_id,
+            ),
+            0,
+        )
+
+
+    def set_repeat_stage(
+        self,
+        group_id: int,
+        user_id: int,
+        stage: int,
+    ) -> None:
+        self._repeat_stage[
+            (
+                group_id,
+                user_id,
+            )
+        ] = max(
+            0,
+            int(stage),
+        )
+
+
+    def current_repeat_message_ids(
+        self,
+        group_id: int,
+        user_id: int,
+    ) -> list[int]:
+        messages = self._messages.get(
+            (
+                group_id,
+                user_id,
+            ),
+            (),
+        )
+
+        if not messages:
+            return []
+
+        latest_text = messages[-1][2]
+
+        if not latest_text:
+            return []
+
+        result: list[int] = []
+
+        for _, message_id, text in reversed(
+            messages
+        ):
+            if text != latest_text:
+                break
+
+            result.append(
+                message_id
+            )
+
+        result.reverse()
+
+        return result
+
+
+    def reset_repeat_incident(
+        self,
+        group_id: int,
+        user_id: int,
+    ) -> None:
+        key = (
+            group_id,
+            user_id,
+        )
+
+        self._last_text[key] = (
+            "",
+            0,
+        )
+
+        self._repeat_stage[key] = 0
+
 
     def _cleanup(self) -> None:
         cutoff = (

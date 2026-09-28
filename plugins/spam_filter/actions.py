@@ -1,6 +1,11 @@
+import math
+import random
+
 from .engine import (
     SpamDecision,
     SpamFeatures,
+    adaptive_repeat_notice_threshold,
+    adaptive_repeat_penalty_threshold,
     calculate_violation_score,
 )
 
@@ -89,6 +94,335 @@ def _get_spam_type(
         return reason
 
     return "الگوی اسپم"
+
+
+
+def _select_repeat_cleanup_ids(
+    message_ids: list[int],
+) -> list[int]:
+    """
+    حدود 90٪ پیام‌های تکراری را حذف می‌کند،
+    اما:
+      - اولین پیام می‌ماند
+      - آخرین پیام می‌ماند
+      - چند پیام میانی تصادفی می‌مانند
+      - تعداد پیام‌های باقی‌مانده حداکثر 8 است
+    """
+
+    count = len(message_ids)
+
+    if count <= 2:
+        return []
+
+    keep_count = min(
+        8,
+        max(
+            2,
+            math.floor(
+                count * 0.10
+            ),
+        ),
+    )
+
+    keep_indexes = {
+        0,
+        count - 1,
+    }
+
+    middle_indexes = list(
+        range(
+            1,
+            count - 1,
+        )
+    )
+
+    extra_keep = max(
+        0,
+        keep_count - 2,
+    )
+
+    if extra_keep > 0:
+        keep_indexes.update(
+            random.sample(
+                middle_indexes,
+                k=min(
+                    extra_keep,
+                    len(middle_indexes),
+                ),
+            )
+        )
+
+    return [
+        message_id
+        for index, message_id
+        in enumerate(message_ids)
+        if index not in keep_indexes
+    ]
+
+
+async def apply_repeat_only_intervention(
+    self,
+    event,
+    features: SpamFeatures,
+    context: dict,
+    is_admin: bool,
+    repeat_reference: int,
+) -> bool:
+    """
+    مسیر اختصاصی برای تکرار خالی.
+
+    اگر Repeat تنها سیگنال رفتاری باشد:
+      - threshold تطبیقی محاسبه می‌شود
+      - پیام‌های اضافی پاک می‌شوند
+      - یک هشدار داده می‌شود
+      - رفتار در Trust ثبت می‌شود
+      - در threshold بالاتر، فقط کاربر غیرادمین
+        violation دریافت می‌کند
+    """
+
+    if (
+        features.repeat_score <= 0
+        or features.flood_score > 0
+        or features.burst_score > 0
+        or features.similarity_score > 0
+        or features.char_flood_score > 0
+    ):
+        return False
+
+    trust_score = float(
+        context.get(
+            "trust_score",
+            0.0,
+        )
+    )
+
+    notice_threshold = (
+        adaptive_repeat_notice_threshold(
+            repeat_reference,
+            trust_score,
+        )
+    )
+
+    if (
+        features.repeat_count
+        < notice_threshold
+    ):
+        return False
+
+    stage = self.tracker.repeat_stage(
+        event.chat_id,
+        event.sender_id,
+    )
+
+    penalty_threshold = (
+        adaptive_repeat_penalty_threshold(
+            notice_threshold,
+            trust_score,
+        )
+    )
+
+    # -------------------------------------------------
+    # مرحله اول: هشدار + حذف حدود 90٪
+    # -------------------------------------------------
+
+    if stage == 0:
+        repeat_ids = (
+            self.tracker
+            .current_repeat_message_ids(
+                event.chat_id,
+                event.sender_id,
+            )
+        )
+
+        delete_ids = (
+            _select_repeat_cleanup_ids(
+                repeat_ids
+            )
+        )
+
+        if delete_ids:
+            deleted = await _delete_messages(
+                self,
+                event,
+                delete_ids,
+            )
+
+            if not deleted:
+                self.debug(
+                    "REPEAT_ACTION",
+                    (
+                        f"group={event.chat_id} "
+                        f"user={event.sender_id} "
+                        "action=STOPPED "
+                        "reason=DELETE_FAILED"
+                    ),
+                )
+                return True
+
+        updated_trust = (
+            await self.trust.record_repeat_behavior(
+                event.chat_id,
+                event.sender_id,
+                features.repeat_score,
+            )
+        )
+
+        self.tracker.set_repeat_stage(
+            event.chat_id,
+            event.sender_id,
+            1,
+        )
+
+        self.debug(
+            "REPEAT_ACTION",
+            (
+                f"group={event.chat_id} "
+                f"user={event.sender_id} "
+                f"repeat={features.repeat_count} "
+                f"repeat_score={features.repeat_score} "
+                f"notice_threshold={notice_threshold} "
+                f"penalty_threshold="
+                f"{penalty_threshold or '-'} "
+                f"deleted={len(delete_ids)} "
+                f"is_admin={is_admin}"
+            ),
+        )
+
+        self.debug(
+            "TRUST",
+            (
+                f"group={event.chat_id} "
+                f"user={event.sender_id} "
+                "event=REPEAT_BEHAVIOR "
+                f"trust={updated_trust.trust_score:.1f} "
+                f"repeat_events="
+                f"{updated_trust.repeat_events}"
+            ),
+        )
+
+        await event.reply(
+            "⚠️ پیام تکراری بیش از حد شناسایی شد؛ "
+            "بخش زیادی از پیام‌های تکراری پاک شد."
+        )
+
+        # حتی اگر کاربر ادمین باشد،
+        # از اینجا باید عبور نکنیم تا هیچ
+        # مسیر مجازات معمولی برای او اجرا نشود.
+        return True
+
+    # -------------------------------------------------
+    # مرحله دوم: threshold بالاتر
+    # -------------------------------------------------
+
+    if (
+        penalty_threshold is None
+        or features.repeat_count
+        < penalty_threshold
+    ):
+        return True
+
+    if stage >= 2:
+        return True
+
+    # ادمین/مالک فقط هشدار و سابقه می‌گیرد،
+    # نه violation.
+    if is_admin:
+        self.tracker.set_repeat_stage(
+            event.chat_id,
+            event.sender_id,
+            2,
+        )
+
+        self.debug(
+            "REPEAT_ACTION",
+            (
+                f"group={event.chat_id} "
+                f"user={event.sender_id} "
+                "action=WARNING_ONLY "
+                "reason=ADMIN "
+                f"repeat={features.repeat_count}"
+            ),
+        )
+
+        return True
+
+    # -------------------------------------------------
+    # کاربر عادی: violation سبک
+    # -------------------------------------------------
+
+    excess = (
+        features.repeat_count
+        - penalty_threshold
+    )
+
+    violation_score = min(
+        5,
+        max(
+            1,
+            2 + (
+                excess
+                // 10
+            ),
+        ),
+    )
+
+    updated_trust = (
+        await self.trust.record_violation(
+            event.chat_id,
+            event.sender_id,
+            violation_score,
+        )
+    )
+
+    self.tracker.set_repeat_stage(
+        event.chat_id,
+        event.sender_id,
+        2,
+    )
+
+    self.debug(
+        "VIOLATION",
+        (
+            f"group={event.chat_id} "
+            f"user={event.sender_id} "
+            f"severity={violation_score} "
+            "reason=repeat_only"
+        ),
+    )
+
+    self.debug(
+        "TRUST",
+        (
+            f"group={event.chat_id} "
+            f"user={event.sender_id} "
+            "event=REPEAT_VIOLATION "
+            f"severity={violation_score} "
+            f"trust={updated_trust.trust_score:.1f} "
+            f"violation_count="
+            f"{updated_trust.violation_count}"
+        ),
+    )
+
+    await self.event_bus.emit(
+        "violation",
+        event=event,
+        group_id=event.chat_id,
+        user_id=event.sender_id,
+        reason=(
+            "تکرار بیش از حد یک پیام"
+        ),
+        spam_type="پیام تکراری",
+        violation_score=violation_score,
+        confidence=95,
+        source="spam_filter",
+        message_ids=[
+            event.id
+        ],
+    )
+
+    return True
+
+
 async def apply_decision(
     self,
     event,

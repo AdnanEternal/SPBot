@@ -66,6 +66,15 @@ class SpamSettingsStore:
             for row in columns
         }
 
+        if "repeat_events" not in column_names:
+            await self.db.execute(
+                f"""
+                ALTER TABLE {self.TABLE}
+                ADD COLUMN repeat_events
+                INTEGER NOT NULL DEFAULT 0
+                """
+            )
+
         migrations = {
             "flood_count": (
                 f"INTEGER NOT NULL "
@@ -581,6 +590,9 @@ class SpamTrustStore:
                 "updated_at": (
                     "REAL NOT NULL DEFAULT 0"
                 ),
+                "repeat_events": (
+                    "INTEGER NOT NULL DEFAULT 0"
+                ),
             },
             unique=[
                 (
@@ -612,6 +624,7 @@ class SpamTrustStore:
         group_id: int,
         user_id: int,
         state,
+        repeat_events = None,
     ) -> None:
         import time
 
@@ -625,6 +638,7 @@ class SpamTrustStore:
                 clean_streak,
                 suspicious_events,
                 violation_count,
+                repeat_events,
                 updated_at
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -635,6 +649,7 @@ class SpamTrustStore:
                 clean_streak = excluded.clean_streak,
                 suspicious_events = excluded.suspicious_events,
                 violation_count = excluded.violation_count,
+                repeat_events = excluded.repeat_events,
                 updated_at = excluded.updated_at
             """,
             (
@@ -645,6 +660,7 @@ class SpamTrustStore:
                 state.clean_streak,
                 state.suspicious_events,
                 state.violation_count,
+                state.repeat_events,
                 time.time(),
             ),
         )

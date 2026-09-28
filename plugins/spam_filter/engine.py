@@ -24,6 +24,125 @@ WEIGHTS = {
 # The curve grows continuously and slowly, then saturates.
 REPEAT_EVIDENCE_SCALE = 35.0
 
+
+# Repeat-only intervention:
+# این thresholdها برای خودِ رفتار تکراری هستند و
+# به سن کاربر وابسته نیستند؛ trust تعیین می‌کند
+# کاربر چقدر فرصت بیشتری داشته باشد.
+
+REPEAT_NOTICE_MIN = 16
+REPEAT_NOTICE_MAX = 50
+
+REPEAT_NOTICE_REFERENCE_MULTIPLIER = 5
+REPEAT_NOTICE_TRUST_FACTOR = 0.35
+
+REPEAT_PENALTY_MIN = 20
+REPEAT_PENALTY_MAX = 50
+REPEAT_PENALTY_TRUST_FACTOR = 0.30
+
+
+def adaptive_repeat_notice_threshold(
+    repeat_reference: int,
+    trust_score: float,
+) -> int:
+    """
+    تعیین می‌کند از چه تعداد تکرار،
+    Repeat-only وارد مسیر هشدار/پاک‌سازی شود.
+
+    مثال با max_repeat=3:
+        trust=0   -> 16
+        trust=50  -> حدود 34
+        trust=100 -> 50
+    """
+
+    reference = max(
+        1,
+        int(repeat_reference),
+    )
+
+    trust = max(
+        0.0,
+        min(
+            100.0,
+            float(trust_score),
+        ),
+    )
+
+    base = max(
+        REPEAT_NOTICE_MIN,
+        reference
+        * REPEAT_NOTICE_REFERENCE_MULTIPLIER,
+    )
+
+    threshold = round(
+        base
+        + (
+            trust
+            * REPEAT_NOTICE_TRUST_FACTOR
+        )
+    )
+
+    return max(
+        REPEAT_NOTICE_MIN,
+        min(
+            REPEAT_NOTICE_MAX,
+            threshold,
+        ),
+    )
+
+
+def adaptive_repeat_penalty_threshold(
+    notice_threshold: int,
+    trust_score: float,
+) -> int | None:
+    """
+    تعیین می‌کند چه زمانی Repeat-only برای
+    کاربر غیرادمین از هشدار صرف عبور کرده و
+    violation تولید کند.
+
+    برای trust خیلی بالا، ممکن است هیچ penalty
+    داخلی قبل از سقف 50 وجود نداشته باشد.
+    """
+
+    trust = max(
+        0.0,
+        min(
+            100.0,
+            float(trust_score),
+        ),
+    )
+
+    notice_threshold = max(
+        REPEAT_NOTICE_MIN,
+        min(
+            REPEAT_NOTICE_MAX,
+            int(notice_threshold),
+        ),
+    )
+
+    if notice_threshold >= REPEAT_PENALTY_MAX:
+        return None
+
+    trust_based = round(
+        REPEAT_PENALTY_MIN
+        + (
+            trust
+            * REPEAT_PENALTY_TRUST_FACTOR
+        )
+    )
+
+    threshold = max(
+        REPEAT_PENALTY_MIN,
+        notice_threshold + 5,
+        trust_based,
+    )
+
+    return min(
+        REPEAT_PENALTY_MAX,
+        threshold,
+    )
+
+
 _WHITESPACE_RE = re.compile(r"\s+")
 _NON_WORD_RE = re.compile(r"[^\w]+", re.UNICODE)
 
