@@ -17,12 +17,11 @@ from .actions import (
     apply_repeat_only_intervention,
 )
 from .engine import (
-    adaptive_repeat_notice_threshold,
+    adaptive_flood_threshold,
     build_features,
     calculate_score,
     decide,
 )
-
 from .trust import (
     classify_user_state,
 )
@@ -691,60 +690,6 @@ async def on_message(
             f"clean_messages={trust_state.clean_messages}"
         ),
     )
-    # -------------------------------------------------
-# Repeat-only intervention
-#
-# فقط وقتی Repeat تنها رفتار مسئله‌دار است.
-# این مسیر باید قبل از NORMAL و قبل از admin skip
-# اجرا شود تا ادمین/مالک هم در تکرار افراطی هشدار بگیرد.
-# -------------------------------------------------
-
-    repeat_only = (
-        decision.hard_rule is None
-        and features.repeat_score > 0
-        and features.flood_score == 0
-        and features.burst_score == 0
-        and features.similarity_score == 0
-        and features.char_flood_score == 0
-    )
-
-    if repeat_only:
-        try:
-            repeat_is_admin = await is_chat_admin(
-                self.client,
-                await event.get_chat(),
-                event.sender_id,
-                raise_on_error=True,
-            )
-        except Exception as exc:
-            # اگر بررسی admin شکست خورد،
-            # warning غیرتنبیهی همچنان مجاز است،
-            # ولی مسیر penalty نباید اجرا شود.
-            repeat_is_admin = True
-
-            self.debug(
-                "ADMIN_CHECK",
-                (
-                    f"group={event.chat_id} "
-                    f"user={event.sender_id} "
-                    "status=FAILED_REPEAT_ONLY "
-                    f"error_type={type(exc).__name__}"
-                ),
-            )
-
-        handled = (
-            await apply_repeat_only_intervention(
-                self,
-                event,
-                features,
-                context,
-                repeat_is_admin,
-                settings["max_repeat"],
-            )
-        )
-
-        if handled:
-            return
 
     is_new_user = (
         user_state == "NEW"
@@ -754,14 +699,13 @@ async def on_message(
         "flood_count"
     ]
 
-    flood_threshold = adaptive_repeat_notice_threshold(
+    flood_threshold = adaptive_flood_threshold(
         base_flood_threshold,
         join_age_seconds,
         trust_score=trust_state.trust_score,
         user_origin=user_origin,
         is_new_user=is_new_user,
     )
-
     burst_message_count = (
         self.tracker.count_in_window(
             event.chat_id,
@@ -935,6 +879,65 @@ async def on_message(
             f"reason_code={reason_code}"
         ),
     )
+
+    # -------------------------------------------------
+    # Repeat-only intervention
+    #
+    # فقط وقتی Repeat تنها رفتار مسئله‌دار است.
+    # در این مرحله decision و context و features
+    # همگی ساخته شده‌اند.
+    #
+    # ادمین/مالک هم در این مسیر هشدار می‌گیرد،
+    # ولی مجازات نمی‌شود.
+    # -------------------------------------------------
+
+    repeat_only = (
+        decision.hard_rule is None
+        and features.repeat_score > 0
+        and features.flood_score == 0
+        and features.burst_score == 0
+        and features.similarity_score == 0
+        and features.char_flood_score == 0
+    )
+
+    if repeat_only:
+        try:
+            repeat_is_admin = await is_chat_admin(
+                self.client,
+                await event.get_chat(),
+                event.sender_id,
+                raise_on_error=True,
+            )
+
+        except Exception as exc:
+            # در صورت شکست بررسی ادمین،
+            # مسیر penalty را غیرفعال می‌کنیم.
+            repeat_is_admin = True
+
+            self.debug(
+                "ADMIN_CHECK",
+                (
+                    f"group={event.chat_id} "
+                    f"user={event.sender_id} "
+                    "status=FAILED_REPEAT_ONLY "
+                    f"error_type={type(exc).__name__}"
+                ),
+            )
+
+        handled = (
+            await apply_repeat_only_intervention(
+                self,
+                event,
+                features,
+                context,
+                repeat_is_admin,
+                settings["max_repeat"],
+            )
+        )
+
+        if handled:
+            return
+
 
     previous_status = (
         self._debug_last_status.get(key)
