@@ -1085,8 +1085,7 @@ async def on_member_change(
         user_id,
     )
 
-
-    if (
+    joined = (
         getattr(
             event,
             "user_joined",
@@ -1097,7 +1096,34 @@ async def on_member_change(
             "user_added",
             False,
         )
-    ):
+    )
+
+    left = (
+        getattr(
+            event,
+            "user_left",
+            False,
+        )
+        or getattr(
+            event,
+            "user_kicked",
+            False,
+        )
+    )
+
+    if joined:
+
+        # عضویت جدید باید با تاریخچه‌ی رفتاری
+        # قبلی قاطی نشود.
+        self.tracker.clear_user(
+            event.chat_id,
+            user_id,
+        )
+
+        self.confirmation.clear(
+            event.chat_id,
+            user_id,
+        )
 
         await self.context.record_join(
             event.chat_id,
@@ -1107,6 +1133,11 @@ async def on_member_change(
         await self.trust.reset_clean_streak(
             event.chat_id,
             user_id,
+        )
+
+        self._debug_last_status.pop(
+            key,
+            None,
         )
 
         self._debug_last_user_state.pop(
@@ -1127,21 +1158,29 @@ async def on_member_change(
                 "event=JOIN"
             ),
         )
-    elif (
-        getattr(
-            event,
-            "user_left",
-            False,
+
+    elif left:
+
+        # بعد از خروج، پیام‌های قبلی نباید
+        # در Flood/Repeat عضویت بعدی دخالت کنند.
+        self.tracker.clear_user(
+            event.chat_id,
+            user_id,
         )
-        or getattr(
-            event,
-            "user_kicked",
-            False,
+
+        self.confirmation.clear(
+            event.chat_id,
+            user_id,
         )
-    ):
+
         await self.context.record_leave(
             event.chat_id,
             user_id,
+        )
+
+        self._debug_last_status.pop(
+            key,
+            None,
         )
 
         self._debug_last_user_state.pop(
@@ -1150,11 +1189,6 @@ async def on_member_change(
         )
 
         self._debug_last_origin.pop(
-            key,
-            None,
-        )
-
-        self._debug_last_status.pop(
             key,
             None,
         )

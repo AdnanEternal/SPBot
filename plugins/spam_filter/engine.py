@@ -327,8 +327,6 @@ def calculate_score(
     return _clamp(score)
 
 
-
-
 def evaluate_hard_rules(
     *,
     features: SpamFeatures,
@@ -337,12 +335,15 @@ def evaluate_hard_rules(
 ) -> tuple[str, str] | None:
 
     matched_rules = context.get(
-    "matched_text_rules",
-    [],
-)
+        "matched_text_rules",
+        [],
+    )
 
-    # فقط تطابق داخل خود پیام می‌تواند باعث حذف همان پیام شود.
-    # تطابق داخل profile نباید باعث حذف پیام‌های عادی کاربر شود.
+    # فقط تطابق داخل خود پیام می‌تواند
+    # باعث حذف همان پیام شود.
+    #
+    # تطابق داخل profile نباید باعث حذف
+    # پیام عادی کاربر شود.
     message_rules = [
         rule
         for rule in matched_rules
@@ -351,22 +352,6 @@ def evaluate_hard_rules(
 
     if message_rules:
         first = message_rules[0]
-
-        return (
-            "custom_text_rule",
-            (
-                "مطابقت با قانون سفارشی: "
-                f"{first['pattern']} "
-                f"(source={first['source']})"
-            ),
-        )
-
-    # ---------------------------------------------
-    # Rule متنی، به‌تنهایی = spammer نیست
-    # ---------------------------------------------
-
-    if matched_rules:
-        first = matched_rules[0]
 
         return (
             "custom_text_rule",
@@ -388,11 +373,8 @@ def evaluate_hard_rules(
             "یک قانون خارجی، اسپم شدید را تأیید کرد",
         )
 
-    # ---------------------------------------------
     # Content Filter + رفتار اسپمی
-    # به‌تنهایی نباید مستقیم مجازات ایجاد کند.
-    # ---------------------------------------------
-
+    # توسط Content Filter مدیریت می‌شود.
     if (
         external.get("content_filter_match")
         and score >= 25
@@ -405,9 +387,7 @@ def evaluate_hard_rules(
             ),
         )
 
-    # ---------------------------------------------
     # Flood فوق‌العاده شدید
-    # ---------------------------------------------
     if (
         features.burst_message_count
         >= EXTREME_BURST_COUNT
@@ -419,7 +399,7 @@ def evaluate_hard_rules(
                 "در چند ثانیه ارسال شد"
             ),
         )
-    
+
     flood_threshold = max(
         1,
         int(
@@ -458,10 +438,7 @@ def evaluate_hard_rules(
             ),
         )
 
-    # ---------------------------------------------
     # تکرار شدید
-    # ---------------------------------------------
-
     repeat_burst_count = max(
         6,
         flood_threshold * 2,
@@ -484,10 +461,7 @@ def evaluate_hard_rules(
             ),
         )
 
-    # ---------------------------------------------
     # Flood + تکرار / شباهت
-    # ---------------------------------------------
-
     if (
         features.flood_score >= 80
         and (

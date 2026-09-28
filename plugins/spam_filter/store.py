@@ -34,7 +34,9 @@ class SpamSettingsStore:
         await self.db.create_table(
             self.TABLE,
             columns={
-                "group_id": "INTEGER PRIMARY KEY",
+                "group_id": (
+                    "INTEGER PRIMARY KEY"
+                ),
                 "flood_count": (
                     f"INTEGER NOT NULL "
                     f"DEFAULT {DEFAULT_FLOOD_COUNT}"
@@ -43,7 +45,6 @@ class SpamSettingsStore:
                     f"INTEGER NOT NULL "
                     f"DEFAULT {DEFAULT_FLOOD_SECONDS}"
                 ),
-                # برای سازگاری با دیتابیس‌های قبلی
                 "max_links": (
                     f"INTEGER NOT NULL "
                     f"DEFAULT {DEFAULT_MAX_LINKS}"
@@ -55,6 +56,45 @@ class SpamSettingsStore:
             },
         )
 
+        # Migration برای دیتابیس‌های قدیمی
+        columns = await self.db.fetchall(
+            f"PRAGMA table_info({self.TABLE})"
+        )
+
+        column_names = {
+            row["name"]
+            for row in columns
+        }
+
+        migrations = {
+            "flood_count": (
+                f"INTEGER NOT NULL "
+                f"DEFAULT {DEFAULT_FLOOD_COUNT}"
+            ),
+            "flood_seconds": (
+                f"INTEGER NOT NULL "
+                f"DEFAULT {DEFAULT_FLOOD_SECONDS}"
+            ),
+            "max_links": (
+                f"INTEGER NOT NULL "
+                f"DEFAULT {DEFAULT_MAX_LINKS}"
+            ),
+            "max_repeat": (
+                f"INTEGER NOT NULL "
+                f"DEFAULT {DEFAULT_MAX_REPEAT}"
+            ),
+        }
+
+        for column, definition in migrations.items():
+            if column in column_names:
+                continue
+
+            await self.db.execute(
+                f"""
+                ALTER TABLE {self.TABLE}
+                ADD COLUMN {column} {definition}
+                """
+            )
     async def _ensure_row(
         self,
         group_id: int,
