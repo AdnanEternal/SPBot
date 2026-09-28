@@ -825,7 +825,6 @@ class AIModelStatisticsStore:
 
 
 
-
 class AIModelStore:
     TABLE = "ai_models"
     KEY_TABLE = "ai_model_api_keys"
@@ -841,7 +840,7 @@ class AIModelStore:
             ttl_seconds=300,
         )
 
-    async def create_table(self) -> None:
+    async def _create_models_table(self) -> None:
         await self.db.create_table(
             self.TABLE,
             columns={
@@ -849,9 +848,10 @@ class AIModelStore:
                 "name": "TEXT NOT NULL UNIQUE",
                 "provider": "TEXT NOT NULL",
                 "model_id": "TEXT NOT NULL",
-                "api_key": "TEXT",
                 "base_url": "TEXT",
-                "is_active": "INTEGER NOT NULL DEFAULT 0",
+                "is_active": (
+                    "INTEGER NOT NULL DEFAULT 0"
+                ),
                 "created_at": (
                     "TEXT NOT NULL "
                     "DEFAULT CURRENT_TIMESTAMP"
@@ -867,77 +867,578 @@ class AIModelStore:
             ],
         )
 
-        # ---------------------------------------------
-        # API Keys for each model
-        # ---------------------------------------------
+    async def _create_key_table(
+        self,
+    ) -> None:
+
+        # -------------------------------------------------
+        # اگر جدول از نسخه قبلی وجود دارد،
+        # ابتدا schema آن را بررسی می‌کنیم.
+        # -------------------------------------------------
+
+        rows = await self.db.fetchall(
+            f"PRAGMA table_info({self.KEY_TABLE})"
+        )
+
+        existing_columns = {
+            row["name"]
+            for row in rows
+        }
+
+        # -------------------------------------------------
+        # Migration:
+        # schema قدیمی:
+        #
+        # id
+        # model_name
+        # api_key
+        # created_at
+        #
+        # ->
+        #
+        # id
+        # model_id
+        # key_number
+        # api_key
+        # is_active
+        # status
+        # cooldown_until
+        # created_at
+        # updated_at
+        # -------------------------------------------------
+
+        if (
+            existing_columns
+            and "model_name" in existing_columns
+            and "model_id" not in existing_columns
+        ):
+
+            legacy_table = (
+                f"{self.KEY_TABLE}_legacy"
+            )
+
+            # اگر migration قبلی نصفه‌کاره مانده باشد
+            # جدول موقت را پاک می‌کنیم.
+            await self.db.execute(
+                f"""
+                DROP TABLE IF EXISTS
+                {legacy_table}
+                """
+            )
+
+            await self.db.execute(
+                f"""
+                ALTER TABLE {self.KEY_TABLE}
+                RENAME TO {legacy_table}
+                """
+            )
+
+            # جدول جدید را بدون index می‌سازیم.
+            await self.db.create_table(
+                self.KEY_TABLE,
+                columns={
+                    "id": (
+                        "INTEGER PRIMARY KEY AUTOINCREMENT"
+                    ),
+
+                    "model_id": (
+                        "INTEGER NOT NULL "
+                        "REFERENCES ai_models(id) "
+                        "ON DELETE CASCADE"
+                    ),
+
+                    "key_number": (
+                        "INTEGER NOT NULL"
+                    ),
+
+                    "api_key": (
+                        "TEXT NOT NULL"
+                    ),
+
+                    "is_active": (
+                        "INTEGER NOT NULL DEFAULT 0"
+                    ),
+
+                    "status": (
+                        "TEXT NOT NULL "
+                        "DEFAULT 'AVAILABLE'"
+                    ),
+
+                    "cooldown_until": "TEXT",
+
+                    "created_at": (
+                        "TEXT NOT NULL "
+                        "DEFAULT CURRENT_TIMESTAMP"
+                    ),
+
+                    "updated_at": (
+                        "TEXT NOT NULL "
+                        "DEFAULT CURRENT_TIMESTAMP"
+                    ),
+                },
+                unique=[
+                    (
+                        "model_id",
+                        "key_number",
+                    ),
+                    (
+                        "model_id",
+                        "api_key",
+                    ),
+                ],
+            )
+
+            legacy_rows = await self.db.fetchall(
+                f"""
+                SELECT
+                    id,
+                    model_name,
+                    api_key,
+                    created_at
+                FROM {legacy_table}
+                ORDER BY id ASC
+                """
+            )
+
+            next_numbers: dict[int, int] = {}
+            active_models: set[int] = set()
+
+            for row in legacy_rows:
+
+                model = await self.db.fetchone(
+                    f"""
+                    SELECT id
+                    FROM {self.TABLE}
+                    WHERE name = ?
+                    LIMIT 1
+                    """,
+                    (
+                        str(row["model_name"])
+                        .strip()
+                        .lower(),
+                    ),
+                )
+
+                # اگر مدل دیگر وجود ندارد،
+                # کلید orphan را منتقل نمی‌کنیم.
+                if model is None:
+                    continue
+
+                model_id = int(
+                    model["id"]
+                )
+
+                next_number = (
+                    next_numbers.get(
+                        model_id,
+                        1,
+                    )
+                )
+
+                is_active = (
+                    1
+                    if model_id
+                    not in active_models
+                    else 0
+                )
+
+                await self.db.insert(
+                    self.KEY_TABLE,
+                    {
+                        "model_id": model_id,
+                        "key_number": next_number,
+                        "api_key": row["api_key"],
+                        "is_active": is_active,
+                        "status": "AVAILABLE",
+                        "cooldown_until": None,
+                        "created_at": (
+                            row["created_at"]
+                            or None
+                        ),
+                        "updated_at": (
+                            row["created_at"]
+                            or None
+                        ),
+                    },
+                    or_ignore=True,
+                )
+
+                next_numbers[model_id] = (
+                    next_number + 1
+                )
+
+                active_models.add(
+                    model_id
+                )
+
+            await self.db.execute(
+                f"""
+                DROP TABLE {legacy_table}
+                """
+            )
+
+        # -------------------------------------------------
+        # جدول اصلاً وجود نداشته
+        # -------------------------------------------------
+
+        elif not existing_columns:
+
+            await self.db.create_table(
+                self.KEY_TABLE,
+                columns={
+                    "id": (
+                        "INTEGER PRIMARY KEY AUTOINCREMENT"
+                    ),
+
+                    "model_id": (
+                        "INTEGER NOT NULL "
+                        "REFERENCES ai_models(id) "
+                        "ON DELETE CASCADE"
+                    ),
+
+                    "key_number": (
+                        "INTEGER NOT NULL"
+                    ),
+
+                    "api_key": (
+                        "TEXT NOT NULL"
+                    ),
+
+                    "is_active": (
+                        "INTEGER NOT NULL DEFAULT 0"
+                    ),
+
+                    "status": (
+                        "TEXT NOT NULL "
+                        "DEFAULT 'AVAILABLE'"
+                    ),
+
+                    "cooldown_until": "TEXT",
+
+                    "created_at": (
+                        "TEXT NOT NULL "
+                        "DEFAULT CURRENT_TIMESTAMP"
+                    ),
+
+                    "updated_at": (
+                        "TEXT NOT NULL "
+                        "DEFAULT CURRENT_TIMESTAMP"
+                    ),
+                },
+                unique=[
+                    (
+                        "model_id",
+                        "key_number",
+                    ),
+                    (
+                        "model_id",
+                        "api_key",
+                    ),
+                ],
+            )
+
+        # -------------------------------------------------
+        # اگر جدول جدید از قبل وجود دارد،
+        # migration لازم نیست.
+        # -------------------------------------------------
+
+        # -------------------------------------------------
+        # Indexes
+        # -------------------------------------------------
 
         await self.db.create_table(
             self.KEY_TABLE,
             columns={
-                "id": "INTEGER PRIMARY KEY AUTOINCREMENT",
-                "model_name": "TEXT NOT NULL",
-                "api_key": "TEXT NOT NULL",
+                "id": (
+                    "INTEGER PRIMARY KEY AUTOINCREMENT"
+                ),
+                "model_id": (
+                    "INTEGER NOT NULL"
+                ),
+                "key_number": (
+                    "INTEGER NOT NULL"
+                ),
+                "api_key": (
+                    "TEXT NOT NULL"
+                ),
+                "is_active": (
+                    "INTEGER NOT NULL DEFAULT 0"
+                ),
+                "status": (
+                    "TEXT NOT NULL DEFAULT 'AVAILABLE'"
+                ),
+                "cooldown_until": "TEXT",
                 "created_at": (
                     "TEXT NOT NULL "
                     "DEFAULT CURRENT_TIMESTAMP"
                 ),
+                "updated_at": (
+                    "TEXT NOT NULL "
+                    "DEFAULT CURRENT_TIMESTAMP"
+                ),
             },
-            unique=[
-                ("model_name", "api_key"),
-            ],
             indexes=[
-                "model_name",
+                "model_id",
+                "is_active",
+                "status",
             ],
         )
 
-        # ---------------------------------------------
-        # Migration:
-        # کلید فعلی هر مدل -> Key 1
-        # ---------------------------------------------
+    async def _migrate_legacy_api_keys(
+        self,
+    ) -> None:
+        """
+        API Key قدیمی داخل ai_models را به
+        ai_model_api_keys منتقل می‌کند و سپس
+        ستون قدیمی را حذف می‌کند.
+        """
 
         rows = await self.db.fetchall(
+            f"PRAGMA table_info({self.TABLE})"
+        )
+
+        columns = {
+            row["name"]
+            for row in rows
+        }
+
+        if "api_key" not in columns:
+            return
+
+        legacy_rows = await self.db.fetchall(
             f"""
-            SELECT name, api_key
+            SELECT
+                id,
+                name,
+                api_key
             FROM {self.TABLE}
             WHERE api_key IS NOT NULL
               AND TRIM(api_key) != ''
             """
         )
 
-        for row in rows:
+        # ابتدا کلیدهای قدیمی را منتقل می‌کنیم.
+        for row in legacy_rows:
+
+            model_id = int(
+                row["id"]
+            )
+
+            existing = await self.db.fetchone(
+                f"""
+                SELECT id
+                FROM {self.KEY_TABLE}
+                WHERE model_id = ?
+                ORDER BY key_number ASC
+                LIMIT 1
+                """,
+                (model_id,),
+            )
+
+            if existing is not None:
+                continue
+
             await self.db.insert(
                 self.KEY_TABLE,
                 {
-                    "model_name": row["name"],
+                    "model_id": model_id,
+                    "key_number": 1,
                     "api_key": row["api_key"],
+                    "is_active": 1,
+                    "status": "AVAILABLE",
                 },
                 or_ignore=True,
             )
+
+        # -------------------------------------------------
+        # حذف ستون api_key
+        # -------------------------------------------------
+
+        try:
+            await self.db.execute(
+                f"""
+                ALTER TABLE {self.TABLE}
+                DROP COLUMN api_key
+                """
+            )
+
+        except Exception:
+            # Fallback برای SQLiteهای قدیمی‌تر
+            await self.db.execute(
+                f"""
+                DROP INDEX IF EXISTS
+                idx_{self.TABLE}_is_active
+                """
+            )
+
+            await self.db.execute(
+                f"""
+                DROP INDEX IF EXISTS
+                idx_{self.TABLE}_provider
+                """
+            )
+
+            await self.db.execute(
+                f"""
+                ALTER TABLE {self.TABLE}
+                RENAME TO {self.TABLE}_legacy
+                """
+            )
+
+            await self._create_models_table()
+
+            await self.db.execute(
+                f"""
+                INSERT INTO {self.TABLE}
+                (
+                    id,
+                    name,
+                    provider,
+                    model_id,
+                    base_url,
+                    is_active,
+                    created_at,
+                    updated_at
+                )
+                SELECT
+                    id,
+                    name,
+                    provider,
+                    model_id,
+                    base_url,
+                    is_active,
+                    created_at,
+                    updated_at
+                FROM {self.TABLE}_legacy
+                """
+            )
+
+            await self.db.execute(
+                f"""
+                DROP TABLE {self.TABLE}_legacy
+                """
+            )
+
+    async def _ensure_active_keys(
+        self,
+    ) -> None:
+        """
+        تضمین می‌کند هر مدل در صورت داشتن کلید،
+        دقیقاً حداقل یک کلید active داشته باشد.
+        """
+
+        models = await self.db.fetchall(
+            f"""
+            SELECT id
+            FROM {self.TABLE}
+            """
+        )
+
+        for model in models:
+
+            model_id = int(
+                model["id"]
+            )
+
+            active = await self.db.fetchone(
+                f"""
+                SELECT id
+                FROM {self.KEY_TABLE}
+                WHERE model_id = ?
+                  AND is_active = 1
+                ORDER BY id ASC
+                LIMIT 1
+                """,
+                (model_id,),
+            )
+
+            if active is not None:
+                continue
+
+            first_key = await self.db.fetchone(
+                f"""
+                SELECT id
+                FROM {self.KEY_TABLE}
+                WHERE model_id = ?
+                ORDER BY key_number ASC
+                LIMIT 1
+                """,
+                (model_id,),
+            )
+
+            if first_key is None:
+                continue
+
+            await self.db.execute(
+                f"""
+                UPDATE {self.KEY_TABLE}
+                SET is_active = 1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (
+                    first_key["id"],
+                ),
+            )
+
+    async def create_table(self) -> None:
+        # ---------------------------------------------
+        # اول مدل‌ها
+        # ---------------------------------------------
+
+        await self._create_models_table()
+
+        # ---------------------------------------------
+        # سپس جدول کلیدها
+        # ---------------------------------------------
+
+        await self._create_key_table()
+
+        # ---------------------------------------------
+        # Migration از ساختار قبلی
+        # ---------------------------------------------
+
+        await self._migrate_legacy_api_keys()
+
+        # ---------------------------------------------
+        # تضمین active بودن حداقل یک کلید
+        # ---------------------------------------------
+
+        await self._ensure_active_keys()
 
     async def add(
         self,
         name: str,
         provider: str,
         model_id: str,
-        api_key: Optional[str],
+        api_key: str,
         base_url: Optional[str],
     ) -> None:
 
-        normalized_name = name.strip().lower()
+        normalized_name = (
+            name.strip().lower()
+        )
 
         clean_api_key = (
             api_key.strip()
-            if api_key
-            else None
         )
 
-        await self.db.insert(
+        if not normalized_name:
+            raise ValueError(
+                "نام مدل نمی‌تواند خالی باشد."
+            )
+
+        if not clean_api_key:
+            raise ValueError(
+                "API Key نمی‌تواند خالی باشد."
+            )
+
+        result = await self.db.insert(
             self.TABLE,
             {
                 "name": normalized_name,
                 "provider": provider.strip(),
                 "model_id": model_id.strip(),
-                "api_key": clean_api_key,
                 "base_url": (
                     base_url.strip()
                     if base_url
@@ -946,15 +1447,26 @@ class AIModelStore:
             },
         )
 
-        # اولین API Key = Key 1
-        if clean_api_key:
-            await self.db.insert(
-                self.KEY_TABLE,
-                {
-                    "model_name": normalized_name,
-                    "api_key": clean_api_key,
-                },
+        if result.lastrowid is None:
+            raise RuntimeError(
+                "شناسه مدل ساخته‌شده قابل دریافت نیست."
             )
+
+        model_id_db = int(
+            result.lastrowid
+        )
+
+        # اولین کلید = active
+        await self.db.insert(
+            self.KEY_TABLE,
+            {
+                "model_id": model_id_db,
+                "key_number": 1,
+                "api_key": clean_api_key,
+                "is_active": 1,
+                "status": "AVAILABLE",
+            },
+        )
 
     async def get(
         self,
@@ -968,7 +1480,11 @@ class AIModelStore:
             },
         )
 
-        return dict(row) if row else None
+        return (
+            dict(row)
+            if row
+            else None
+        )
 
     async def get_all(
         self,
@@ -978,7 +1494,9 @@ class AIModelStore:
             f"""
             SELECT *
             FROM {self.TABLE}
-            ORDER BY is_active DESC, name ASC
+            ORDER BY
+                is_active DESC,
+                name ASC
             """
         )
 
@@ -996,12 +1514,16 @@ class AIModelStore:
         )
 
         if cached is not None:
-            return dict(cached) if cached else None
+            return (
+                dict(cached)
+                if cached
+                else None
+            )
 
         row = await self.db.select_one(
             self.TABLE,
             where={
-                "is_active": 1
+                "is_active": 1,
             },
         )
 
@@ -1044,18 +1566,22 @@ class AIModelStore:
                     f"""
                     UPDATE {self.TABLE}
                     SET is_active = 0,
-                        updated_at = CURRENT_TIMESTAMP
+                        updated_at =
+                            CURRENT_TIMESTAMP
                     """
                 )
 
-                cursor = await self.db.connection.execute(
-                    f"""
-                    UPDATE {self.TABLE}
-                    SET is_active = 1,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE name = ?
-                    """,
-                    (normalized,),
+                cursor = (
+                    await self.db.connection.execute(
+                        f"""
+                        UPDATE {self.TABLE}
+                        SET is_active = 1,
+                            updated_at =
+                                CURRENT_TIMESTAMP
+                        WHERE name = ?
+                        """,
+                        (normalized,),
+                    )
                 )
 
                 if cursor.rowcount <= 0:
@@ -1088,85 +1614,325 @@ class AIModelStore:
     async def get_api_keys(
         self,
         model_name: str,
-    ) -> list[str]:
+    ) -> list[dict[str, Any]]:
 
-        normalized = (
-            model_name.strip().lower()
+        model = await self.get(
+            model_name
         )
+
+        if model is None:
+            return []
 
         rows = await self.db.fetchall(
             f"""
-            SELECT api_key
+            SELECT
+                id,
+                model_id,
+                key_number,
+                api_key,
+                is_active,
+                status,
+                cooldown_until,
+                created_at,
+                updated_at
             FROM {self.KEY_TABLE}
-            WHERE model_name = ?
-            ORDER BY id ASC
+            WHERE model_id = ?
+            ORDER BY key_number ASC
             """,
-            (normalized,),
+            (
+                model["id"],
+            ),
         )
 
-        keys = [
-            str(row["api_key"])
+        return [
+            dict(row)
             for row in rows
-            if row["api_key"]
         ]
 
-        # سازگاری با دیتابیس‌های خیلی قدیمی
-        if not keys:
-            model = await self.get(
-                normalized
-            )
-
-            if model and model.get("api_key"):
-                return [
-                    model["api_key"]
-                ]
-
-        return keys
-
-    async def add_api_key(
+    async def get_active_api_key(
         self,
         model_name: str,
-        api_key: str,
-    ) -> int | None:
-
-        normalized = (
-            model_name.strip().lower()
-        )
+    ) -> Optional[dict[str, Any]]:
 
         model = await self.get(
-            normalized
+            model_name
         )
 
         if model is None:
             return None
 
-        api_key = (
+        row = await self.db.fetchone(
+            f"""
+            SELECT
+                id,
+                model_id,
+                key_number,
+                api_key,
+                is_active,
+                status,
+                cooldown_until,
+                created_at,
+                updated_at
+            FROM {self.KEY_TABLE}
+            WHERE model_id = ?
+              AND is_active = 1
+            ORDER BY id ASC
+            LIMIT 1
+            """,
+            (
+                model["id"],
+            ),
+        )
+
+        if row is None:
+            return None
+
+        return dict(row)
+
+    async def add_api_key(
+        self,
+        model_name: str,
+        api_key: str,
+    ) -> Optional[int]:
+
+        model = await self.get(
+            model_name
+        )
+
+        if model is None:
+            return None
+
+        clean_api_key = (
             api_key.strip()
         )
 
-        if not api_key:
+        if not clean_api_key:
             raise ValueError(
                 "API Key نمی‌تواند خالی باشد."
             )
 
-        result = await self.db.insert(
-            self.KEY_TABLE,
-            {
-                "model_name": normalized,
-                "api_key": api_key,
-            },
-            or_ignore=True,
+        existing = await self.db.fetchone(
+            f"""
+            SELECT id
+            FROM {self.KEY_TABLE}
+            WHERE model_id = ?
+              AND api_key = ?
+            LIMIT 1
+            """,
+            (
+                model["id"],
+                clean_api_key,
+            ),
         )
 
-        # کلید قبلاً برای همین مدل وجود داشته
-        if result.rowcount <= 0:
+        if existing is not None:
             return 0
 
-        keys = await self.get_api_keys(
-            normalized
+        next_number_row = (
+            await self.db.fetchone(
+                f"""
+                SELECT
+                    COALESCE(
+                        MAX(key_number),
+                        0
+                    ) + 1 AS next_number
+                FROM {self.KEY_TABLE}
+                WHERE model_id = ?
+                """,
+                (
+                    model["id"],
+                ),
+            )
         )
 
-        return len(keys)
+        key_number = int(
+            next_number_row["next_number"]
+        )
+
+        active = await self.db.fetchone(
+            f"""
+            SELECT id
+            FROM {self.KEY_TABLE}
+            WHERE model_id = ?
+              AND is_active = 1
+            LIMIT 1
+            """,
+            (
+                model["id"],
+            ),
+        )
+
+        is_active = (
+            0
+            if active is not None
+            else 1
+        )
+
+        await self.db.insert(
+            self.KEY_TABLE,
+            {
+                "model_id": model["id"],
+                "key_number": key_number,
+                "api_key": clean_api_key,
+                "is_active": is_active,
+                "status": "AVAILABLE",
+            },
+        )
+
+        return key_number
+
+    async def activate_api_key(
+        self,
+        model_name: str,
+        key_number: int,
+    ) -> bool:
+
+        model = await self.get(
+            model_name
+        )
+
+        if model is None:
+            return False
+
+        key_number = int(
+            key_number
+        )
+
+        async with self.db.maintenance_lock:
+
+            if self.db.connection is None:
+                raise RuntimeError(
+                    "Database connection is not available"
+                )
+
+            cursor = None
+
+            try:
+                target = (
+                    await self.db.connection.execute(
+                        f"""
+                        SELECT id
+                        FROM {self.KEY_TABLE}
+                        WHERE model_id = ?
+                          AND key_number = ?
+                        LIMIT 1
+                        """,
+                        (
+                            model["id"],
+                            key_number,
+                        ),
+                    )
+                )
+
+                target_row = (
+                    await target.fetchone()
+                )
+
+                await target.close()
+
+                if target_row is None:
+                    return False
+
+                await self.db.connection.execute(
+                    f"""
+                    UPDATE {self.KEY_TABLE}
+                    SET is_active = 0,
+                        updated_at =
+                            CURRENT_TIMESTAMP
+                    WHERE model_id = ?
+                    """,
+                    (
+                        model["id"],
+                    ),
+                )
+
+                cursor = (
+                    await self.db.connection.execute(
+                        f"""
+                        UPDATE {self.KEY_TABLE}
+                        SET is_active = 1,
+                            status = 'AVAILABLE',
+                            updated_at =
+                                CURRENT_TIMESTAMP
+                        WHERE model_id = ?
+                          AND key_number = ?
+                        """,
+                        (
+                            model["id"],
+                            key_number,
+                        ),
+                    )
+                )
+
+                if cursor.rowcount <= 0:
+                    await self.db.connection.rollback()
+                    return False
+
+                await self.db.connection.commit()
+
+                return True
+
+            except Exception:
+                try:
+                    await self.db.connection.rollback()
+                except Exception:
+                    pass
+
+                raise
+
+            finally:
+                try:
+                    if cursor is not None:
+                        await cursor.close()
+                except Exception:
+                    pass
+
+    async def update_api_key(
+        self,
+        model_name: str,
+        key_number: int,
+        api_key: str | None,
+    ) -> bool:
+
+        model = await self.get(
+            model_name
+        )
+
+        if model is None:
+            return False
+
+        key_number = int(
+            key_number
+        )
+
+        clean_api_key = (
+            api_key.strip()
+            if api_key
+            else None
+        )
+
+        if not clean_api_key:
+            raise ValueError(
+                "API Key نمی‌تواند خالی باشد."
+            )
+
+        result = await self.db.execute(
+            f"""
+            UPDATE {self.KEY_TABLE}
+            SET api_key = ?,
+                updated_at =
+                    CURRENT_TIMESTAMP
+            WHERE model_id = ?
+              AND key_number = ?
+            """,
+            (
+                clean_api_key,
+                model["id"],
+                key_number,
+            ),
+        )
+
+        return result.rowcount > 0
 
     async def delete(
         self,
@@ -1187,14 +1953,14 @@ class AIModelStore:
         await self.db.delete(
             self.KEY_TABLE,
             {
-                "model_name": normalized
+                "model_id": model["id"],
             },
         )
 
         cursor = await self.db.delete(
             self.TABLE,
             {
-                "name": normalized
+                "name": normalized,
             },
         )
 
@@ -1209,91 +1975,7 @@ class AIModelStore:
 
         return deleted
 
-    async def update_api_key(
-        self,
-        name: str,
-        api_key: Optional[str],
-    ) -> bool:
 
-        normalized = (
-            name.strip().lower()
-        )
-
-        model = await self.get(
-            normalized
-        )
-
-        if model is None:
-            return False
-
-        clean_api_key = (
-            api_key.strip()
-            if api_key
-            else None
-        )
-
-        # ---------------------------------------------
-        # legacy api_key = Key 1
-        # ---------------------------------------------
-
-        await self.db.execute(
-            f"""
-            UPDATE {self.TABLE}
-            SET api_key = ?,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE name = ?
-            """,
-            (
-                clean_api_key,
-                normalized,
-            ),
-        )
-
-        # ---------------------------------------------
-        # اگر Key 1 وجود دارد، همان را آپدیت کن
-        # اگر ندارد، بساز
-        # ---------------------------------------------
-
-        first_key = await self.db.fetchone(
-            f"""
-            SELECT id
-            FROM {self.KEY_TABLE}
-            WHERE model_name = ?
-            ORDER BY id ASC
-            LIMIT 1
-            """,
-            (normalized,),
-        )
-
-        if first_key is not None:
-
-            await self.db.execute(
-                f"""
-                UPDATE {self.KEY_TABLE}
-                SET api_key = ?
-                WHERE id = ?
-                """,
-                (
-                    clean_api_key,
-                    first_key["id"],
-                ),
-            )
-
-        elif clean_api_key:
-
-            await self.db.insert(
-                self.KEY_TABLE,
-                {
-                    "model_name": normalized,
-                    "api_key": clean_api_key,
-                },
-            )
-
-        self._active_cache.delete(
-            "active"
-        )
-
-        return True
 class AIGroupSettingsStore:
     TABLE = "ai_group_settings"
     GLOBAL_GROUP_ID = 0

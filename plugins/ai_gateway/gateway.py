@@ -919,7 +919,37 @@ class AIGateway:
                     candidate
                 )
 
-                api_key = candidate.get("api_key")
+                # ---------------------------------------------
+                # Active API Key
+                # ---------------------------------------------
+
+                active_key = None
+
+                try:
+                    active_key = (
+                        await self.models.get_active_api_key(
+                            candidate["name"]
+                        )
+                    )
+
+                except Exception as exc:
+                    print(
+                        "⚠️ دریافت Active API Key ناموفق بود: "
+                        f"model={candidate['name']} | "
+                        f"error={exc}"
+                    )
+
+                api_key = (
+                    active_key["api_key"]
+                    if active_key is not None
+                    else candidate.get("api_key")
+                )
+
+                api_key_number = (
+                    active_key["key_number"]
+                    if active_key is not None
+                    else None
+                )
 
                 kwargs: dict[str, Any] = {
                     "model": litellm_model,
@@ -946,9 +976,9 @@ class AIGateway:
                     print(
                         "📡 AI MODEL ATTEMPT | "
                         f"{index + 1}/{len(candidates)} | "
-                        f"model={litellm_model}"
+                        f"model={litellm_model} | "
+                        f"key=#{api_key_number or '?'}"
                     )
-
                     response = await self._completion(
                         kwargs,
                         api_key,
@@ -1026,6 +1056,7 @@ class AIGateway:
                             "base_url": candidate.get(
                                 "base_url"
                             ),
+                            "api_key_number": api_key_number,
                             "usage": self._extract_usage(
                                 response
                             ),

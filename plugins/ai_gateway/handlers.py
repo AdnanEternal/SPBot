@@ -1007,7 +1007,7 @@ async def memory_message_limit(
     name="مدل افزودن",
     permission="owner",
     chat_type="all",
-    description="افزودن یک مدل AI و API Key شماره 1 آن.",
+    description="افزودن مدل AI با API Key شماره 1.",
 )
 async def add_model(
     self,
@@ -1017,7 +1017,7 @@ async def add_model(
         event.args_text or ""
     ).strip().split()
 
-    if len(args) < 4:
+    if len(args) not in {4, 5}:
         await event.reply(
             "❌ استفاده نادرست.\n\n"
             "فرمت:\n"
@@ -1025,7 +1025,8 @@ async def add_model(
             "<model_id> <API_KEY> [BASE_URL]\n\n"
             "مثال:\n"
             "!مدل افزودن gpt5luna openai "
-            "gpt-5-luna sk-xxxxx https://api.example.com/v1"
+            "gpt-5-luna sk-xxxxx "
+            "https://api.example.com/v1"
         )
         return
 
@@ -1036,15 +1037,9 @@ async def add_model(
 
     base_url = (
         args[4]
-        if len(args) >= 5
+        if len(args) == 5
         else None
     )
-
-    if not api_key.strip():
-        await event.reply(
-            "❌ API Key نمی‌تواند خالی باشد."
-        )
-        return
 
     try:
         await self.models.add(
@@ -1068,8 +1063,71 @@ async def add_model(
 
     await event.reply(
         f"✅ مدل «{model_name}» اضافه شد.\n"
-        f"🔑 API Key: #1\n"
+        "🔑 API Key شماره #1 فعال شد.\n"
         f"🤖 Model ID: {model_id}"
+    )
+
+@command(
+    name="مدل کلید فعال",
+    permission="owner",
+    chat_type="all",
+    description="کلید فعال یک مدل را تغییر می‌دهد.",
+)
+async def activate_model_api_key(
+    self,
+    event,
+):
+    args = (
+        event.args_text or ""
+    ).strip().split()
+
+    if len(args) != 2:
+        await event.reply(
+            "❌ استفاده نادرست.\n\n"
+            "فرمت:\n"
+            "!مدل کلید فعال <نام_مدل> <شماره_کلید>\n\n"
+            "مثال:\n"
+            "!مدل کلید فعال gpt5luna 2"
+        )
+        return
+
+    model_name = args[0]
+    key_number_text = args[1]
+
+    if not key_number_text.isdigit():
+        await event.reply(
+            "❌ شماره کلید باید عدد باشد."
+        )
+        return
+
+    key_number = int(
+        key_number_text
+    )
+
+    try:
+        success = (
+            await self.models.activate_api_key(
+                model_name,
+                key_number,
+            )
+        )
+
+    except Exception as exc:
+        await event.reply(
+            f"❌ تغییر کلید فعال ناموفق بود:\n{exc}"
+        )
+        return
+
+    if not success:
+        await event.reply(
+            f"❌ مدل «{model_name}» یا "
+            f"کلید #{key_number} پیدا نشد."
+        )
+        return
+
+    await event.reply(
+        f"✅ کلید #{key_number} مدل "
+        f"«{model_name}» فعال شد."
     )
 
 
@@ -1122,7 +1180,7 @@ async def add_model_api_key(
 
     if key_number == 0:
         await event.reply(
-            "⚠️ این API Key قبلاً برای این مدل ثبت شده است."
+            "⚠️ این API Key قبلاً برای همین مدل ثبت شده است."
         )
         return
 
@@ -1135,7 +1193,6 @@ async def add_model_api_key(
         f"✅ API Key شماره #{key_number} "
         f"به مدل «{model_name}» اضافه شد."
     )
-
 
 @command(
     name="مدل ها",
@@ -1242,12 +1299,11 @@ async def delete_model(
         f"✅ مدل «{name}» حذف شد."
     )
 
-
 @command(
     name="مدل اطلاعات",
     permission="owner",
     chat_type="all",
-    description="جزئیات مدل",
+    description="جزئیات مدل و API Keyهای آن",
 )
 async def model_info(
     self,
@@ -1267,25 +1323,31 @@ async def model_info(
         )
         return
 
-    api_keys = await self.models.get_api_keys(
+    keys = await self.models.get_api_keys(
         model["name"]
     )
 
     key_lines = []
 
-    for index, api_key in enumerate(
-        api_keys,
-        start=1,
-    ):
+    for key in keys:
+
+        state = (
+            "🟢 فعال"
+            if key["is_active"]
+            else "⚪ غیرفعال"
+        )
+
         key_lines.append(
-            f"  #{index}: "
-            f"{mask_secret(api_key)}"
+            f"{state} "
+            f"#{key['key_number']} — "
+            f"{mask_secret(key['api_key'])} "
+            f"[{key['status']}]"
         )
 
     if not key_lines:
-        key_lines = [
-            "  هیچ API Key ثبت نشده"
-        ]
+        key_lines.append(
+            "هیچ API Key ثبت نشده."
+        )
 
     await event.reply(
         f"🤖 {model['name']}\n"
@@ -1293,10 +1355,10 @@ async def model_info(
         f"Model ID: {model['model_id']}\n"
         f"Base URL: "
         f"{model['base_url'] or 'پیش فرض'}\n\n"
-        f"🔑 API Keys ({len(api_keys)}):\n"
+        f"🔑 API Keys ({len(keys)}):\n"
         + "\n".join(key_lines)
         + "\n\n"
-        f"Active: "
+        f"Active Model: "
         f"{'بله' if model['is_active'] else 'خیر'}"
     )
 
@@ -1304,7 +1366,7 @@ async def model_info(
     name="مدل کلید",
     permission="owner",
     chat_type="all",
-    description="تغییر API Key",
+    description="API Key یک کلید مشخص از مدل را تغییر می‌دهد.",
 )
 async def update_model_key(
     self,
@@ -1312,38 +1374,63 @@ async def update_model_key(
 ):
     args = (
         event.args_text or ""
-    ).split()
+    ).strip().split()
 
-    if len(args) != 2:
+    if len(args) != 3:
         await event.reply(
-            "مثال: !مدل کلید gpt NEW_API_KEY"
+            "❌ استفاده نادرست.\n\n"
+            "فرمت:\n"
+            "!مدل کلید <نام_مدل> <شماره_کلید> <API_KEY>\n\n"
+            "مثال:\n"
+            "!مدل کلید gpt5luna 2 sk-new-key"
         )
         return
 
-    success = await self.models.update_api_key(
-        args[0],
-        None
-        if args[1] == "-"
-        else args[1],
+    model_name = args[0]
+    key_number_text = args[1]
+    api_key = args[2]
+
+    if not key_number_text.isdigit():
+        await event.reply(
+            "❌ شماره کلید باید عدد باشد."
+        )
+        return
+
+    key_number = int(
+        key_number_text
     )
+
+    try:
+        success = (
+            await self.models.update_api_key(
+                model_name,
+                key_number,
+                api_key,
+            )
+        )
+
+    except Exception as exc:
+        await event.reply(
+            f"❌ بروزرسانی API Key ناموفق بود:\n{exc}"
+        )
+        return
 
     if not success:
         await event.reply(
-            "❌ مدل پیدا نشد."
+            f"❌ مدل «{model_name}» یا "
+            f"کلید #{key_number} پیدا نشد."
         )
         return
 
     try:
         await event.delete()
-
     except Exception:
         pass
 
     await event.reply(
-        "✅ API Key بروزرسانی شد."
+        f"✅ API Key شماره #{key_number} "
+        f"مدل «{model_name}» بروزرسانی شد."
     )
-
-
 @command(
     name="مدل پینگ",
     permission="owner",
