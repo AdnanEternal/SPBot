@@ -26,7 +26,6 @@ class SpamTrustState:
     clean_streak: int
     suspicious_events: int
     violation_count: int
-    repeat_events: int
 
 
 def classify_user_state(
@@ -88,7 +87,7 @@ class SpamTrustManager:
             clean_streak=state.clean_streak,
             suspicious_events=state.suspicious_events,
             violation_count=state.violation_count,
-            repeat_events=state.repeat_events,
+            
         )
 
     @staticmethod
@@ -111,9 +110,7 @@ class SpamTrustManager:
             violation_count=int(
                 row["violation_count"]
             ),
-            repeat_events=int(
-                row["repeat_events"]
-            ),
+            
         )
 
     def _cache_set(
@@ -178,7 +175,7 @@ class SpamTrustManager:
                 clean_streak=0,
                 suspicious_events=0,
                 violation_count=0,
-                repeat_events=0,
+                
             )
 
             await self.store.save(
@@ -326,7 +323,7 @@ class SpamTrustManager:
                 ),
             )
 
-            state.repeat_events += 1
+            # Repeat شدید یک سابقه رفتاری منفی است.
             state.suspicious_events += 1
             state.clean_streak = 0
 
@@ -369,8 +366,6 @@ class SpamTrustManager:
             return self._copy_state(
                 state
             )
-
-
     async def record_suspicious(
         self,
         group_id: int,

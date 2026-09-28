@@ -295,8 +295,8 @@ async def apply_repeat_only_intervention(
                 f"user={event.sender_id} "
                 "event=REPEAT_BEHAVIOR "
                 f"trust={updated_trust.trust_score:.1f} "
-                f"repeat_events="
-                f"{updated_trust.repeat_events}"
+                f"suspicious_events="
+                f"{updated_trust.suspicious_events}"
             ),
         )
 

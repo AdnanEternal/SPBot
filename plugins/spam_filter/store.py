@@ -66,14 +66,6 @@ class SpamSettingsStore:
             for row in columns
         }
 
-        if "repeat_events" not in column_names:
-            await self.db.execute(
-                f"""
-                ALTER TABLE {self.TABLE}
-                ADD COLUMN repeat_events
-                INTEGER NOT NULL DEFAULT 0
-                """
-            )
 
         migrations = {
             "flood_count": (
@@ -587,11 +579,11 @@ class SpamTrustStore:
                 "violation_count": (
                     "INTEGER NOT NULL DEFAULT 0"
                 ),
-                "updated_at": (
-                    "REAL NOT NULL DEFAULT 0"
-                ),
                 "repeat_events": (
                     "INTEGER NOT NULL DEFAULT 0"
+                ),
+                "updated_at": (
+                    "REAL NOT NULL DEFAULT 0"
                 ),
             },
             unique=[
@@ -606,6 +598,24 @@ class SpamTrustStore:
             ],
         )
 
+        # Migration برای دیتابیس‌های قدیمی
+        columns = await self.db.fetchall(
+            f"PRAGMA table_info({self.TABLE})"
+        )
+
+        column_names = {
+            row["name"]
+            for row in columns
+        }
+
+        if "repeat_events" not in column_names:
+            await self.db.execute(
+                f"""
+                ALTER TABLE {self.TABLE}
+                ADD COLUMN repeat_events
+                INTEGER NOT NULL DEFAULT 0
+                """
+            )
     async def get(
         self,
         group_id: int,
@@ -624,7 +634,6 @@ class SpamTrustStore:
         group_id: int,
         user_id: int,
         state,
-        repeat_events = None,
     ) -> None:
         import time
 
@@ -641,7 +650,7 @@ class SpamTrustStore:
                 repeat_events,
                 updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(group_id, user_id)
             DO UPDATE SET
                 trust_score = excluded.trust_score,
@@ -664,7 +673,6 @@ class SpamTrustStore:
                 time.time(),
             ),
         )
-
 
 class SpamRuleStore:
     """
