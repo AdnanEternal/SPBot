@@ -21,11 +21,11 @@ from core.base_plugin import BasePlugin
 
 class SpamFilterPlugin(BasePlugin):
     name = "Spam Filter"
-    version = "1.5.12"
+    version = "1.5.13"
 
 
 
-    DEBUG_LOGGING = True
+    DEBUG_LOGGING = False
 
 
     def __init__(
