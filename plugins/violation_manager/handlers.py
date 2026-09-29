@@ -795,17 +795,19 @@ async def on_punishment_request(
                 hours=hours,
             )
 
+
+            "/"
             if hours is None:
                 punishment_text = (
                     "🔇 مجازات: کاربر "
-                    "به‌صورت دائمی میوت شد."
+                    f"به‌صورت دائمی میوت شد.\nبرای لغو این عمل از این دستور استفاده کنید:\n`آنمیوت {event.sender_id}!`\n(توجه:علامت تعجب '!' باید اول دستور باشد)"
                 )
 
             else:
                 punishment_text = (
                     "🔇 مجازات: کاربر میوت شد "
-                    f"({hours} ساعت).\n"
-                    f"برای لغو این عمل از دستور `!آنمیوت {event.sender_id} ` استفاده کنید"
+                    f"({hours} ساعت).\nبرای لغو این عمل از این دستور استفاده کنید:\n`آنمیوت {event.sender_id}!`\n(توجه:علامت تعجب '!' باید اول دستور باشد)"
+                    
                 )
 
         else:
@@ -967,17 +969,22 @@ async def on_violation(
                 user_id,
                 hours=hours,
             )
+
+            
     
             if hours is None:
                 punishment_text = (
                     "🔇 مجازات: کاربر "
-                    "به‌صورت دائمی میوت شد."
+                    "به‌صورت دائمی میوت شد.\n"
+                    f"برای لغو این دستور را بزنید: `!آنمیوت {event.sender_id}`"
                 )
 
             else:
                 punishment_text = (
                     "🔇 مجازات: کاربر میوت شد "
-                    f"({hours} ساعت)."
+                    f"({hours} ساعت).\n"
+                    f"برای لغو این دستور را بزنید: `!آنمیوت {event.sender_id}`"
+
                 )
 
         else:
