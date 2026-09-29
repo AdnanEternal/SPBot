@@ -48,7 +48,7 @@ class ViolationNoticeThrottle:
 
 class ViolationManagerPlugin(BasePlugin):
     name = "Violation Manager"
-    version = "1.6.8"
+    version = "1.6.9"
 
     def __init__(
         self,
@@ -89,4 +89,5 @@ class ViolationManagerPlugin(BasePlugin):
     unmute_command = handlers.unmute_command
     on_reply_shortcut = handlers.on_reply_shortcut
     on_violation = handlers.on_violation
+    on_punishment_request = handlers.on_punishment_request
     clear_record = handlers.clear_record

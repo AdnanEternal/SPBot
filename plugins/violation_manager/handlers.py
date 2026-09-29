@@ -403,7 +403,137 @@ async def on_reply_shortcut(self: "ViolationManagerPlugin", event: events.NewMes
     elif text in ("ریم","بن"):
         await moderation.ban_user(self.client,chat,target_id)
 
+@on_bus_event("punishment_request")
+async def on_punishment_request(
+    self: "ViolationManagerPlugin",
+    event,
+    group_id: int,
+    user_id: int,
+    reason: str,
+    source: str = "unknown",
+) -> None:
+    """
+    درخواست مجازات از پلاگین‌های مستقل.
 
+    این مسیر فقط مجازات را انجام می‌دهد
+    و هیچ سابقه‌ای در Violation Manager ثبت نمی‌کند.
+    """
+
+    try:
+        chat = await event.get_chat()
+
+        is_admin = await is_chat_admin(
+            self.client,
+            chat,
+            user_id,
+            raise_on_error=True,
+        )
+
+    except Exception as exc:
+        print(
+            f"⚠️ پردازش درخواست مجازات متوقف شد: {exc}"
+        )
+        return
+
+    # ادمین‌ها مجازات نمی‌شوند.
+    if is_admin:
+        return
+
+    settings = await self.settings.get(
+        group_id
+    )
+
+    # همان throttle فعلی سیستم مجازات.
+    if not punishment_throttle.should_punish(
+        group_id,
+        user_id,
+        10,
+    ):
+        return
+
+    punishment_text = None
+
+    try:
+
+        if settings["punishment_type"] == "ban":
+
+            await moderation.ban_user(
+                self.client,
+                chat,
+                user_id,
+            )
+
+            punishment_text = (
+                "🔨 مجازات: کاربر بن شد."
+            )
+
+        elif settings["punishment_type"] == "mute":
+
+            hours = settings[
+                "mute_hours"
+            ]
+
+            await moderation.mute_user(
+                self.client,
+                chat,
+                user_id,
+                hours=hours,
+            )
+
+            if hours is None:
+                punishment_text = (
+                    "🔇 مجازات: کاربر "
+                    "به‌صورت دائمی میوت شد."
+                )
+
+            else:
+                punishment_text = (
+                    "🔇 مجازات: کاربر میوت شد "
+                    f"({hours} ساعت)."
+                )
+
+        else:
+            print(
+                "⚠️ نوع مجازات ناشناخته است: "
+                f"{settings['punishment_type']}"
+            )
+
+            return
+
+    except Exception as exc:
+
+        print(
+            f"❌ اعمال مجازات ناموفق بود: {exc}"
+        )
+
+        return
+
+    punishment_throttle.mark_punished(
+        group_id,
+        user_id,
+        10,
+    )
+
+    name = await _display_name(
+        event,
+        user_id,
+    )
+
+    message = (
+        f"⚠️ {name} به‌دلیل تخلف مکرر مجازات شد.\n"
+        f"📌 دلیل: {reason}\n"
+        f"{punishment_text}"
+    )
+
+    if self.notice_throttle.should_notify(
+        group_id,
+        user_id,
+        source or reason,
+    ):
+        await _notify(
+            event,
+            message,
+        )
 
 @on_bus_event("violation")
 async def on_violation(

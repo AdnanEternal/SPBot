@@ -2,7 +2,7 @@ from typing import TYPE_CHECKING
 
 from splusthon import events
 
-from core.decorators import command, on_event, on_bus_event
+from core.decorators import command, on_event
 from core.permissions import is_chat_admin, is_owner
 
 if TYPE_CHECKING:
@@ -35,12 +35,9 @@ def _extract_optional_group_target(
     آن را از آرگومان‌ها جدا می‌کند.
 
     خروجی:
-
-        (
-            target_group,
-            remaining_args,
-            remote,
-        )
+        target_group
+        remaining_args
+        remote
     """
 
     raw = (
@@ -100,21 +97,11 @@ async def _resolve_group_target(
     """
     مقصد گروه را مشخص می‌کند.
 
-    داخل گروه:
+    اجرای محلی:
+        فقط داخل گروه و در صورت نیاز با دسترسی Admin.
 
-        !فیلتر کلمه
-        -> گروه فعلی
-
-    ریموت:
-
-        !فیلتر کلمه -100123456
-        -> گروه ریموت
-
-    قوانین دسترسی:
-
-        - اجرای محلی فیلتر/حذف/لیست: Admin
-        - اجرای ریموت این کامندها: Owner
-        - فیلتر ادمین: خود command فقط Owner است
+    اجرای ریموت:
+        فقط Owner مجاز است.
     """
 
     (
@@ -131,7 +118,6 @@ async def _resolve_group_target(
 
     if remote:
 
-        # ریموت فقط برای Owner مجاز است.
         if not is_owner(
             event.sender_id
         ):
@@ -156,7 +142,6 @@ async def _resolve_group_target(
     # LOCAL
     # =================================================
 
-    # اجرای محلی خارج از گروه مقصد معنی ندارد.
     if not event.is_group:
         return (
             None,
@@ -166,7 +151,6 @@ async def _resolve_group_target(
 
     target_group = event.chat_id
 
-    # کامندهای محلی فیلتر فقط برای Admin هستند.
     if local_admin:
 
         try:
@@ -227,7 +211,6 @@ async def add_word(
     self: "ContentFilterPlugin",
     event: events.NewMessage.Event,
 ) -> None:
-
     (
         target_group,
         word,
@@ -282,7 +265,6 @@ async def remove_word(
     self: "ContentFilterPlugin",
     event: events.NewMessage.Event,
 ) -> None:
-
     (
         target_group,
         word,
@@ -344,7 +326,6 @@ async def list_words(
     self: "ContentFilterPlugin",
     event: events.NewMessage.Event,
 ) -> None:
-
     (
         target_group,
         remaining,
@@ -409,7 +390,6 @@ async def set_admin_filter_permission(
     self: "ContentFilterPlugin",
     event: events.NewMessage.Event,
 ) -> None:
-
     (
         target_group,
         remaining,
@@ -461,7 +441,7 @@ async def set_admin_filter_permission(
         return
 
     # ---------------------------------------------
-    # SET ENABLED
+    # SET
     # ---------------------------------------------
 
     if value == "مجاز":
@@ -499,7 +479,7 @@ async def set_admin_filter_permission(
 
 
 # =====================================================
-# CONTENT FILTER EVENT
+# CONTENT FILTER
 # =====================================================
 
 
@@ -508,7 +488,6 @@ async def on_message(
     self: "ContentFilterPlugin",
     event: events.NewMessage.Event,
 ) -> None:
-
     if not event.is_group:
         return
 
@@ -532,9 +511,6 @@ async def on_message(
 
     is_admin = False
 
-    # ادمین بودن همیشه بررسی می‌شود.
-    # چون وقتی فیلتر برای ادمین ممنوع است،
-    # باید پیام ادمین حذف شود ولی violation ثبت نشود.
     try:
         is_admin = await is_chat_admin(
             self.client,
@@ -549,18 +525,19 @@ async def on_message(
             f"Content Filter ناموفق بود: {e}"
         )
 
-    # اگر ادمین‌ها مجاز باشند،
-    # پیام ادمین اصلاً فیلتر نمی‌شود.
+    # ادمین‌ها در حالت مجاز اصلاً فیلتر نمی‌شوند.
     if admins_allowed and is_admin:
         return
 
     # ---------------------------------------------
-    # NOTIFY
+    # اطلاع‌رسانی
     # ---------------------------------------------
 
     try:
+        sender_name= ("@"+event.sender.username if event.sender.username else event.sender.first_name)
         await event.reply(
-            "⚠️ این پیام به‌دلیل استفاده از "
+            f"{sender_name}"
+            "⚠️ پیام شما به‌دلیل استفاده از "
             "کلمهٔ فیلترشده حذف شد."
         )
 
@@ -571,7 +548,7 @@ async def on_message(
         )
 
     # ---------------------------------------------
-    # DELETE
+    # حذف پیام
     # ---------------------------------------------
 
     try:
@@ -587,89 +564,42 @@ async def on_message(
     # ADMIN
     # ---------------------------------------------
 
-    # پیام ادمین حذف شد،
-    # اما برای ادمین سابقه‌ی تخلف ثبت نمی‌شود.
+    # اگر ادمین مشمول فیلتر بوده،
+    # فقط پیام حذف می‌شود و هیچ سابقه‌ای ثبت نمی‌شود.
     if is_admin:
         return
 
     # ---------------------------------------------
-    # VIOLATION
+    # RECORD
     # ---------------------------------------------
 
+    await self.violations.add(
+        group_id=event.chat_id,
+        user_id=event.sender_id,
+        word=matched_word,
+    )
+
+    count = await self.violations.get_count(
+        event.chat_id,
+        event.sender_id,
+    )
+
+    # سقف پیش‌فرض = 3
+    #
+    # تخلف 1 -> ثبت
+    # تخلف 2 -> ثبت
+    # تخلف 3 -> ثبت
+    # تخلف 4 -> ثبت + درخواست مجازات
+    if count <= self.MAX_VIOLATIONS:
+        return
+
+    # Content Filter خودش مجازات نمی‌کند.
+    # فقط از سیستم مجازات درخواست اجرای مجازات می‌کند.
     await self.event_bus.emit(
-        event_name="violation",
+        "punishment_request",
         event=event,
         group_id=event.chat_id,
         user_id=event.sender_id,
-        reason=(
-            f"استفاده از کلمه «{matched_word}» ممنوع است."
-        ),
+        reason="استفاده مکرر از کلمات فیلترشده",
+        source="content_filter",
     )
-
-
-# =====================================================
-# SPAM SIGNAL
-# =====================================================
-
-
-@on_bus_event("spam_signals")
-async def contribute_spam_signals(
-    self: "ContentFilterPlugin",
-    event,
-    group_id: int,
-    user_id: int,
-    signals: dict,
-) -> None:
-
-    if not event.is_group:
-        return
-
-    is_admin = False
-
-    try:
-        is_admin = await is_chat_admin(
-            self.client,
-            await event.get_chat(),
-            user_id,
-            raise_on_error=True,
-        )
-
-    except Exception as e:
-        print(
-            "⚠️ بررسی ادمین برای Spam Signal "
-            f"ناموفق بود: {e}"
-        )
-
-    # ادمین نباید از Content Filter
-    # سیگنال تخلف دریافت کند.
-    if is_admin:
-        return
-
-    matched_word = getattr(
-        event,
-        "_content_filter_match",
-        None,
-    )
-
-    if matched_word is None:
-
-        matched_word = await self.words.find_match(
-            group_id,
-            event.raw_text or "",
-        )
-
-        if matched_word is not None:
-            event._content_filter_match = (
-                matched_word
-            )
-
-    if matched_word is None:
-        return
-
-    signals[
-        "content_filter_match"
-    ] = True
-
-    signals[
-        "content_filter_word"
-    ] = matched_word

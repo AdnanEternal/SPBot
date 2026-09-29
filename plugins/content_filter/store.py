@@ -33,9 +33,15 @@ class WordFilterStore:
         await self.db.create_table(
             self.TABLE,
             columns={
-                "id": "INTEGER PRIMARY KEY AUTOINCREMENT",
-                "group_id": "INTEGER NOT NULL",
-                "word": "TEXT NOT NULL",
+                "id": (
+                    "INTEGER PRIMARY KEY AUTOINCREMENT"
+                ),
+                "group_id": (
+                    "INTEGER NOT NULL"
+                ),
+                "word": (
+                    "TEXT NOT NULL"
+                ),
             },
             unique=[
                 (
@@ -43,7 +49,9 @@ class WordFilterStore:
                     "word",
                 )
             ],
-            indexes=["group_id"],
+            indexes=[
+                "group_id",
+            ],
         )
 
     async def add(
@@ -51,7 +59,10 @@ class WordFilterStore:
         group_id: int,
         word: str,
     ):
-        word = word.lower().strip()
+        word = (
+            word.lower()
+            .strip()
+        )
 
         await self.db.insert(
             self.TABLE,
@@ -79,7 +90,10 @@ class WordFilterStore:
         group_id: int,
         word: str,
     ):
-        word = word.lower().strip()
+        word = (
+            word.lower()
+            .strip()
+        )
 
         cursor = await self.db.delete(
             self.TABLE,
@@ -123,6 +137,7 @@ class WordFilterStore:
         text = text.lower()
 
         for word in words:
+
             if word in text:
                 return word
 
@@ -175,7 +190,8 @@ class WordFilterStore:
 class ContentFilterSettingsStore:
     TABLE = "content_filter_settings"
 
-    # پیش‌فرض: ادمین‌ها هم مشمول فیلتر هستند.
+    # پیش‌فرض:
+    # ادمین‌ها هم مشمول فیلتر هستند.
     DEFAULT_ADMINS_ALLOWED = False
 
     def __init__(self, db):
@@ -278,4 +294,78 @@ class ContentFilterSettingsStore:
         self._cache.set(
             group_id,
             bool(allowed),
+        )
+
+
+class ContentFilterViolationStore:
+    """
+    سابقه‌ی اختصاصی استفاده از کلمات فیلترشده.
+
+    این سابقه کاملاً متعلق به Content Filter است
+    و وارد Violation Manager نمی‌شود.
+    """
+
+    TABLE = "content_filter_violations"
+
+    def __init__(self, db):
+        self.db = db
+
+    async def create_table(self):
+        await self.db.create_table(
+            self.TABLE,
+            columns={
+                "id": (
+                    "INTEGER PRIMARY KEY AUTOINCREMENT"
+                ),
+                "group_id": (
+                    "INTEGER NOT NULL"
+                ),
+                "user_id": (
+                    "INTEGER NOT NULL"
+                ),
+                "word": (
+                    "TEXT NOT NULL"
+                ),
+                "created_at": (
+                    "TEXT NOT NULL "
+                    "DEFAULT CURRENT_TIMESTAMP"
+                ),
+            },
+            indexes=[
+                "group_id",
+                "user_id",
+            ],
+        )
+
+    async def add(
+        self,
+        group_id: int,
+        user_id: int,
+        word: str,
+    ) -> None:
+        await self.db.insert(
+            self.TABLE,
+            {
+                "group_id": group_id,
+                "user_id": user_id,
+                "word": word,
+            },
+        )
+
+    async def get_count(
+        self,
+        group_id: int,
+        user_id: int,
+    ) -> int:
+        row = await self.db.select_one(
+            self.TABLE,
+            where={
+                "group_id": group_id,
+                "user_id": user_id,
+            },
+            columns="COUNT(*) AS count",
+        )
+
+        return int(
+            row["count"]
         )
