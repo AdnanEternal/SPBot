@@ -191,8 +191,8 @@ class ContentFilterSettingsStore:
     TABLE = "content_filter_settings"
 
     # پیش‌فرض:
-    # ادمین‌ها هم مشمول فیلتر هستند.
-    DEFAULT_ADMINS_ALLOWED = False
+    # ادمین‌ها مشمول فیلتر نیستند
+    DEFAULT_ADMINS_ALLOWED = True
 
     def __init__(self, db):
         self.db = db
