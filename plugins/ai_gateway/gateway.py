@@ -942,7 +942,7 @@ class AIGateway:
                 api_key = (
                     active_key["api_key"]
                     if active_key is not None
-                    else candidate.get("api_key")
+                    else None
                 )
 
                 api_key_number = (
