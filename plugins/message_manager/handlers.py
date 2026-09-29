@@ -76,6 +76,16 @@ async def clear_messages(
         message_ids,
     )
 
+    for message_id in message_ids:
+        await self.event_bus.emit(
+            "timeline_deletion",
+            event=event,
+            group_id=event.chat_id,
+            message_id=message_id,
+            source="clear_command",
+            reason="admin_cleanup",
+        )
+
     await event.delete()
 
 

@@ -575,12 +575,15 @@ async def on_message(
     settings = await self.settings.get(
         event.chat_id
     )
+    
+    event_timestamp = event.date.timestamp()
 
     repeat_count = self.tracker.register(
         event.chat_id,
         event.sender_id,
         event.id,
         text,
+        event_timestamp,
     )
 
     recent_message_count = (

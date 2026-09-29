@@ -50,6 +50,7 @@ class SpamTracker:
         user_id: int,
         message_id: int,
         text: str,
+        timestamp: float,
     ) -> int:
         self._register_calls += 1
 
@@ -67,7 +68,7 @@ class SpamTracker:
 
         self._messages[key].append(
             (
-                time.monotonic(),
+                timestamp,
                 message_id,
                 text,
             )
