@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING
 from splusthon import events
 
 from core.decorators import command, on_bus_event, on_event
-from core.permissions import is_chat_admin
+from core.permissions import is_chat_admin, is_owner
 
 from . import moderation
 from core.ttl_cache import TTLCache
@@ -23,6 +23,120 @@ DEFAULT_MUTE_HOURS = 1
 
 SOFT_SCORE_MAX = 5
 
+async def _resolve_group_entity(
+    self: "ViolationManagerPlugin",
+    group_id: int,
+):
+    try:
+        dialogs = await self.client.get_dialogs()
+
+    except Exception as e:
+        print(
+            "⚠️ دریافت لیست گروه‌ها برای اجرای ریموت ناموفق بود: "
+            f"{e}"
+        )
+        return None
+
+    for dialog in dialogs:
+        if dialog.id == group_id:
+            return dialog.entity
+
+    return None
+
+
+def _is_remote_group_id(value: str) -> bool:
+    if not value:
+        return False
+
+    try:
+        return int(value) < 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _extract_optional_group_target(
+    raw: str,
+) -> tuple[int | None, str, bool]:
+    raw = (raw or "").strip()
+
+    if not raw:
+        return None, "", False
+
+    parts = raw.split()
+    candidate = parts[-1]
+
+    if not _is_remote_group_id(candidate):
+        return None, raw, False
+
+    try:
+        target_group = int(candidate)
+    except (TypeError, ValueError):
+        return None, raw, False
+
+    return (
+        target_group,
+        " ".join(parts[:-1]).strip(),
+        True,
+    )
+
+
+async def _resolve_group_target(
+    self: "ViolationManagerPlugin",
+    event,
+) -> tuple[int | None, str, bool]:
+
+    target_group, remaining, remote = (
+        _extract_optional_group_target(
+            event.args_text or ""
+        )
+    )
+
+    # -----------------------------
+    # REMOTE
+    # -----------------------------
+
+    if remote:
+        if not is_owner(event.sender_id):
+            await event.reply(
+                "❌ اجرای ریموت این کامند فقط برای Owner مجازه."
+            )
+            return None, remaining, True
+
+        return target_group, remaining, True
+
+    # -----------------------------
+    # LOCAL
+    # -----------------------------
+
+    if not event.is_group:
+        return None, remaining, False
+
+    try:
+        allowed = await is_chat_admin(
+            self.client,
+            await event.get_chat(),
+            event.sender_id,
+            raise_on_error=True,
+        )
+
+    except Exception as e:
+        print(
+            "⚠️ بررسی دسترسی ادمین برای "
+            f"Violation Manager ناموفق بود: {e}"
+        )
+
+        await event.reply(
+            "❌ نتونستم دسترسی ادمین شما رو بررسی کنم."
+        )
+        return None, remaining, False
+
+    if not allowed:
+        await event.reply(
+            "❌ این کامند فقط برای ادمین‌های گروه مجازه."
+        )
+        return None, remaining, False
+
+    return event.chat_id, remaining, False
 
 def _normalize_violation_score(
     value,
@@ -330,40 +444,191 @@ async def my_record(self: "ViolationManagerPlugin", event: events.NewMessage.Eve
 
 @command(
     name="میوت",
-    permission="admin",
-    chat_type="group",
-    description="یه کاربر رو میوت می‌کنه (با یوزرنیم یا ریپلای روی پیامش)، حتی اگه تخلفی نکرده باشه.",
+    permission="everyone",
+    chat_type="all",
+    description="یه کاربر رو میوت می‌کنه؛ محلی برای ادمین و ریموت برای Owner.",
 )
-async def mute_command(self: "ViolationManagerPlugin", event: events.NewMessage.Event) -> None:
-    target_id = await moderation.resolve_target(self.client, event)
-    if target_id is None:
-        await event.reply("مثال: !میوت @username یا روی پیام شخص ریپلای کن.")
+async def mute_command(
+    self: "ViolationManagerPlugin",
+    event: events.NewMessage.Event,
+) -> None:
+
+    target_group, target_arg, remote = (
+        await _resolve_group_target(
+            self,
+            event,
+        )
+    )
+
+    if target_group is None:
+        await event.reply(
+            "مثال:\n"
+            "داخل گروه:\n"
+            "!میوت @username\n"
+            "یا روی پیام کاربر ریپلای کن.\n\n"
+            "ریموت توسط Owner:\n"
+            "!میوت @username -100123456"
+        )
         return
 
-    settings = await self.settings.get(event.chat_id)
-    hours = settings["mute_hours"] or DEFAULT_MUTE_HOURS
+    # ریموت فقط با username / target انجام می‌شود.
+    if remote:
+        target_id = None
 
-    chat = await event.get_chat()
-    await moderation.mute_user(self.client, chat, target_id, hours)
-    await event.reply(f"کاربر `{target_id}` به مدت {hours} ساعت میوت شد.")
+        if not target_arg:
+            await event.reply(
+                "❌ برای اجرای ریموت باید کاربر را مشخص کنی.\n"
+                "مثال:\n"
+                "!میوت @username -100123456"
+            )
+            return
+
+        try:
+            entity = await self.client.get_entity(
+                target_arg
+            )
+            target_id = entity.id
+
+        except Exception:
+            await event.reply(
+                f"❌ نتونستم کاربر `{target_arg}` رو پیدا کنم."
+            )
+            return
+
+    else:
+        # اجرای محلی: ریپلای یا آرگومان
+        target_id = await moderation.resolve_target(
+            self.client,
+            event,
+        )
+
+        if target_id is None:
+            await event.reply(
+                "مثال: !میوت @username\n"
+                "یا روی پیام شخص ریپلای کن."
+            )
+            return
+
+    settings = await self.settings.get(
+        target_group
+    )
+
+    hours = (
+        settings["mute_hours"]
+        or DEFAULT_MUTE_HOURS
+    )
+
+    chat = await _resolve_group_entity(
+        self,
+        target_group,
+    )
+
+    if chat is None:
+        await event.reply(
+            f"❌ گروه `{target_group}` پیدا نشد.\n"
+            "مطمئن شو ربات داخل این گروه حضور داره."
+        )
+        return
+
+    await moderation.mute_user(
+        self.client,
+        chat,
+        target_id,
+        hours,
+    )
+
+    await event.reply(
+        f"✅ کاربر `{target_id}` "
+        f"به مدت {hours} ساعت میوت شد.\n"
+        f"📍 گروه: `{target_group}`"
+    )
 
 
 @command(
     name="آنمیوت",
-    permission="admin",
-    chat_type="group",
-    description="میوتِ یه کاربر رو برمی‌داره (با یوزرنیم یا ریپلای روی پیامش).",
+    permission="everyone",
+    chat_type="all",
+    description="میوت یه کاربر رو برمی‌داره؛ محلی برای ادمین و ریموت برای Owner.",
 )
-async def unmute_command(self: "ViolationManagerPlugin", event: events.NewMessage.Event) -> None:
-    target_id = await moderation.resolve_target(self.client, event)
-    if target_id is None:
-        await event.reply("مثال: !آنمیوت @username یا روی پیام شخص ریپلای کن.")
+async def unmute_command(
+    self: "ViolationManagerPlugin",
+    event: events.NewMessage.Event,
+) -> None:
+
+    target_group, target_arg, remote = (
+        await _resolve_group_target(
+            self,
+            event,
+        )
+    )
+
+    if target_group is None:
+        await event.reply(
+            "مثال:\n"
+            "داخل گروه:\n"
+            "!آنمیوت @username\n"
+            "یا روی پیام کاربر ریپلای کن.\n\n"
+            "ریموت توسط Owner:\n"
+            "!آنمیوت @username -100123456"
+        )
         return
 
-    chat = await event.get_chat()
-    await moderation.unmute_user(self.client, chat, target_id)
-    await event.reply(f"میوتِ کاربر `{target_id}` برداشته شد.")
+    if remote:
+        if not target_arg:
+            await event.reply(
+                "❌ برای اجرای ریموت باید کاربر را مشخص کنی.\n"
+                "مثال:\n"
+                "!آنمیوت @username -100123456"
+            )
+            return
 
+        try:
+            entity = await self.client.get_entity(
+                target_arg
+            )
+            target_id = entity.id
+
+        except Exception:
+            await event.reply(
+                f"❌ نتونستم کاربر `{target_arg}` رو پیدا کنم."
+            )
+            return
+
+    else:
+        target_id = await moderation.resolve_target(
+            self.client,
+            event,
+        )
+
+        if target_id is None:
+            await event.reply(
+                "مثال: !آنمیوت @username\n"
+                "یا روی پیام شخص ریپلای کن."
+            )
+            return
+
+    chat = await _resolve_group_entity(
+        self,
+        target_group,
+    )
+
+    if chat is None:
+        await event.reply(
+            f"❌ گروه `{target_group}` پیدا نشد.\n"
+            "مطمئن شو ربات داخل این گروه حضور داره."
+        )
+        return
+
+    await moderation.unmute_user(
+        self.client,
+        chat,
+        target_id,
+    )
+
+    await event.reply(
+        f"✅ میوتِ کاربر `{target_id}` برداشته شد.\n"
+        f"📍 گروه: `{target_group}`"
+    )
 
 @on_event(events.NewMessage(incoming=True))
 async def on_reply_shortcut(self: "ViolationManagerPlugin", event: events.NewMessage.Event) -> None:

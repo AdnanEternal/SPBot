@@ -534,10 +534,14 @@ async def on_message(
     # ---------------------------------------------
 
     try:
-        sender_name= ("@"+event.sender.username if event.sender.username else event.sender.first_name)
+        sender_name = (
+            "@" + event.sender.username
+            if event.sender.username
+            else event.sender.first_name
+        )
+
         await event.reply(
-            f"{sender_name}"
-            "⚠️ پیام شما به‌دلیل استفاده از "
+            f"{sender_name} ⚠️ پیام شما به‌دلیل استفاده از "
             "کلمهٔ فیلترشده حذف شد."
         )
 
