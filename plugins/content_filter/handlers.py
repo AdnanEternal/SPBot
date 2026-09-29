@@ -8,94 +8,220 @@ from core.permissions import is_chat_admin
 if TYPE_CHECKING:
     from .plugin import ContentFilterPlugin
 
+def _is_remote_group_id(
+    value: str,
+) -> bool:
+    if not value:
+        return False
+
+    try:
+        return int(value) < 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _extract_optional_group_target(
+    raw: str,
+) -> tuple[int | None, str]:
+    parts = (
+        raw or ""
+    ).strip().split()
+
+    if not parts:
+        return None, ""
+
+    candidate = parts[-1]
+
+    if not _is_remote_group_id(
+        candidate
+    ):
+        return None, " ".join(parts)
+
+    try:
+        target_group = int(candidate)
+
+    except (TypeError, ValueError):
+        return None, " ".join(parts)
+
+    return (
+        target_group,
+        " ".join(parts[:-1]).strip(),
+    )
+
+
+def _resolve_group_target(
+    event,
+) -> tuple[int | None, str]:
+    target_group, remaining = (
+        _extract_optional_group_target(
+            event.args_text or ""
+        )
+    )
+
+    if target_group is not None:
+        return (
+            target_group,
+            remaining,
+        )
+
+    if event.is_group:
+        return (
+            event.chat_id,
+            remaining,
+        )
+
+    return (
+        None,
+        remaining,
+    )
+
 
 @command(
     name="فیلتر",
     permission="admin",
-    chat_type="group",
+    chat_type="all",
     description="یک کلمه رو به لیست فیلتر این گروه اضافه می‌کنه.",
 )
 async def add_word(
     self: "ContentFilterPlugin",
     event: events.NewMessage.Event,
 ) -> None:
-    word = event.args_text.strip()
+    target_group, word = _resolve_group_target(
+        event
+    )
+
+    if target_group is None:
+        await event.reply(
+            "❌ گروه هدف مشخص نشده.\n"
+            "داخل گروه:\n"
+            "!فیلتر کلمه\n\n"
+            "برای گروه دیگر:\n"
+            "!فیلتر کلمه -100123456"
+        )
+        return
 
     if not word:
-        await event.reply("مثال: !فیلتر کلمه")
+        await event.reply(
+            "مثال:\n"
+            "!فیلتر کلمه\n"
+            "!فیلتر کلمه -100123456"
+        )
         return
 
     await self.words.add(
-        event.chat_id,
+        target_group,
         word,
     )
 
     await event.reply(
-        f"کلمه «{word}» به لیست فیلتر این گروه اضافه شد."
+        f"✅ کلمه «{word}» به لیست فیلتر گروه "
+        f"`{target_group}` اضافه شد."
     )
 
 
 @command(
     name="حذف فیلتر",
     permission="admin",
-    chat_type="group",
+    chat_type="all",
     description="یک کلمه رو از لیست فیلتر این گروه حذف می‌کنه.",
 )
 async def remove_word(
     self: "ContentFilterPlugin",
     event: events.NewMessage.Event,
 ) -> None:
-    word = event.args_text.strip()
+    target_group, word = _resolve_group_target(
+        event
+    )
+
+    if target_group is None:
+        await event.reply(
+            "❌ گروه هدف مشخص نشده.\n"
+            "داخل گروه:\n"
+            "!حذف فیلتر کلمه\n\n"
+            "برای گروه دیگر:\n"
+            "!حذف فیلتر کلمه -100123456"
+        )
+        return
 
     if not word:
-        await event.reply("مثال: !حذف فیلتر کلمه")
+        await event.reply(
+            "مثال:\n"
+            "!حذف فیلتر کلمه\n"
+            "!حذف فیلتر کلمه -100123456"
+        )
         return
 
     removed = await self.words.remove(
-        event.chat_id,
+        target_group,
         word,
     )
 
     if removed:
         await event.reply(
-            f"کلمه «{word}» از لیست فیلتر این گروه حذف شد."
+            f"✅ کلمه «{word}» از لیست فیلتر گروه "
+            f"`{target_group}` حذف شد."
         )
     else:
         await event.reply(
-            f"کلمه «{word}» در لیست فیلتر این گروه وجود نداشت."
+            f"ℹ️ کلمه «{word}» در لیست فیلتر گروه "
+            f"`{target_group}` وجود نداشت."
         )
-
 
 @command(
     name="لیست فیلتر",
     permission="admin",
-    chat_type="group",
+    chat_type="all",
     description="لیست کلمات فیلترشده‌ی این گروه رو نشون می‌ده.",
 )
 async def list_words(
     self: "ContentFilterPlugin",
     event: events.NewMessage.Event,
 ) -> None:
+    target_group, remaining = (
+        _resolve_group_target(
+            event
+        )
+    )
+
+    if target_group is None:
+        await event.reply(
+            "❌ در PV باید شناسه گروه را وارد کنی.\n"
+            "مثال:\n"
+            "!لیست فیلتر -100123456"
+        )
+        return
+
+    if remaining:
+        await event.reply(
+            "❌ استفاده نادرست.\n"
+            "مثال:\n"
+            "!لیست فیلتر\n"
+            "!لیست فیلتر -100123456"
+        )
+        return
+
     words = await self.words.get_all(
-        event.chat_id
+        target_group
     )
 
     if not words:
         await event.reply(
-            "لیست فیلتر این گروه خالیه."
+            f"📋 لیست فیلتر گروه `{target_group}` خالیه."
         )
         return
 
     await event.reply(
-        "کلمات فیلترشده:\n"
-        + "\n".join(sorted(words))
+        f"📋 کلمات فیلترشده گروه "
+        f"`{target_group}`:\n\n"
+        + "\n".join(
+            sorted(words)
+        )
     )
-
 
 @command(
     name="فیلتر ادمین",
     permission="owner",
-    chat_type="group",
+    chat_type="all",
     description=(
         "تعیین می‌کنه ادمین‌های گروه اجازه استفاده "
         "از کلمات فیلترشده رو داشته باشن یا نه."
@@ -105,14 +231,28 @@ async def set_admin_filter_permission(
     self: "ContentFilterPlugin",
     event: events.NewMessage.Event,
 ) -> None:
+    target_group, remaining = (
+        _resolve_group_target(
+            event
+        )
+    )
+
+    if target_group is None:
+        await event.reply(
+            "❌ گروه هدف مشخص نشده.\n"
+            "مثال:\n"
+            "!فیلتر ادمین مجاز -100123456"
+        )
+        return
+
     value = (
-        event.args_text or ""
+        remaining or ""
     ).strip().casefold()
 
     if not value:
         allowed = (
             await self.settings.get_admins_allowed(
-                event.chat_id
+                target_group
             )
         )
 
@@ -123,11 +263,12 @@ async def set_admin_filter_permission(
         )
 
         await event.reply(
-            f"⚙️ استفاده ادمین‌های این گروه "
-            f"از کلمات فیلترشده: {status}\n\n"
+            f"⚙️ استفاده ادمین‌های گروه "
+            f"`{target_group}` از کلمات فیلترشده: "
+            f"{status}\n\n"
             "تغییر:\n"
-            "`!فیلتر ادمین مجاز`\n"
-            "`!فیلتر ادمین ممنوع`"
+            f"`!فیلتر ادمین مجاز {target_group}`\n"
+            f"`!فیلتر ادمین ممنوع {target_group}`"
         )
         return
 
@@ -139,14 +280,15 @@ async def set_admin_filter_permission(
 
     else:
         await event.reply(
+            "❌ استفاده نادرست.\n\n"
             "مثال:\n"
-            "`!فیلتر ادمین مجاز`\n"
-            "`!فیلتر ادمین ممنوع`"
+            f"`!فیلتر ادمین مجاز {target_group}`\n"
+            f"`!فیلتر ادمین ممنوع {target_group}`"
         )
         return
 
     await self.settings.set_admins_allowed(
-        event.chat_id,
+        target_group,
         allowed,
     )
 
@@ -157,10 +299,10 @@ async def set_admin_filter_permission(
     )
 
     await event.reply(
-        f"✅ از این به بعد ادمین‌های این گروه "
-        f"{status} از کلمات فیلترشده استفاده کنن."
+        f"✅ ادمین‌های گروه `{target_group}` "
+        f"از این به بعد {status} از کلمات "
+        "فیلترشده استفاده کنن."
     )
-
 
 @on_event(events.NewMessage(incoming=True))
 async def on_message(
