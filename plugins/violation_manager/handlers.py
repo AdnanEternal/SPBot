@@ -472,6 +472,8 @@ async def mute_command(
         return
 
     # ریموت فقط با username / target انجام می‌شود.
+    
+
     if remote:
         target_id = None
 
@@ -479,22 +481,45 @@ async def mute_command(
             await event.reply(
                 "❌ برای اجرای ریموت باید کاربر را مشخص کنی.\n"
                 "مثال:\n"
+                "!میوت 49245702 -100123456\n"
+                "یا:\n"
                 "!میوت @username -100123456"
             )
             return
 
-        try:
-            entity = await self.client.get_entity(
-                target_arg
-            )
-            target_id = entity.id
+        # User ID مستقیم
+        if target_arg.lstrip("-").isdigit():
 
-        except Exception:
+            try:
+                target_id = int(
+                    target_arg
+                )
+
+            except ValueError:
+                target_id = None
+
+        # Username / Mention
+        else:
+
+            try:
+                entity = await self.client.get_entity(
+                    target_arg
+                )
+
+                target_id = entity.id
+
+            except Exception:
+                await event.reply(
+                    f"❌ نتونستم کاربر `{target_arg}` رو پیدا کنم."
+                )
+                return
+
+        if target_id is None:
             await event.reply(
-                f"❌ نتونستم کاربر `{target_arg}` رو پیدا کنم."
+                f"❌ شناسه/کاربر `{target_arg}` معتبر نیست."
             )
             return
-
+        
     else:
         # اجرای محلی: ریپلای یا آرگومان
         target_id = await moderation.resolve_target(
@@ -574,23 +599,48 @@ async def unmute_command(
         return
 
     if remote:
+        target_id = None
+
         if not target_arg:
             await event.reply(
                 "❌ برای اجرای ریموت باید کاربر را مشخص کنی.\n"
                 "مثال:\n"
-                "!آنمیوت @username -100123456"
+                "!میوت 49245702 -100123456\n"
+                "یا:\n"
+                "!میوت @username -100123456"
             )
             return
 
-        try:
-            entity = await self.client.get_entity(
-                target_arg
-            )
-            target_id = entity.id
+        # User ID مستقیم
+        if target_arg.lstrip("-").isdigit():
 
-        except Exception:
+            try:
+                target_id = int(
+                    target_arg
+                )
+
+            except ValueError:
+                target_id = None
+
+        # Username / Mention
+        else:
+
+            try:
+                entity = await self.client.get_entity(
+                    target_arg
+                )
+
+                target_id = entity.id
+
+            except Exception:
+                await event.reply(
+                    f"❌ نتونستم کاربر `{target_arg}` رو پیدا کنم."
+                )
+                return
+
+        if target_id is None:
             await event.reply(
-                f"❌ نتونستم کاربر `{target_arg}` رو پیدا کنم."
+                f"❌ شناسه/کاربر `{target_arg}` معتبر نیست."
             )
             return
 
