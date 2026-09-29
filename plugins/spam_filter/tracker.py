@@ -127,10 +127,7 @@ class SpamTracker:
         user_id: int,
         seconds: int,
     ) -> int:
-        cutoff = (
-            time.monotonic()
-            - seconds
-        )
+        cutoff = time.time() - seconds
 
         messages = self._messages.get(
             (group_id, user_id),
@@ -149,10 +146,7 @@ class SpamTracker:
         user_id: int,
         seconds: int,
     ) -> list[int]:
-        cutoff = (
-            time.monotonic()
-            - seconds
-        )
+        cutoff = time.time() - seconds
 
         messages = self._messages.get(
             (group_id, user_id),
@@ -285,10 +279,7 @@ class SpamTracker:
 
 
     def _cleanup(self) -> None:
-        cutoff = (
-            time.monotonic()
-            - self.STALE_SECONDS
-        )
+        cutoff = time.time() - self.STALE_SECONDS
 
         stale_keys = [
             key
