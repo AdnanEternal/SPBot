@@ -183,3 +183,4 @@ class AIGatewayPlugin(BasePlugin):
     maximum_timeline_chars = (
     handlers.maximum_timeline_chars
 )
+    on_timeline_deletion = handlers.on_timeline_deletion
