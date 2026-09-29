@@ -556,6 +556,19 @@ async def on_message(
     # ---------------------------------------------
 
     try:
+        await self.event_bus.emit(
+            "timeline_deletion",
+            event=event,
+            group_id=event.chat_id,
+            message_id=getattr(
+                event,
+                "id",
+                None,
+            ),
+            source="content_filter",
+            reason="filtered_content",
+            matched_word=matched_word,
+        )
         await event.delete()
 
     except Exception as e:

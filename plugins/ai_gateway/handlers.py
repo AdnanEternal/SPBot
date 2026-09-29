@@ -2242,7 +2242,6 @@ async def on_timeline_message_deleted(
             self.memory.mark_deleted_message(
                 message_id=message_id,
                 group_id=group_id,
-                reason="این پیام حذف شده است",
             )
 
     except Exception:
@@ -2841,7 +2840,40 @@ async def on_message(
 # MODERATION -> TIMELINE
 # =========================================================
 
+@on_bus_event(
+    "timeline_deletion"
+)
+async def on_timeline_deletion(
+    self,
+    event,
+    group_id: int,
+    message_id: int | None = None,
+    source: str = "unknown",
+    reason: str | None = None,
+    matched_word: str | None = None,
+) -> None:
 
+    if not self.timeline_enabled:
+        return
+
+    if message_id is None:
+        message_id = (
+            self.memory._extract_message_id(
+                event
+            )
+        )
+
+    if message_id is None:
+        return
+
+    self.memory.mark_deleted(
+        group_id=group_id,
+        event=event,
+        message_id=message_id,
+        source=source,
+        reason=reason,
+        matched_word=matched_word,
+    )
 @on_bus_event("violation")
 async def on_violation_deleted(
     self,
