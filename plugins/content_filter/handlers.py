@@ -8,9 +8,15 @@ from core.permissions import is_chat_admin
 if TYPE_CHECKING:
     from .plugin import ContentFilterPlugin
 
+
 def _is_remote_group_id(
     value: str,
 ) -> bool:
+    """
+    شناسه‌ی گروه ریموت را تشخیص می‌دهد.
+    فقط tokenهای عددی منفی به‌عنوان مقصد ریموت پذیرفته می‌شوند.
+    """
+
     if not value:
         return False
 
@@ -22,58 +28,162 @@ def _is_remote_group_id(
 
 def _extract_optional_group_target(
     raw: str,
-) -> tuple[int | None, str]:
-    parts = (
-        raw or ""
-    ).strip().split()
+) -> tuple[int | None, str, bool]:
+    """
+    اگر آخرین آرگومان یک شناسه‌ی گروه منفی باشد،
+    آن را از آرگومان‌ها جدا می‌کند.
 
-    if not parts:
-        return None, ""
+    خروجی:
+        (target_group, remaining_args, remote)
+    """
+
+    raw = (
+        raw or ""
+    ).strip()
+
+    if not raw:
+        return (
+            None,
+            "",
+            False,
+        )
+
+    parts = raw.split()
 
     candidate = parts[-1]
 
     if not _is_remote_group_id(
         candidate
     ):
-        return None, " ".join(parts)
+        return (
+            None,
+            raw,
+            False,
+        )
 
     try:
-        target_group = int(candidate)
+        target_group = int(
+            candidate
+        )
 
-    except (TypeError, ValueError):
-        return None, " ".join(parts)
+    except (
+        TypeError,
+        ValueError,
+    ):
+        return (
+            None,
+            raw,
+            False,
+        )
 
     return (
         target_group,
-        " ".join(parts[:-1]).strip(),
+        " ".join(
+            parts[:-1]
+        ).strip(),
+        True,
     )
 
 
-def _resolve_group_target(
+async def _resolve_group_target(
+    self: "ContentFilterPlugin",
     event,
-) -> tuple[int | None, str]:
-    target_group, remaining = (
-        _extract_optional_group_target(
-            event.args_text or ""
-        )
+    *,
+    require_admin: bool = False,
+) -> tuple[int | None, str, bool]:
+    """
+    مقصد گروه را مشخص می‌کند.
+
+    داخل گروه:
+        !فیلتر کلمه
+        -> گروه فعلی
+
+    ریموت:
+        !فیلتر کلمه -100123456
+        -> گروه ریموت
+
+    در عملیات admin ریموت، ادمین بودن کاربر
+    در خود گروه مقصد هم بررسی می‌شود.
+    """
+
+    (
+        target_group,
+        remaining,
+        remote,
+    ) = _extract_optional_group_target(
+        event.args_text or ""
     )
 
-    if target_group is not None:
-        return (
-            target_group,
-            remaining,
-        )
+    if target_group is None:
 
-    if event.is_group:
-        return (
-            event.chat_id,
-            remaining,
-        )
+        if event.is_group:
+            target_group = event.chat_id
+
+        else:
+            return (
+                None,
+                remaining,
+                False,
+            )
+
+    if require_admin and remote:
+
+        try:
+            if target_group == event.chat_id:
+                target_chat = (
+                    await event.get_chat()
+                )
+
+            else:
+                target_chat = (
+                    await self.client.get_entity(
+                        target_group
+                    )
+                )
+
+            allowed = await is_chat_admin(
+                self.client,
+                target_chat,
+                event.sender_id,
+                raise_on_error=True,
+            )
+
+        except Exception as e:
+            print(
+                "⚠️ بررسی دسترسی ادمین گروه مقصد "
+                f"ناموفق بود: {e}"
+            )
+
+            await event.reply(
+                "❌ نتونستم دسترسی ادمین شما "
+                "در گروه مقصد رو بررسی کنم."
+            )
+
+            return (
+                None,
+                remaining,
+                remote,
+            )
+
+        if not allowed:
+            await event.reply(
+                "❌ شما در گروه مقصد ادمین نیستید."
+            )
+
+            return (
+                None,
+                remaining,
+                remote,
+            )
 
     return (
-        None,
+        target_group,
         remaining,
+        remote,
     )
+
+
+
 
 
 @command(
@@ -86,8 +196,10 @@ async def add_word(
     self: "ContentFilterPlugin",
     event: events.NewMessage.Event,
 ) -> None:
-    target_group, word = _resolve_group_target(
-        event
+    target_group, word, _ = await _resolve_group_target(
+        self,
+        event,
+        require_admin=True,
     )
 
     if target_group is None:
@@ -129,8 +241,11 @@ async def remove_word(
     self: "ContentFilterPlugin",
     event: events.NewMessage.Event,
 ) -> None:
-    target_group, word = _resolve_group_target(
-        event
+ 
+    target_group, word, _ = await _resolve_group_target(
+        self,
+        event,
+        require_admin=True,
     )
 
     if target_group is None:
@@ -177,9 +292,12 @@ async def list_words(
     self: "ContentFilterPlugin",
     event: events.NewMessage.Event,
 ) -> None:
-    target_group, remaining = (
-        _resolve_group_target(
-            event
+
+    target_group, remaining, _ = (
+        await _resolve_group_target(
+            self,
+            event,
+            require_admin=True,
         )
     )
 
@@ -231,9 +349,11 @@ async def set_admin_filter_permission(
     self: "ContentFilterPlugin",
     event: events.NewMessage.Event,
 ) -> None:
-    target_group, remaining = (
-        _resolve_group_target(
-            event
+
+    target_group, remaining, _ = (
+        await _resolve_group_target(
+            self,
+            event,
         )
     )
 
@@ -312,7 +432,9 @@ async def on_message(
     if not event.is_group:
         return
 
-    text = event.raw_text or ""
+    text = (
+        event.raw_text or ""
+    )
 
     matched_word = await self.words.find_match(
         event.chat_id,
@@ -328,29 +450,31 @@ async def on_message(
         )
     )
 
+    # ادمین بودن را همیشه بررسی می‌کنیم.
+    # حتی وقتی admins_allowed=False باشد.
     is_admin = False
 
-    if admins_allowed:
-        try:
-            is_admin = await is_chat_admin(
-                self.client,
-                await event.get_chat(),
-                event.sender_id,
-                raise_on_error=True,
-            )
+    try:
+        is_admin = await is_chat_admin(
+            self.client,
+            await event.get_chat(),
+            event.sender_id,
+            raise_on_error=True,
+        )
 
-        except Exception as e:
-            print(
-                "⚠️ بررسی ادمین برای "
-                f"Content Filter ناموفق بود: {e}"
-            )
+    except Exception as e:
+        print(
+            "⚠️ بررسی ادمین برای "
+            f"Content Filter ناموفق بود: {e}"
+        )
 
-    # اگر ادمین‌ها مجاز باشند، پیام ادمین اصلاً فیلتر نمی‌شود.
+    # اگر ادمین‌ها مجاز باشند،
+    # پیام ادمین اصلاً فیلتر نمی‌شود.
     if admins_allowed and is_admin:
         return
 
-    # اول ریپلای می‌زنیم تا به پیام اصلی متصل باشد.
-    # بعد پیام اصلی را حذف می‌کنیم.
+    # اول اعلان را به‌صورت Reply می‌فرستیم
+    # تا کاربر بفهمد دقیقاً کدام پیام حذف شده.
     try:
         await event.reply(
             "⚠️ این پیام به‌دلیل استفاده از "
@@ -359,24 +483,26 @@ async def on_message(
 
     except Exception as e:
         print(
-            "⚠️ نتونستم اعلان فیلتر شدن پیام رو ارسال کنم: "
-            f"{e}"
+            "⚠️ نتونستم اعلان فیلتر شدن پیام "
+            f"رو ارسال کنم: {e}"
         )
 
+    # بعد خود پیام حذف می‌شود.
     try:
         await event.delete()
 
     except Exception as e:
         print(
-            "⚠️ نتونستم پیام فیلترشده رو پاک کنم: "
-            f"{e}"
+            "⚠️ نتونستم پیام فیلترشده "
+            f"رو پاک کنم: {e}"
         )
 
-    # اگر ادمین بوده و اجازه استفاده نداشته،
-    # پیام حذف می‌شود ولی سابقه تخلف ثبت نمی‌شود.
+    # ادمین مشمول فیلتر بوده،
+    # اما نباید سابقه‌ی violation داشته باشد.
     if is_admin:
         return
 
+    # فقط کاربران عادی وارد سیستم تخلفات می‌شوند.
     await self.event_bus.emit(
         event_name="violation",
         event=event,
@@ -386,7 +512,6 @@ async def on_message(
             f"استفاده از کلمه «{matched_word}» ممنوع است."
         ),
     )
-
 
 @on_bus_event("spam_signals")
 async def contribute_spam_signals(
@@ -399,28 +524,26 @@ async def contribute_spam_signals(
     if not event.is_group:
         return
 
-    # اگر ادمین‌ها معاف باشند، برای پیام ادمین
-    # سیگنال content_filter هم تولید نمی‌کنیم.
-    if await self.settings.get_admins_allowed(
-        group_id
-    ):
-        try:
-            is_admin = await is_chat_admin(
-                self.client,
-                await event.get_chat(),
-                user_id,
-                raise_on_error=True,
-            )
+    # ادمین بودن همیشه بررسی می‌شود.
+    # ادمین‌ها نباید از این پلاگین سیگنال تخلف بگیرند.
+    is_admin = False
 
-        except Exception as e:
-            print(
-                "⚠️ بررسی ادمین برای Spam Signal "
-                f"ناموفق بود: {e}"
-            )
-            is_admin = False
+    try:
+        is_admin = await is_chat_admin(
+            self.client,
+            await event.get_chat(),
+            user_id,
+            raise_on_error=True,
+        )
 
-        if is_admin:
-            return
+    except Exception as e:
+        print(
+            "⚠️ بررسی ادمین برای Spam Signal "
+            f"ناموفق بود: {e}"
+        )
+
+    if is_admin:
+        return
 
     matched_word = getattr(
         event,
