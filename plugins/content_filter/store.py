@@ -21,7 +21,10 @@ class WordFilterStore:
     def __init__(self, db):
         self.db = db
 
-        self._cache = TTLCache[int, set[str]](
+        self._cache = TTLCache[
+            int,
+            set[str],
+        ](
             max_entries=self.CACHE_MAX_GROUPS,
             ttl_seconds=self.CACHE_TTL_SECONDS,
         )
@@ -34,7 +37,12 @@ class WordFilterStore:
                 "group_id": "INTEGER NOT NULL",
                 "word": "TEXT NOT NULL",
             },
-            unique=[("group_id", "word")],
+            unique=[
+                (
+                    "group_id",
+                    "word",
+                )
+            ],
             indexes=["group_id"],
         )
 
@@ -54,12 +62,13 @@ class WordFilterStore:
             or_ignore=True,
         )
 
-        # اگر این گروه از قبل cache شده،
-        # همان cache را هم بلافاصله به‌روزرسانی کن.
-        cached = self._cache.get(group_id)
+        cached = self._cache.get(
+            group_id
+        )
 
         if cached is not None:
             cached.add(word)
+
             self._cache.set(
                 group_id,
                 cached,
@@ -80,13 +89,18 @@ class WordFilterStore:
             },
         )
 
-        removed = cursor.rowcount > 0
+        removed = (
+            cursor.rowcount > 0
+        )
 
         if removed:
-            cached = self._cache.get(group_id)
+            cached = self._cache.get(
+                group_id
+            )
 
             if cached is not None:
                 cached.discard(word)
+
                 self._cache.set(
                     group_id,
                     cached,
@@ -99,18 +113,9 @@ class WordFilterStore:
         group_id: int,
         text: str,
     ) -> str | None:
-        """
-        مهم‌ترین مسیر:
-
-        اگر گروه در cache باشد:
-            DB اصلاً صدا زده نمی‌شود.
-
-        اگر نباشد:
-            فقط یک بار DB خوانده می‌شود
-            و نتیجه در RAM قرار می‌گیرد.
-        """
-
-        words = await self.get_all(group_id)
+        words = await self.get_all(
+            group_id
+        )
 
         if not words:
             return None
@@ -140,13 +145,13 @@ class WordFilterStore:
         self,
         group_id: int,
     ) -> set[str]:
-        # اول RAM
-        cached = self._cache.get(group_id)
+        cached = self._cache.get(
+            group_id
+        )
 
         if cached is not None:
             return set(cached)
 
-        # فقط در cache miss سراغ DB
         rows = await self.db.select_all(
             self.TABLE,
             where={
@@ -165,3 +170,112 @@ class WordFilterStore:
         )
 
         return set(words)
+
+
+class ContentFilterSettingsStore:
+    TABLE = "content_filter_settings"
+
+    # پیش‌فرض: ادمین‌ها هم مشمول فیلتر هستند.
+    DEFAULT_ADMINS_ALLOWED = False
+
+    def __init__(self, db):
+        self.db = db
+
+        self._cache = TTLCache[
+            int,
+            bool,
+        ](
+            max_entries=256,
+            ttl_seconds=900,
+        )
+
+    async def create_table(self):
+        await self.db.create_table(
+            self.TABLE,
+            columns={
+                "group_id": (
+                    "INTEGER PRIMARY KEY"
+                ),
+                "admins_allowed": (
+                    "INTEGER NOT NULL "
+                    f"DEFAULT {int(self.DEFAULT_ADMINS_ALLOWED)}"
+                ),
+            },
+        )
+
+    async def _ensure_row(
+        self,
+        group_id: int,
+    ) -> None:
+        await self.db.insert(
+            self.TABLE,
+            {
+                "group_id": group_id,
+            },
+            or_ignore=True,
+        )
+
+    async def get_admins_allowed(
+        self,
+        group_id: int,
+    ) -> bool:
+        cached = self._cache.get(
+            group_id
+        )
+
+        if cached is not None:
+            return bool(cached)
+
+        await self._ensure_row(
+            group_id
+        )
+
+        row = await self.db.select_one(
+            self.TABLE,
+            where={
+                "group_id": group_id,
+            },
+        )
+
+        allowed = bool(
+            int(
+                row["admins_allowed"]
+            )
+        )
+
+        self._cache.set(
+            group_id,
+            allowed,
+        )
+
+        return allowed
+
+    async def set_admins_allowed(
+        self,
+        group_id: int,
+        allowed: bool,
+    ) -> None:
+        await self._ensure_row(
+            group_id
+        )
+
+        value = (
+            1
+            if allowed
+            else 0
+        )
+
+        await self.db.update(
+            self.TABLE,
+            {
+                "admins_allowed": value,
+            },
+            where={
+                "group_id": group_id,
+            },
+        )
+
+        self._cache.set(
+            group_id,
+            bool(allowed),
+        )
