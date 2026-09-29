@@ -227,6 +227,9 @@ class ContentFilterSettingsStore:
             self.TABLE,
             {
                 "group_id": group_id,
+                "admins_allowed": int(
+                    self.DEFAULT_ADMINS_ALLOWED
+                ),
             },
             or_ignore=True,
         )
