@@ -20,20 +20,59 @@ from typing import Any, Optional
 from splusthon import SoroushClient
 
 
-async def resolve_target(client: SoroushClient, event: Any) -> Optional[int]:
+async def resolve_target(
+    client: SoroushClient,
+    event: Any,
+) -> Optional[int]:
     """
-    کاربر هدف رو پیدا می‌کنه: اول از آرگومان (یوزرنیم/منشن تو
-    event.args_text)، اگه نبود از ریپلای (پیامی که روش ریپلای شده).
+    کاربر هدف رو پیدا می‌کنه.
+
+    اولویت:
+    1. آرگومان:
+       - User ID
+       - Username
+       - Mention
+    2. ریپلای به پیام کاربر
     """
-    target = event.args_text.strip() if event.args_text else ""
+
+    target = (
+        event.args_text.strip()
+        if event.args_text
+        else ""
+    )
+
     if target:
+
+        # -----------------------------------------
+        # User ID
+        # -----------------------------------------
+
+        if target.lstrip("-").isdigit():
+            try:
+                return int(target)
+            except ValueError:
+                pass
+
+        # -----------------------------------------
+        # Username / Mention
+        # -----------------------------------------
+
         try:
-            entity = await client.get_entity(target)
+            entity = await client.get_entity(
+                target
+            )
+
             return entity.id
+
         except Exception:
             return None
 
+    # -----------------------------------------
+    # Reply
+    # -----------------------------------------
+
     reply = await event.get_reply_message()
+
     if reply is not None:
         return reply.sender_id
 

@@ -754,7 +754,8 @@ async def on_punishment_request(
             else:
                 punishment_text = (
                     "🔇 مجازات: کاربر میوت شد "
-                    f"({hours} ساعت)."
+                    f"({hours} ساعت).\n"
+                    f"برای لغو این عمل از دستور `!آنمیوت {event.sender_id} ` استفاده کنید"
                 )
 
         else:
