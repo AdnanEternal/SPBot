@@ -2061,10 +2061,12 @@ class AIModelStore:
                         UPDATE {self.KEY_TABLE}
                         SET is_active = 1,
                             status = 'AVAILABLE',
+                            status_reason = NULL,
+                            cooldown_until = NULL,
                             updated_at =
                                 CURRENT_TIMESTAMP
                         WHERE model_id = ?
-                          AND key_number = ?
+                        AND key_number = ?
                         """,
                         (
                             model["id"],

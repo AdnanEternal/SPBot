@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import aiohttp
-
 import time
-from typing import Any, Optional
 
+from datetime import (
+    datetime,
+    timedelta,
+    timezone,
+)
+
+from typing import Any, Optional
 from dataclasses import dataclass
 
 from litellm import acompletion
@@ -456,7 +461,10 @@ class AIGateway:
         # -------------------------------------------------
 
         if (
-            status_code == 401
+            status_code in{
+                401,
+                403
+            }
             or "authenticationerror" in error_name
             or "authentication error" in error_name
         ):
@@ -1168,7 +1176,77 @@ class AIGateway:
 
 
 
+    async def _apply_api_key_failure(
+        self,
+        model_name: str | None,
+        api_key_number: int | None,
+        exc: Exception,
+    ) -> APIKeyFailureDecision:
 
+        decision = (
+            self.classify_api_key_failure(
+                exc
+            )
+        )
+
+        # ---------------------------------------------
+        # این request الزاماً به یک Key ذخیره‌شده
+        # متعلق نیست.
+        #
+        # مثلاً ping_remote_model ممکن است یک model
+        # موقت با api_key مستقیم بسازد.
+        # ---------------------------------------------
+
+        if (
+            model_name is None
+            or api_key_number is None
+            or not decision.should_change_key
+        ):
+            return decision
+
+        cooldown_until = None
+
+        if (
+            decision.status == "COOLDOWN"
+            and decision.cooldown_seconds is not None
+        ):
+            cooldown_until = (
+                datetime.now(
+                    timezone.utc
+                )
+                + timedelta(
+                    seconds=decision.cooldown_seconds
+                )
+            ).isoformat()
+
+        try:
+            await self.models.set_api_key_status(
+                model_name,
+                api_key_number,
+                decision.status,
+                cooldown_until=cooldown_until,
+                reason=decision.reason,
+            )
+
+        except Exception as db_exc:
+            print(
+                "⚠️ ذخیره وضعیت API Key ناموفق بود | "
+                f"model={model_name} | "
+                f"key=#{api_key_number} | "
+                f"error={db_exc}"
+            )
+
+        else:
+            print(
+                "🔑 API KEY STATUS UPDATED | "
+                f"model={model_name} | "
+                f"key=#{api_key_number} | "
+                f"status={decision.status} | "
+                f"reason={decision.reason} | "
+                f"cooldown_until={cooldown_until}"
+            )
+
+        return decision
 
 
 
@@ -1178,6 +1256,7 @@ class AIGateway:
         api_key: Optional[str],
         *,
         statistics_name: str | None = None,
+        api_key_number: int | None = None,
         record_statistics: bool = True,
     ):
         last_error: Optional[Exception] = None
@@ -1244,10 +1323,17 @@ class AIGateway:
                     raise AIGatewayContextLengthError(
                         safe_error
                     ) from exc
-    
+                    
                 if not self._is_retryable_error(
                     exc
                 ):
+
+                    await self._apply_api_key_failure(
+                        statistics_name,
+                        api_key_number,
+                        exc,
+                    )
+
                     raise AIGatewayError(
                         f"[{error_class}] "
                         f"{detailed_error}"
@@ -1277,25 +1363,35 @@ class AIGateway:
             raise AIGatewayRetryExhaustedError(
                 "هیچ خطای مشخصی ثبت نشد."
             )
-    
+
+        # -------------------------------------------------
+        # حالا که تمام retryها شکست خورده‌اند،
+        # تصمیم نهایی مربوط به API Key را ذخیره می‌کنیم.
+        # -------------------------------------------------
+
+        await self._apply_api_key_failure(
+            statistics_name,
+            api_key_number,
+            last_error,
+        )
+
         error_class = (
             self._classify_error(
                 last_error
             )
         )
-    
+
         detailed_error = (
             self._error_details(
                 last_error
             )
         )
-    
+
         raise AIGatewayRetryExhaustedError(
             f"[{error_class}] "
             f"پس از {total_attempts} تلاش ناموفق. "
             f"آخرین خطا: {detailed_error}"
         ) from last_error
-
 
 
 
@@ -1423,8 +1519,8 @@ class AIGateway:
                         kwargs,
                         api_key,
                         statistics_name=candidate["name"],
+                        api_key_number=api_key_number,
                         record_statistics=record_statistics,
-                    
                     )
                     api_response_received = True
 
