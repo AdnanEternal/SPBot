@@ -1441,6 +1441,18 @@ class AIGateway:
                     )
                 )
 
+                self.debug(
+                    "CLASSIFY",
+                    (
+                        f"model={kwargs.get('model')} "
+                        f"key=#{api_key_number or '?'} "
+                        f"status={key_decision.status or '-'} "
+                        f"reason={key_decision.reason or '-'} "
+                        f"cooldown_seconds="
+                        f"{key_decision.cooldown_seconds}"
+                    ),
+                )
+
                 if key_decision.should_change_key:
 
                     await self._apply_api_key_failure(
@@ -1648,6 +1660,24 @@ class AIGateway:
                         )
                     )
 
+                    self.debug(
+                        "KEY_POOL",
+                        (
+                            f"model={litellm_model} "
+                            f"keys="
+                            + ",".join(
+                                (
+                                    f"#{key.get('key_number')}:"
+                                    f"{key.get('status') or 'UNKNOWN'}"
+                                    f"{'*' if key.get('is_active') else ''}"
+                                )
+                                for key in candidate_keys
+                            )
+                            if candidate_keys
+                            else "keys=EMPTY"
+                        ),
+                    )
+
                 if not candidate_keys:
 
                     self.debug(
@@ -1784,6 +1814,15 @@ class AIGateway:
                         ):
 
                             try:
+                                self.debug(
+                                    "PROBE",
+                                    (
+                                        f"model={litellm_model} "
+                                        f"key=#{api_key_number or '?'} "
+                                        "event=SUCCESS "
+                                        "status=AVAILABLE"
+                                    ),
+                                )
 
                                 restored = (
                                     await self.models.mark_api_key_available(
