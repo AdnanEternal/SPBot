@@ -1787,26 +1787,33 @@ class AIModelStore:
                 cooldown_until
             FROM {self.KEY_TABLE}
             WHERE model_id = ?
-              AND status = 'COOLDOWN'
-              AND cooldown_until IS NOT NULL
+            AND status = 'COOLDOWN'
+            AND cooldown_until IS NOT NULL
             """,
             (
                 model_id,
             ),
         )
 
-        expired_ids = []
+        expired_keys = []
 
         for row in rows:
 
-            if self._is_cooldown_expired(
+            cooldown_until = (
                 row["cooldown_until"]
+            )
+
+            if self._is_cooldown_expired(
+                cooldown_until
             ):
-                expired_ids.append(
-                    int(row["id"])
+                expired_keys.append(
+                    (
+                        int(row["id"]),
+                        cooldown_until,
+                    )
                 )
 
-        if not expired_ids:
+        if not expired_keys:
             return
 
         async with self.db.maintenance_lock:
@@ -1818,7 +1825,7 @@ class AIModelStore:
 
             try:
 
-                for key_id in expired_ids:
+                for key_id, cooldown_until in expired_keys:
 
                     await self.db.connection.execute(
                         f"""
@@ -1830,10 +1837,12 @@ class AIModelStore:
                             updated_at =
                                 CURRENT_TIMESTAMP
                         WHERE id = ?
-                          AND status = 'COOLDOWN'
+                        AND status = 'COOLDOWN'
+                        AND cooldown_until = ?
                         """,
                         (
                             key_id,
+                            cooldown_until,
                         ),
                     )
 
@@ -1847,7 +1856,6 @@ class AIModelStore:
                     pass
 
                 raise
-
 
     async def get_available_api_keys(
         self,
@@ -1916,6 +1924,77 @@ class AIModelStore:
             for row in rows
         ]
 
+
+    async def get_api_key_candidates(
+        self,
+        model_name: str,
+    ) -> list[dict[str, Any]]:
+
+        # -------------------------------------------------
+        # مرحله اول:
+        # اگر حتی یک Key قابل استفاده وجود دارد،
+        # فقط همان‌ها را برگردان.
+        # -------------------------------------------------
+
+        available_keys = (
+            await self.get_available_api_keys(
+                model_name
+            )
+        )
+
+        if available_keys:
+            return available_keys
+
+        # -------------------------------------------------
+        # هیچ Key قابل استفاده‌ای نداریم.
+        #
+        # حالا COOLDOWNها را برای Probe بررسی می‌کنیم.
+        #
+        # Keyهای INVALID / DISABLED هرگز Probe نمی‌شوند.
+        # -------------------------------------------------
+
+        model = await self.get(
+            model_name
+        )
+
+        if model is None:
+            return []
+
+        rows = await self.db.fetchall(
+            f"""
+            SELECT
+                id,
+                model_id,
+                key_number,
+                api_key,
+                is_active,
+                status,
+                status_reason,
+                cooldown_until,
+                created_at,
+                updated_at
+            FROM {self.KEY_TABLE}
+            WHERE model_id = ?
+            AND status = 'COOLDOWN'
+            ORDER BY
+                CASE
+                    WHEN cooldown_until IS NULL
+                    THEN 1
+                    ELSE 0
+                END ASC,
+                cooldown_until ASC,
+                is_active DESC,
+                key_number ASC
+            """,
+            (
+                model["id"],
+            ),
+        )
+
+        return [
+            dict(row)
+            for row in rows
+        ]
 
     async def get_available_api_key(
         self,

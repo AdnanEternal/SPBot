@@ -1189,7 +1189,6 @@ class AIGateway:
 
 
 
-
     async def _apply_api_key_failure(
         self,
         model_name: str | None,
@@ -1220,20 +1219,76 @@ class AIGateway:
 
         cooldown_until = None
 
-        if (
-            decision.status == "COOLDOWN"
-            and decision.cooldown_seconds is not None
-        ):
-            cooldown_until = (
-                datetime.now(
-                    timezone.utc
-                )
-                + timedelta(
-                    seconds=decision.cooldown_seconds
-                )
-            ).isoformat()
+        if decision.status == "COOLDOWN":
+
+            # ---------------------------------------------
+            # Provider زمان cooldown را صریحاً داده.
+            # ---------------------------------------------
+
+            if decision.cooldown_seconds is not None:
+
+                cooldown_until = (
+                    datetime.now(
+                        timezone.utc
+                    )
+                    + timedelta(
+                        seconds=decision.cooldown_seconds
+                    )
+                ).isoformat()
+
+            # ---------------------------------------------
+            # Provider زمان جدیدی نداده.
+            #
+            # اگر این Key از قبل COOLDOWN بوده،
+            # cooldown قبلی را خراب نکن.
+            # ---------------------------------------------
+
+            else:
+
+                try:
+
+                    current_keys = (
+                        await self.models.get_api_keys(
+                            model_name
+                        )
+                    )
+
+                    current_key = next(
+                        (
+                            key
+                            for key in current_keys
+                            if int(
+                                key["key_number"]
+                            ) == int(
+                                api_key_number
+                            )
+                        ),
+                        None,
+                    )
+
+                    if (
+                        current_key is not None
+                        and current_key.get("status")
+                        == self.models.KEY_STATUS_COOLDOWN
+                    ):
+                        cooldown_until = (
+                            current_key.get(
+                                "cooldown_until"
+                            )
+                        )
+
+                except Exception as lookup_exc:
+
+                    print(
+                        "⚠️ خواندن وضعیت قبلی API Key "
+                        "ناموفق بود | "
+                        f"model={model_name} | "
+                        f"key=#{api_key_number} | "
+                        f"error={lookup_exc}"
+                    )
 
         try:
+
             await self.models.set_api_key_status(
                 model_name,
                 api_key_number,
@@ -1243,6 +1298,7 @@ class AIGateway:
             )
 
         except Exception as db_exc:
+
             print(
                 "⚠️ ذخیره وضعیت API Key ناموفق بود | "
                 f"model={model_name} | "
@@ -1251,6 +1307,7 @@ class AIGateway:
             )
 
         else:
+
             print(
                 "🔑 API KEY STATUS UPDATED | "
                 f"model={model_name} | "
@@ -1261,8 +1318,6 @@ class AIGateway:
             )
 
         return decision
-
-
 
     async def _completion(
         self,
@@ -1545,7 +1600,7 @@ class AIGateway:
                 else:
 
                     candidate_keys = (
-                        await self.models.get_available_api_keys(
+                        await self.models.get_api_key_candidates(
                             candidate["name"]
                         )
                     )
@@ -1563,7 +1618,6 @@ class AIGateway:
                 # Key Rotation
                 # ---------------------------------------------
 
-                model_exhausted = True
 
                 for key_index, key_data in enumerate(
                     candidate_keys
@@ -1654,6 +1708,44 @@ class AIGateway:
                             - model_started
                         ) * 1000
 
+                        # ---------------------------------------------
+                        # اگر این Key به‌صورت Probe از COOLDOWN آمده
+                        # و درخواست موفق شده، دوباره AVAILABLE شود.
+                        # ---------------------------------------------
+
+                        if (
+                            key_data.get("status")
+                            == self.models.KEY_STATUS_COOLDOWN
+                        ):
+
+                            try:
+
+                                restored = (
+                                    await self.models.mark_api_key_available(
+                                        candidate["name"],
+                                        api_key_number,
+                                        reason="PROBE_SUCCESS",
+                                    )
+                                )
+
+                                if restored:
+
+                                    print(
+                                        "✅ API KEY PROBE SUCCESS | "
+                                        f"model={litellm_model} | "
+                                        f"key=#{api_key_number}"
+                                    )
+
+                            except Exception as status_exc:
+
+                                print(
+                                    "⚠️ بازیابی وضعیت API Key پس از "
+                                    "Probe ناموفق بود | "
+                                    f"model={litellm_model} | "
+                                    f"key=#{api_key_number} | "
+                                    f"error={status_exc}"
+                                )
+
                         if record_statistics:
                             try:
                                 await self.statistics.record_success(
@@ -1701,7 +1793,6 @@ class AIGateway:
 
                     except APIKeyFailureError as exc:
 
-                        model_exhausted = False
 
                         model_latency_ms = (
                             time.perf_counter()
