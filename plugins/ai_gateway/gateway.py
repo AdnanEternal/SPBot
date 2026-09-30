@@ -61,6 +61,10 @@ class AIGateway:
         "AUTHENTICATION"
     )
 
+    KEY_REASON_INVALID_KEY = (
+        "INVALID_KEY"
+    )
+
     KEY_REASON_RATE_LIMIT = (
         "RATE_LIMIT"
     )
@@ -69,13 +73,14 @@ class AIGateway:
         "DAILY_QUOTA"
     )
 
-    KEY_REASON_INVALID_KEY = (
-        "INVALID_KEY"
-    )
-
     KEY_REASON_UNKNOWN = (
         "UNKNOWN"
     )
+
+    # -------------------------------------------------
+    # عباراتی که با اطمینان نسبتاً بالا نشان می‌دهند
+    # خود API Key نامعتبر / منقضی / revoke شده است.
+    # -------------------------------------------------
 
     EXPLICIT_INVALID_KEY_PHRASES = (
         "invalid api key",
@@ -89,15 +94,93 @@ class AIGateway:
         "revoked api key",
         "revoked api token",
         "api key revoked",
+        "api token revoked",
         "authentication failed",
         "invalid credentials",
+        "invalid authentication",
+        "authentication credentials are invalid",
+        "api key does not exist",
+        "api key not found",
     )
+
+    # -------------------------------------------------
+    # عبارت‌های مشخص مربوط به quota / مصرف / billing
+    # -------------------------------------------------
+
+    DAILY_QUOTA_PHRASES = (
+        "quota exhausted",
+        "quota exceeded",
+        "quota has been exceeded",
+        "current quota",
+        "exceeded your current quota",
+        "daily quota",
+        "daily limit",
+        "daily usage limit",
+        "daily usage",
+        "daily requests limit",
+        "daily request limit",
+        "daily tokens limit",
+        "daily token limit",
+        "monthly quota",
+        "monthly limit",
+        "monthly usage limit",
+        "free tier limit",
+        "free tier quota",
+        "usage limit exceeded",
+        "usage limit reached",
+        "usage quota exceeded",
+        "usage quota reached",
+        "credits exhausted",
+        "credits exceeded",
+        "credit limit exceeded",
+        "credit limit reached",
+        "spending limit exceeded",
+        "spend limit exceeded",
+        "budget exceeded",
+        "budget limit exceeded",
+        "billing hard limit",
+        "hard limit exceeded",
+        "insufficient_quota",
+    )
+
+    # -------------------------------------------------
+    # عبارت‌هایی که معمولاً نشان‌دهنده Rate Limit
+    # کوتاه‌مدت هستند.
+    # -------------------------------------------------
+
+    RATE_LIMIT_PHRASES = (
+        "rate limit",
+        "rate_limit",
+        "ratelimit",
+        "too many requests",
+        "requests per minute",
+        "request per minute",
+        "requests per second",
+        "request per second",
+        "tokens per minute",
+        "token per minute",
+        "tokens per second",
+        "token per second",
+        "rpm limit",
+        "tpm limit",
+    )
+
+    # -------------------------------------------------
+    # Rate Limitهایی که مربوط به خود deployment /
+    # concurrency هستند، نه API Key.
+    # -------------------------------------------------
 
     NON_KEY_RATE_LIMIT_PHRASES = (
         "max_parallel_requests",
         "maximum parallel requests",
+        "max parallel requests",
         "deployment has all",
         "too many requests for deployment",
+        "all slots are busy",
+        "all slots in use",
+        "concurrency limit",
+        "concurrent request limit",
+        "max concurrent requests",
     )
 
     def __init__(
@@ -198,6 +281,7 @@ class AIGateway:
             return "SERVER_ERROR"
 
         return "UNKNOWN"
+
 
     @staticmethod
     def _extract_retry_after_seconds(
@@ -309,6 +393,7 @@ class AIGateway:
 
         return None
 
+
     @classmethod
     def classify_api_key_failure(
         cls,
@@ -325,35 +410,36 @@ class AIGateway:
             exc.__class__.__name__.lower()
         )
 
-        message = str(
+        error_text = (
+            cls._build_error_text(
+                exc
+            )
+        )
+
+        # -------------------------------------------------
+        # 0. Context Length
+        #
+        # مشکل ورودی است، نه API Key.
+        # -------------------------------------------------
+
+        if cls._is_context_length_error(
             exc
-        ).lower()
-
-        provider_fields = getattr(
-            exc,
-            "provider_specific_fields",
-            None,
-        )
-
-        provider_text = (
-            str(provider_fields).lower()
-            if provider_fields
-            else ""
-        )
-
-        combined = (
-            message
-            + " "
-            + provider_text
-        )
+        ):
+            return APIKeyFailureDecision(
+                status=None,
+                reason=None,
+            )
 
         # -------------------------------------------------
         # 1. Explicit invalid / revoked / expired key
+        #
+        # متن صریح از status code مهم‌تر است.
         # -------------------------------------------------
 
         if any(
-            phrase in combined
-            for phrase in cls.EXPLICIT_INVALID_KEY_PHRASES
+            phrase in error_text
+            for phrase
+            in cls.EXPLICIT_INVALID_KEY_PHRASES
         ):
             return APIKeyFailureDecision(
                 status="INVALID",
@@ -363,12 +449,16 @@ class AIGateway:
             )
 
         # -------------------------------------------------
-        # 2. Authentication failure
+        # 2. HTTP 401 / AuthenticationError
+        #
+        # در این مرحله فرض می‌کنیم authentication
+        # واقعاً برای credential فعلی شکست خورده.
         # -------------------------------------------------
 
         if (
             status_code == 401
             or "authenticationerror" in error_name
+            or "authentication error" in error_name
         ):
             return APIKeyFailureDecision(
                 status="INVALID",
@@ -378,23 +468,16 @@ class AIGateway:
             )
 
         # -------------------------------------------------
-        # 3. Daily / quota exhaustion
+        # 3. Daily / account quota
+        #
+        # این شرط باید قبل از generic 429 باشد،
+        # چون بسیاری از quota errorها با 429 می‌آیند.
         # -------------------------------------------------
 
-        quota_phrases = (
-            "quota exhausted",
-            "quota exceeded",
-            "daily quota",
-            "daily limit",
-            "usage limit exceeded",
-            "usage limit reached",
-            "credits exhausted",
-            "insufficient_quota",
-        )
-
         if any(
-            phrase in combined
-            for phrase in quota_phrases
+            phrase in error_text
+            for phrase
+            in cls.DAILY_QUOTA_PHRASES
         ):
             return APIKeyFailureDecision(
                 status="COOLDOWN",
@@ -409,26 +492,29 @@ class AIGateway:
             )
 
         # -------------------------------------------------
-        # 4. 429 Rate Limit
+        # 4. Rate Limit
         # -------------------------------------------------
 
         is_rate_limit = (
             status_code == 429
             or "ratelimiterror" in error_name
-            or "rate limit" in message
-            or "rate_limit" in message
+            or any(
+                phrase in error_text
+                for phrase
+                in cls.RATE_LIMIT_PHRASES
+            )
         )
 
         if is_rate_limit:
 
-            # این‌ها می‌توانند محدودیت داخلی
-            # deployment / concurrency باشند،
-            # نه مشکل API Key.
+            # ---------------------------------------------
+            # بعضی 429ها اصلاً مربوط به Key نیستند.
+            # ---------------------------------------------
+
             if any(
-                phrase in combined
-                for phrase in (
-                    cls.NON_KEY_RATE_LIMIT_PHRASES
-                )
+                phrase in error_text
+                for phrase
+                in cls.NON_KEY_RATE_LIMIT_PHRASES
             ):
                 return APIKeyFailureDecision(
                     status=None,
@@ -448,8 +534,9 @@ class AIGateway:
             )
 
         # -------------------------------------------------
-        # 5. بقیه خطاها:
-        # هنوز حق نداریم Key را مقصر بدانیم.
+        # 5. بقیه خطاها
+        #
+        # فعلاً Key را متهم نمی‌کنیم.
         # -------------------------------------------------
 
         return APIKeyFailureDecision(
@@ -457,6 +544,42 @@ class AIGateway:
             reason=None,
         )
     
+    @staticmethod
+    def _build_error_text(
+        exc: Exception,
+    ) -> str:
+
+        message = str(
+            exc
+        ).lower()
+
+        provider_fields = getattr(
+            exc,
+            "provider_specific_fields",
+            None,
+        )
+
+        provider_text = (
+            str(
+                provider_fields
+            ).lower()
+            if provider_fields
+            else ""
+        )
+
+        error_name = (
+            exc.__class__.__name__.lower()
+        )
+
+        return " ".join(
+            (
+                error_name,
+                message,
+                provider_text,
+            )
+        )
+
+
     @staticmethod
     def _error_details(
         exc: Exception,
