@@ -6,6 +6,8 @@ import aiohttp
 import time
 from typing import Any, Optional
 
+from dataclasses import dataclass
+
 from litellm import acompletion
 from .store import (
     AIModelStore,
@@ -35,12 +37,68 @@ class AIGatewayRetryExhaustedError(
     """
     pass
 
+@dataclass(frozen=True)
+class APIKeyFailureDecision:
+    status: str | None
+    reason: str | None
+    cooldown_seconds: float | None = None
+
+    @property
+    def should_change_key(self) -> bool:
+        return self.status in {
+            "COOLDOWN",
+            "INVALID",
+        }
+
 class AIGateway:
     MAX_RETRIES = 3
     RETRY_DELAYS = (1, 2, 4)
     PING_CONCURRENCY = 15
 
     AI_CONCURRENCY = 3
+
+    KEY_REASON_AUTHENTICATION = (
+        "AUTHENTICATION"
+    )
+
+    KEY_REASON_RATE_LIMIT = (
+        "RATE_LIMIT"
+    )
+
+    KEY_REASON_DAILY_QUOTA = (
+        "DAILY_QUOTA"
+    )
+
+    KEY_REASON_INVALID_KEY = (
+        "INVALID_KEY"
+    )
+
+    KEY_REASON_UNKNOWN = (
+        "UNKNOWN"
+    )
+
+    EXPLICIT_INVALID_KEY_PHRASES = (
+        "invalid api key",
+        "invalid api token",
+        "api key is invalid",
+        "api key invalid",
+        "incorrect api key",
+        "incorrect api token",
+        "expired api key",
+        "expired api token",
+        "revoked api key",
+        "revoked api token",
+        "api key revoked",
+        "authentication failed",
+        "invalid credentials",
+    )
+
+    NON_KEY_RATE_LIMIT_PHRASES = (
+        "max_parallel_requests",
+        "maximum parallel requests",
+        "deployment has all",
+        "too many requests for deployment",
+    )
 
     def __init__(
         self,
@@ -140,6 +198,265 @@ class AIGateway:
             return "SERVER_ERROR"
 
         return "UNKNOWN"
+
+    @staticmethod
+    def _extract_retry_after_seconds(
+        exc: Exception,
+    ) -> float | None:
+
+        # ---------------------------------------------
+        # مستقیم روی Exception
+        # ---------------------------------------------
+
+        value = getattr(
+            exc,
+            "retry_after",
+            None,
+        )
+
+        if value is not None:
+            try:
+                seconds = float(value)
+
+                if seconds >= 0:
+                    return seconds
+
+            except (
+                TypeError,
+                ValueError,
+            ):
+                pass
+
+        # ---------------------------------------------
+        # provider_specific_fields
+        # ---------------------------------------------
+
+        provider_fields = getattr(
+            exc,
+            "provider_specific_fields",
+            None,
+        )
+
+        if isinstance(
+            provider_fields,
+            dict,
+        ):
+            value = provider_fields.get(
+                "retry_after"
+            )
+
+            if value is not None:
+                try:
+                    seconds = float(value)
+
+                    if seconds >= 0:
+                        return seconds
+
+                except (
+                    TypeError,
+                    ValueError,
+                ):
+                    pass
+
+        # ---------------------------------------------
+        # HTTP response headers
+        # فقط Retry-After را می‌خوانیم.
+        # چون معنای آن نسبتاً مشخص است.
+        # ---------------------------------------------
+
+        response = getattr(
+            exc,
+            "response",
+            None,
+        )
+
+        headers = getattr(
+            response,
+            "headers",
+            None,
+        )
+
+        if headers:
+            retry_after = None
+
+            try:
+                retry_after = headers.get(
+                    "retry-after"
+                )
+
+                if retry_after is None:
+                    retry_after = headers.get(
+                        "Retry-After"
+                    )
+
+            except Exception:
+                retry_after = None
+
+            if retry_after is not None:
+                try:
+                    seconds = float(
+                        retry_after
+                    )
+
+                    if seconds >= 0:
+                        return seconds
+
+                except (
+                    TypeError,
+                    ValueError,
+                ):
+                    pass
+
+        return None
+
+    @classmethod
+    def classify_api_key_failure(
+        cls,
+        exc: Exception,
+    ) -> APIKeyFailureDecision:
+
+        status_code = getattr(
+            exc,
+            "status_code",
+            None,
+        )
+
+        error_name = (
+            exc.__class__.__name__.lower()
+        )
+
+        message = str(
+            exc
+        ).lower()
+
+        provider_fields = getattr(
+            exc,
+            "provider_specific_fields",
+            None,
+        )
+
+        provider_text = (
+            str(provider_fields).lower()
+            if provider_fields
+            else ""
+        )
+
+        combined = (
+            message
+            + " "
+            + provider_text
+        )
+
+        # -------------------------------------------------
+        # 1. Explicit invalid / revoked / expired key
+        # -------------------------------------------------
+
+        if any(
+            phrase in combined
+            for phrase in cls.EXPLICIT_INVALID_KEY_PHRASES
+        ):
+            return APIKeyFailureDecision(
+                status="INVALID",
+                reason=(
+                    cls.KEY_REASON_INVALID_KEY
+                ),
+            )
+
+        # -------------------------------------------------
+        # 2. Authentication failure
+        # -------------------------------------------------
+
+        if (
+            status_code == 401
+            or "authenticationerror" in error_name
+        ):
+            return APIKeyFailureDecision(
+                status="INVALID",
+                reason=(
+                    cls.KEY_REASON_AUTHENTICATION
+                ),
+            )
+
+        # -------------------------------------------------
+        # 3. Daily / quota exhaustion
+        # -------------------------------------------------
+
+        quota_phrases = (
+            "quota exhausted",
+            "quota exceeded",
+            "daily quota",
+            "daily limit",
+            "usage limit exceeded",
+            "usage limit reached",
+            "credits exhausted",
+            "insufficient_quota",
+        )
+
+        if any(
+            phrase in combined
+            for phrase in quota_phrases
+        ):
+            return APIKeyFailureDecision(
+                status="COOLDOWN",
+                reason=(
+                    cls.KEY_REASON_DAILY_QUOTA
+                ),
+                cooldown_seconds=(
+                    cls._extract_retry_after_seconds(
+                        exc
+                    )
+                ),
+            )
+
+        # -------------------------------------------------
+        # 4. 429 Rate Limit
+        # -------------------------------------------------
+
+        is_rate_limit = (
+            status_code == 429
+            or "ratelimiterror" in error_name
+            or "rate limit" in message
+            or "rate_limit" in message
+        )
+
+        if is_rate_limit:
+
+            # این‌ها می‌توانند محدودیت داخلی
+            # deployment / concurrency باشند،
+            # نه مشکل API Key.
+            if any(
+                phrase in combined
+                for phrase in (
+                    cls.NON_KEY_RATE_LIMIT_PHRASES
+                )
+            ):
+                return APIKeyFailureDecision(
+                    status=None,
+                    reason=None,
+                )
+
+            return APIKeyFailureDecision(
+                status="COOLDOWN",
+                reason=(
+                    cls.KEY_REASON_RATE_LIMIT
+                ),
+                cooldown_seconds=(
+                    cls._extract_retry_after_seconds(
+                        exc
+                    )
+                ),
+            )
+
+        # -------------------------------------------------
+        # 5. بقیه خطاها:
+        # هنوز حق نداریم Key را مقصر بدانیم.
+        # -------------------------------------------------
+
+        return APIKeyFailureDecision(
+            status=None,
+            reason=None,
+        )
+    
     @staticmethod
     def _error_details(
         exc: Exception,
