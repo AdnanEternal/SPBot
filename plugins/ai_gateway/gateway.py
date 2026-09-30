@@ -55,6 +55,20 @@ class APIKeyFailureDecision:
             "INVALID",
         }
 
+
+class APIKeyFailureError(AIGatewayError):
+    def __init__(
+        self,
+        decision: APIKeyFailureDecision,
+        original_error: Exception,
+    ) -> None:
+        self.decision = decision
+        self.original_error = original_error
+
+        super().__init__(
+            str(original_error)
+        )
+
 class AIGateway:
     MAX_RETRIES = 3
     RETRY_DELAYS = (1, 2, 4)
@@ -1260,32 +1274,35 @@ class AIGateway:
         record_statistics: bool = True,
     ):
         last_error: Optional[Exception] = None
-    
+
         total_attempts = (
             self.MAX_RETRIES + 1
         )
-    
-        for attempt in range(total_attempts):
+
+        for attempt in range(
+            total_attempts
+        ):
             try:
                 return await acompletion(
                     **kwargs
                 )
-    
+
             except Exception as exc:
                 last_error = exc
-    
+
                 safe_error = (
                     self._safe_error(
                         exc,
                         api_key,
                     )
                 )
-    
+
                 error_class = (
                     self._classify_error(
                         exc
                     )
                 )
+
                 if (
                     record_statistics
                     and statistics_name
@@ -1308,7 +1325,7 @@ class AIGateway:
                         exc
                     )
                 )
-    
+
                 print(
                     "❌ AI REQUEST FAILED | "
                     f"attempt={attempt + 1}/{total_attempts} | "
@@ -1316,17 +1333,24 @@ class AIGateway:
                     f"model={kwargs.get('model')} | "
                     f"{detailed_error}"
                 )
-    
-                if self._is_context_length_error(
-                    exc
-                ):
-                    raise AIGatewayContextLengthError(
-                        safe_error
-                    ) from exc
-                    
-                if not self._is_retryable_error(
-                    exc
-                ):
+
+                # =================================================
+                # 1. اول بررسی می‌کنیم آیا مشکل از API Key است.
+                #
+                # اگر بله:
+                # - هیچ retry انجام نمی‌شود.
+                # - وضعیت Key فوراً ذخیره می‌شود.
+                # - یک Exception اختصاصی بالا می‌رود تا chat بتواند
+                #   بعداً Key بعدی را انتخاب کند.
+                # =================================================
+
+                key_decision = (
+                    self.classify_api_key_failure(
+                        exc
+                    )
+                )
+
+                if key_decision.should_change_key:
 
                     await self._apply_api_key_failure(
                         statistics_name,
@@ -1334,40 +1358,80 @@ class AIGateway:
                         exc,
                     )
 
+                    print(
+                        "🔑 API KEY FAILURE | "
+                        f"model={statistics_name} | "
+                        f"key=#{api_key_number or '?'} | "
+                        f"status={key_decision.status} | "
+                        f"reason={key_decision.reason} | "
+                        "retry=NO"
+                    )
+
+                    raise APIKeyFailureError(
+                        key_decision,
+                        exc,
+                    ) from exc
+
+                # =================================================
+                # 2. Context Length
+                #
+                # مشکل Key نیست و منطق مخصوص خودش را دارد.
+                # =================================================
+
+                if self._is_context_length_error(
+                    exc
+                ):
+                    raise AIGatewayContextLengthError(
+                        safe_error
+                    ) from exc
+
+                # =================================================
+                # 3. خطاهای موقتی:
+                # فقط اینجا اجازه retry داریم.
+                # =================================================
+
+                if not self._is_retryable_error(
+                    exc
+                ):
                     raise AIGatewayError(
                         f"[{error_class}] "
                         f"{detailed_error}"
                     ) from exc
-    
+
+                # =================================================
+                # 4. هنوز retry باقی مانده؟
+                # =================================================
+
                 if attempt >= self.MAX_RETRIES:
                     break
-    
+
                 delay = self.RETRY_DELAYS[
                     min(
                         attempt,
-                        len(self.RETRY_DELAYS) - 1,
+                        len(
+                            self.RETRY_DELAYS
+                        ) - 1,
                     )
                 ]
-    
+
                 print(
                     "⚠️ Retry AI Gateway | "
                     f"class={error_class} | "
                     f"delay={delay}s"
                 )
-    
+
                 await asyncio.sleep(
                     delay
                 )
-    
+
         if last_error is None:
             raise AIGatewayRetryExhaustedError(
                 "هیچ خطای مشخصی ثبت نشد."
             )
 
-        # -------------------------------------------------
-        # حالا که تمام retryها شکست خورده‌اند،
-        # تصمیم نهایی مربوط به API Key را ذخیره می‌کنیم.
-        # -------------------------------------------------
+        # =================================================
+        # تمام retryهای خطای غیر-Key تمام شده‌اند.
+        # =================================================
 
         await self._apply_api_key_failure(
             statistics_name,
@@ -1392,7 +1456,6 @@ class AIGateway:
             f"پس از {total_attempts} تلاش ناموفق. "
             f"آخرین خطا: {detailed_error}"
         ) from last_error
-
 
 
     @staticmethod
