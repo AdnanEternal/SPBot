@@ -824,10 +824,23 @@ class AIModelStatisticsStore:
 
 
 
-
 class AIModelStore:
     TABLE = "ai_models"
     KEY_TABLE = "ai_model_api_keys"
+
+    KEY_STATUS_AVAILABLE = "AVAILABLE"
+    KEY_STATUS_COOLDOWN = "COOLDOWN"
+    KEY_STATUS_INVALID = "INVALID"
+    KEY_STATUS_DISABLED = "DISABLED"
+
+    KEY_STATUSES = frozenset(
+        {
+            KEY_STATUS_AVAILABLE,
+            KEY_STATUS_COOLDOWN,
+            KEY_STATUS_INVALID,
+            KEY_STATUS_DISABLED,
+        }
+    )
 
     def __init__(self, db: DatabaseManager) -> None:
         self.db = db
@@ -963,6 +976,8 @@ class AIModelStore:
                         "TEXT NOT NULL "
                         "DEFAULT 'AVAILABLE'"
                     ),
+
+                    "status_reason": "TEXT",
 
                     "cooldown_until": "TEXT",
 
@@ -1113,6 +1128,8 @@ class AIModelStore:
                         "DEFAULT 'AVAILABLE'"
                     ),
 
+                    "status_reason": "TEXT",
+
                     "cooldown_until": "TEXT",
 
                     "created_at": (
@@ -1167,7 +1184,11 @@ class AIModelStore:
                 "status": (
                     "TEXT NOT NULL DEFAULT 'AVAILABLE'"
                 ),
+                
+                "status_reason": "TEXT",
+
                 "cooldown_until": "TEXT",
+                
                 "created_at": (
                     "TEXT NOT NULL "
                     "DEFAULT CURRENT_TIMESTAMP"
@@ -1183,6 +1204,27 @@ class AIModelStore:
                 "status",
             ],
         )
+
+        # -------------------------------------------------
+        # Migration: status_reason
+        # -------------------------------------------------
+
+        rows = await self.db.fetchall(
+            f"PRAGMA table_info({self.KEY_TABLE})"
+        )
+
+        columns = {
+            row["name"]
+            for row in rows
+        }
+
+        if "status_reason" not in columns:
+            await self.db.execute(
+                f"""
+                ALTER TABLE {self.KEY_TABLE}
+                ADD COLUMN status_reason TEXT
+                """
+            )
 
     async def _migrate_legacy_api_keys(
         self,
@@ -1689,6 +1731,171 @@ class AIModelStore:
 
         return dict(row)
 
+
+    async def set_api_key_status(
+        self,
+        model_name: str,
+        key_number: int,
+        status: str,
+        *,
+        cooldown_until: str | None = None,
+        reason: str | None = None,
+    ) -> bool:
+
+        model = await self.get(
+            model_name
+        )
+
+        if model is None:
+            return False
+
+        status = (
+            status.strip().upper()
+        )
+
+        if status not in self.KEY_STATUSES:
+            raise ValueError(
+                f"وضعیت API Key نامعتبر است: {status}"
+            )
+
+        key_number = int(
+            key_number
+        )
+
+        if key_number <= 0:
+            raise ValueError(
+                "شماره API Key نامعتبر است."
+            )
+
+        clean_reason = (
+            reason.strip().upper()
+            if reason
+            else None
+        )
+
+        # فقط COOLDOWN می‌تواند cooldown_until داشته باشد.
+        if status != self.KEY_STATUS_COOLDOWN:
+            cooldown_until = None
+
+        async with self.db.maintenance_lock:
+
+            if self.db.connection is None:
+                raise RuntimeError(
+                    "Database connection is not available"
+                )
+
+            cursor = None
+
+            try:
+                cursor = (
+                    await self.db.connection.execute(
+                        f"""
+                        UPDATE {self.KEY_TABLE}
+                        SET
+                            status = ?,
+                            status_reason = ?,
+                            cooldown_until = ?,
+                            updated_at =
+                                CURRENT_TIMESTAMP
+                        WHERE model_id = ?
+                        AND key_number = ?
+                        """,
+                        (
+                            status,
+                            clean_reason,
+                            cooldown_until,
+                            model["id"],
+                            key_number,
+                        ),
+                    )
+                )
+
+                if cursor.rowcount <= 0:
+                    await self.db.connection.rollback()
+                    return False
+
+                await self.db.connection.commit()
+
+                return True
+
+            except Exception:
+                try:
+                    await self.db.connection.rollback()
+                except Exception:
+                    pass
+
+                raise
+
+            finally:
+                try:
+                    if cursor is not None:
+                        await cursor.close()
+                except Exception:
+                    pass
+
+
+    async def mark_api_key_available(
+        self,
+        model_name: str,
+        key_number: int,
+        reason: str | None = None,
+    ) -> bool:
+
+        return await self.set_api_key_status(
+            model_name,
+            key_number,
+            self.KEY_STATUS_AVAILABLE,
+            reason=reason,
+        )
+
+
+    async def mark_api_key_cooldown(
+        self,
+        model_name: str,
+        key_number: int,
+        cooldown_until: str | None,
+        reason: str | None = None,
+    ) -> bool:
+
+        return await self.set_api_key_status(
+            model_name,
+            key_number,
+            self.KEY_STATUS_COOLDOWN,
+            cooldown_until=cooldown_until,
+            reason=reason,
+        )
+
+
+    async def mark_api_key_invalid(
+        self,
+        model_name: str,
+        key_number: int,
+        reason: str | None = None,
+    ) -> bool:
+
+        return await self.set_api_key_status(
+            model_name,
+            key_number,
+            self.KEY_STATUS_INVALID,
+            reason=reason,
+        )
+
+
+    async def mark_api_key_disabled(
+        self,
+        model_name: str,
+        key_number: int,
+        reason: str | None = None,
+    ) -> bool:
+
+        return await self.set_api_key_status(
+            model_name,
+            key_number,
+            self.KEY_STATUS_DISABLED,
+            reason=reason,
+        )
+
+
     async def add_api_key(
         self,
         model_name: str,
@@ -1920,10 +2127,13 @@ class AIModelStore:
             f"""
             UPDATE {self.KEY_TABLE}
             SET api_key = ?,
+                status = 'AVAILABLE',
+                status_reason = NULL,
+                cooldown_until = NULL,
                 updated_at =
                     CURRENT_TIMESTAMP
             WHERE model_id = ?
-              AND key_number = ?
+            AND key_number = ?
             """,
             (
                 clean_api_key,
