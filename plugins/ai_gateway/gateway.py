@@ -70,6 +70,9 @@ class APIKeyFailureError(AIGatewayError):
         )
 
 class AIGateway:
+    DEBUG_LOGGING = False
+
+
     MAX_RETRIES = 3
     RETRY_DELAYS = (1, 2, 4)
     PING_CONCURRENCY = 15
@@ -215,6 +218,19 @@ class AIGateway:
             self.AI_CONCURRENCY
         )
 
+
+    def debug(
+        self,
+        category: str,
+        message: str,
+    ) -> None:
+        if not self.DEBUG_LOGGING:
+            return
+
+        print(
+            f"[AIGateway][{category}] {message}",
+            flush=True,
+        )
 
 
     @staticmethod
@@ -905,9 +921,12 @@ class AIGateway:
                     )
 
                 except Exception as stats_exc:
-                    print(
-                        "⚠️ ثبت Ping ناموفق بود: "
-                        f"{stats_exc}"
+                    self.debug(
+                        "STATS",
+                        (
+                            "event=PING_FAILURE_RECORD_FAILED "
+                            f"error_type={type(stats_exc).__name__}"
+                        ),
                     )
 
             return False, latency, str(exc)
@@ -925,9 +944,12 @@ class AIGateway:
                 )
 
             except Exception as stats_exc:
-                print(
-                    "⚠️ ثبت Ping موفق بود ولی ذخیره آمار "
-                    f"ناموفق شد: {stats_exc}"
+                self.debug(
+                    "STATS",
+                    (
+                        "event=FAILURE_RECORD_FAILED "
+                        f"error_type={type(stats_exc).__name__}"
+                    ),
                 )
 
         return True, latency, ""
@@ -1279,12 +1301,14 @@ class AIGateway:
 
                 except Exception as lookup_exc:
 
-                    print(
-                        "⚠️ خواندن وضعیت قبلی API Key "
-                        "ناموفق بود | "
-                        f"model={model_name} | "
-                        f"key=#{api_key_number} | "
-                        f"error={lookup_exc}"
+                    self.debug(
+                        "KEY_STATUS",
+                        (
+                            f"model={model_name} "
+                            f"key=#{api_key_number} "
+                            "event=READ_PREVIOUS_STATUS_FAILED "
+                            f"error_type={type(lookup_exc).__name__}"
+                        ),
                     )
 
         try:
@@ -1299,22 +1323,28 @@ class AIGateway:
 
         except Exception as db_exc:
 
-            print(
-                "⚠️ ذخیره وضعیت API Key ناموفق بود | "
-                f"model={model_name} | "
-                f"key=#{api_key_number} | "
-                f"error={db_exc}"
+            self.debug(
+                "KEY_STATUS",
+                (
+                    f"model={model_name} "
+                    f"key=#{api_key_number} "
+                    "event=UPDATE_FAILED "
+                    f"error_type={type(db_exc).__name__}"
+                ),
             )
 
         else:
 
-            print(
-                "🔑 API KEY STATUS UPDATED | "
-                f"model={model_name} | "
-                f"key=#{api_key_number} | "
-                f"status={decision.status} | "
-                f"reason={decision.reason} | "
-                f"cooldown_until={cooldown_until}"
+            self.debug(
+                "KEY_STATUS",
+                (
+                    f"model={model_name} "
+                    f"key=#{api_key_number} "
+                    f"event=UPDATED "
+                    f"status={decision.status} "
+                    f"reason={decision.reason or '-'} "
+                    f"cooldown_until={cooldown_until or '-'}"
+                ),
             )
 
         return decision
@@ -1370,9 +1400,12 @@ class AIGateway:
                         )
 
                     except Exception as stats_exc:
-                        print(
-                            "⚠️ ثبت خطای Attempt مدل ناموفق بود: "
-                            f"{stats_exc}"
+                        self.debug(
+                            "STATS",
+                            (
+                                "event=ATTEMPT_ERROR_RECORD_FAILED "
+                                f"error_type={type(stats_exc).__name__}"
+                            ),
                         )
 
                 detailed_error = (
@@ -1381,12 +1414,15 @@ class AIGateway:
                     )
                 )
 
-                print(
-                    "❌ AI REQUEST FAILED | "
-                    f"attempt={attempt + 1}/{total_attempts} | "
-                    f"class={error_class} | "
-                    f"model={kwargs.get('model')} | "
-                    f"{detailed_error}"
+                self.debug(
+                    "REQUEST",
+                    (
+                        f"event=FAILED "
+                        f"attempt={attempt + 1}/{total_attempts} "
+                        f"class={error_class} "
+                        f"model={kwargs.get('model')} "
+                        f"error={self._safe_error(detailed_error, api_key)}"
+                    ),
                 )
 
                 # =================================================
@@ -1413,13 +1449,16 @@ class AIGateway:
                         exc,
                     )
 
-                    print(
-                        "🔑 API KEY FAILURE | "
-                        f"model={statistics_name} | "
-                        f"key=#{api_key_number or '?'} | "
-                        f"status={key_decision.status} | "
-                        f"reason={key_decision.reason} | "
-                        "retry=NO"
+                    self.debug(
+                        "KEY",
+                        (
+                            f"model={statistics_name} "
+                            f"key=#{api_key_number or '?'} "
+                            "event=FAILURE "
+                            f"status={key_decision.status} "
+                            f"reason={key_decision.reason or '-'} "
+                            "retry=NO"
+                        ),
                     )
 
                     raise APIKeyFailureError(
@@ -1469,10 +1508,14 @@ class AIGateway:
                     )
                 ]
 
-                print(
-                    "⚠️ Retry AI Gateway | "
-                    f"class={error_class} | "
-                    f"delay={delay}s"
+                self.debug(
+                    "RETRY",
+                    (
+                        f"model={kwargs.get('model')} "
+                        f"attempt={attempt + 1}/{total_attempts} "
+                        f"class={error_class} "
+                        f"delay={delay}s"
+                    ),
                 )
 
                 await asyncio.sleep(
@@ -1607,9 +1650,12 @@ class AIGateway:
 
                 if not candidate_keys:
 
-                    print(
-                        "⚠️ NO AVAILABLE API KEY | "
-                        f"model={litellm_model}"
+                    self.debug(
+                        "KEY",
+                        (
+                            f"model={litellm_model} "
+                            "event=NO_CANDIDATE_KEY"
+                        ),
                     )
 
                     continue
@@ -1635,6 +1681,22 @@ class AIGateway:
                         )
                     )
 
+                    is_probe = (
+                        key_data.get("status")
+                        == self.models.KEY_STATUS_COOLDOWN
+                    )
+
+                    self.debug(
+                        "KEY",
+                        (
+                            f"model={litellm_model} "
+                            f"key=#{api_key_number or '?'} "
+                            f"status={key_data.get('status') or 'UNKNOWN'} "
+                            f"probe={'YES' if is_probe else 'NO'} "
+                            f"position={key_index + 1}/{len(candidate_keys)}"
+                        ),
+                    )
+
                     kwargs: dict[str, Any] = {
                         "model": litellm_model,
                         "messages": messages,
@@ -1658,11 +1720,14 @@ class AIGateway:
 
                     try:
 
-                        print(
-                            "📡 AI KEY ATTEMPT | "
-                            f"model={litellm_model} | "
-                            f"key=#{api_key_number or '?'} | "
-                            f"{key_index + 1}/{len(candidate_keys)}"
+                        self.debug(
+                            "REQUEST",
+                            (
+                                f"event=KEY_ATTEMPT "
+                                f"model={litellm_model} "
+                                f"key=#{api_key_number or '?'} "
+                                f"position={key_index + 1}/{len(candidate_keys)}"
+                            ),
                         )
 
                         response = (
@@ -1738,12 +1803,14 @@ class AIGateway:
 
                             except Exception as status_exc:
 
-                                print(
-                                    "⚠️ بازیابی وضعیت API Key پس از "
-                                    "Probe ناموفق بود | "
-                                    f"model={litellm_model} | "
-                                    f"key=#{api_key_number} | "
-                                    f"error={status_exc}"
+                                self.debug(
+                                    "PROBE",
+                                    (
+                                        f"model={litellm_model} "
+                                        f"key=#{api_key_number} "
+                                        "event=RESTORE_STATUS_FAILED "
+                                        f"error_type={type(status_exc).__name__}"
+                                    ),
                                 )
 
                         if record_statistics:
@@ -1759,11 +1826,13 @@ class AIGateway:
                                     f"{stats_exc}"
                                 )
 
-                        print(
-                            "✅ AI KEY SUCCESS | "
-                            f"model={litellm_model} | "
-                            f"key=#{api_key_number or '?'} | "
-                            f"latency={model_latency_ms:.0f}ms"
+                        self.debug(
+                            "SUCCESS",
+                            (
+                                f"model={litellm_model} "
+                                f"key=#{api_key_number or '?'} "
+                                f"latency={model_latency_ms:.0f}ms"
+                            ),
                         )
 
                         if not return_metadata:
@@ -1801,13 +1870,16 @@ class AIGateway:
 
                         last_error = exc
 
-                        print(
-                            "🔑 API KEY UNAVAILABLE | "
-                            f"model={litellm_model} | "
-                            f"key=#{api_key_number or '?'} | "
-                            f"status={exc.decision.status} | "
-                            f"reason={exc.decision.reason} | "
-                            "retry=NO"
+                        self.debug(
+                            "KEY",
+                            (
+                                f"model={litellm_model} "
+                                f"key=#{api_key_number or '?'} "
+                                "event=UNAVAILABLE "
+                                f"status={exc.decision.status} "
+                                f"reason={exc.decision.reason or '-'} "
+                                "retry=NO"
+                            ),
                         )
 
                         # -------------------------------------
@@ -1823,20 +1895,26 @@ class AIGateway:
                             < len(candidate_keys)
                         ):
 
-                            print(
-                                "🔁 SWITCH API KEY | "
-                                f"model={litellm_model} | "
-                                f"next_key=#"
-                                f"{candidate_keys[key_index + 1].get('key_number')}"
+                            self.debug(
+                                "ROTATION",
+                                (
+                                    f"model={litellm_model} "
+                                    f"from_key=#{api_key_number or '?'} "
+                                    f"to_key=#"
+                                    f"{candidate_keys[key_index + 1].get('key_number')}"
+                                ),
                             )
 
                             continue
 
                         # هیچ Key سالم دیگری در این Model
                         # باقی نمانده.
-                        print(
-                            "⚠️ ALL API KEYS EXHAUSTED | "
-                            f"model={litellm_model}"
+                        self.debug(
+                            "ROTATION",
+                            (
+                                f"model={litellm_model} "
+                                "event=ALL_KEYS_EXHAUSTED"
+                            ),
                         )
 
                         break
@@ -1875,13 +1953,16 @@ class AIGateway:
                                     f"{stats_exc}"
                                 )
 
-                        print(
-                            "❌ AI MODEL FAILED | "
-                            f"model={litellm_model} | "
-                            f"key=#{api_key_number or '?'} | "
-                            f"class={error_category} | "
-                            f"latency={model_latency_ms:.0f}ms | "
-                            f"error={safe_error}"
+                        self.debug(
+                            "MODEL",
+                            (
+                                f"event=FAILED "
+                                f"model={litellm_model} "
+                                f"key=#{api_key_number or '?'} "
+                                f"class={error_category} "
+                                f"latency={model_latency_ms:.0f}ms "
+                                f"error={safe_error}"
+                            ),
                         )
 
                         # -------------------------------------
@@ -1906,9 +1987,13 @@ class AIGateway:
 
                 if index + 1 < len(candidates):
 
-                    print(
-                        "🔁 FALLBACK TO NEXT MODEL | "
-                        f"next={self._litellm_model(candidates[index + 1])}"
+                    self.debug(
+                        "FALLBACK",
+                        (
+                            f"from_model={litellm_model} "
+                            f"to_model="
+                            f"{self._litellm_model(candidates[index + 1])}"
+                        ),
                     )
 
                     continue
