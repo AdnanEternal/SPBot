@@ -1674,6 +1674,7 @@ class AIModelStore:
                 api_key,
                 is_active,
                 status,
+                status_reason,
                 cooldown_until,
                 created_at,
                 updated_at
@@ -1712,12 +1713,13 @@ class AIModelStore:
                 api_key,
                 is_active,
                 status,
+                status_reason,
                 cooldown_until,
                 created_at,
                 updated_at
             FROM {self.KEY_TABLE}
             WHERE model_id = ?
-              AND is_active = 1
+            AND is_active = 1
             ORDER BY id ASC
             LIMIT 1
             """,
