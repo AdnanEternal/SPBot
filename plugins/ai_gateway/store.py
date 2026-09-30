@@ -6,6 +6,11 @@ from litellm import token_counter
 
 from typing import Any, Optional
 
+from datetime import (
+    datetime,
+    timezone,
+)
+
 from core.database_manager import DatabaseManager
 from core.ttl_cache import TTLCache
 from core.time_manager import (
@@ -1733,6 +1738,198 @@ class AIModelStore:
 
         return dict(row)
 
+    @staticmethod
+    def _is_cooldown_expired(
+        cooldown_until: str | None,
+    ) -> bool:
+
+        if not cooldown_until:
+            return False
+
+        try:
+            expires_at = (
+                datetime.fromisoformat(
+                    cooldown_until
+                )
+            )
+
+        except (
+            TypeError,
+            ValueError,
+        ):
+            # تاریخ نامعتبر را expire شده فرض نمی‌کنیم.
+            # در این حالت Key همچنان unavailable می‌ماند
+            # تا اطلاعاتش دستی اصلاح شود.
+            return False
+
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(
+                tzinfo=timezone.utc
+            )
+
+        return (
+            expires_at
+            <= datetime.now(
+                timezone.utc
+            )
+        )
+
+
+    async def _restore_expired_cooldowns(
+        self,
+        model_id: int,
+    ) -> None:
+
+        rows = await self.db.fetchall(
+            f"""
+            SELECT
+                id,
+                cooldown_until
+            FROM {self.KEY_TABLE}
+            WHERE model_id = ?
+              AND status = 'COOLDOWN'
+              AND cooldown_until IS NOT NULL
+            """,
+            (
+                model_id,
+            ),
+        )
+
+        expired_ids = []
+
+        for row in rows:
+
+            if self._is_cooldown_expired(
+                row["cooldown_until"]
+            ):
+                expired_ids.append(
+                    int(row["id"])
+                )
+
+        if not expired_ids:
+            return
+
+        async with self.db.maintenance_lock:
+
+            if self.db.connection is None:
+                raise RuntimeError(
+                    "Database connection is not available"
+                )
+
+            try:
+
+                for key_id in expired_ids:
+
+                    await self.db.connection.execute(
+                        f"""
+                        UPDATE {self.KEY_TABLE}
+                        SET
+                            status = 'AVAILABLE',
+                            status_reason = NULL,
+                            cooldown_until = NULL,
+                            updated_at =
+                                CURRENT_TIMESTAMP
+                        WHERE id = ?
+                          AND status = 'COOLDOWN'
+                        """,
+                        (
+                            key_id,
+                        ),
+                    )
+
+                await self.db.connection.commit()
+
+            except Exception:
+
+                try:
+                    await self.db.connection.rollback()
+                except Exception:
+                    pass
+
+                raise
+
+
+    async def get_available_api_keys(
+        self,
+        model_name: str,
+    ) -> list[dict[str, Any]]:
+
+        model = await self.get(
+            model_name
+        )
+
+        if model is None:
+            return []
+
+        model_id = int(
+            model["id"]
+        )
+
+        # -------------------------------------------------
+        # اول COOLDOWNهای منقضی‌شده را برمی‌گردانیم.
+        # -------------------------------------------------
+
+        try:
+            await self._restore_expired_cooldowns(
+                model_id
+            )
+
+        except Exception as exc:
+            print(
+                "⚠️ بروزرسانی COOLDOWNهای منقضی‌شده "
+                "ناموفق بود | "
+                f"model={model_name} | "
+                f"error={exc}"
+            )
+
+        # -------------------------------------------------
+        # فقط Keyهای واقعاً قابل استفاده
+        # -------------------------------------------------
+
+        rows = await self.db.fetchall(
+            f"""
+            SELECT
+                id,
+                model_id,
+                key_number,
+                api_key,
+                is_active,
+                status,
+                status_reason,
+                cooldown_until,
+                created_at,
+                updated_at
+            FROM {self.KEY_TABLE}
+            WHERE model_id = ?
+              AND status = 'AVAILABLE'
+            ORDER BY
+                is_active DESC,
+                key_number ASC
+            """,
+            (
+                model_id,
+            ),
+        )
+
+        return [
+            dict(row)
+            for row in rows
+        ]
+
+
+    async def get_available_api_key(
+        self,
+        model_name: str,
+    ) -> Optional[dict[str, Any]]:
+
+        keys = await self.get_available_api_keys(
+            model_name
+        )
+
+        if not keys:
+            return None
+
+        return keys[0]
 
     async def set_api_key_status(
         self,
