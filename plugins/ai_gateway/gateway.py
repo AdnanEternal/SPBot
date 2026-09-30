@@ -475,7 +475,7 @@ class AIGateway:
         # -------------------------------------------------
 
         if (
-            status_code in{
+            status_code in {
                 401,
                 403
             }

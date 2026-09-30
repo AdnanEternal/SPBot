@@ -1670,6 +1670,28 @@ class AIModelStore:
         if model is None:
             return []
 
+        model_id = int(
+            model["id"]
+        )
+
+        # ---------------------------------------------
+        # اگر Cooldown یکی از Keyها تمام شده،
+        # وضعیتش را قبل از نمایش به AVAILABLE برگردان.
+        # ---------------------------------------------
+
+        try:
+            await self._restore_expired_cooldowns(
+                model_id
+            )
+
+        except Exception as exc:
+            print(
+                "⚠️ بروزرسانی COOLDOWNهای منقضی‌شده "
+                "برای اطلاعات مدل ناموفق بود | "
+                f"model={model_name} | "
+                f"error={exc}"
+            )
+
         rows = await self.db.fetchall(
             f"""
             SELECT
@@ -1688,7 +1710,7 @@ class AIModelStore:
             ORDER BY key_number ASC
             """,
             (
-                model["id"],
+                model_id,
             ),
         )
 
