@@ -1628,6 +1628,14 @@ class AIGateway:
                     candidate
                 )
 
+                self.debug(
+                    "MODEL",
+                    (
+                        f"event=START "
+                        f"model={litellm_model} "
+                        f"position={index + 1}/{len(candidates)}"
+                    ),
+                )
                 # ---------------------------------------------
                 # تمام API Keyهای قابل استفاده این Model
                 # Active Key در صورت سالم بودن، اولین Key است.
@@ -2023,7 +2031,13 @@ class AIGateway:
                 #
                 # حالا fallback بین Modelها.
                 # ---------------------------------------------
-
+                self.debug(
+                    "MODEL",
+                    (
+                        f"event=EXHAUSTED "
+                        f"model={litellm_model}"
+                    ),
+                )
                 if index + 1 < len(candidates):
 
                     self.debug(
