@@ -1519,200 +1519,308 @@ class AIGateway:
                 )
 
                 # ---------------------------------------------
-                # Active API Key
+                # تمام API Keyهای قابل استفاده این Model
+                # Active Key در صورت سالم بودن، اولین Key است.
                 # ---------------------------------------------
 
-                active_key = None
+                if model is not None:
 
-                try:
-                    active_key = (
-                        await self.models.get_active_api_key(
+                    # وقتی مدل به‌صورت صریح از بیرون داده شده،
+                    # هنوز rotation دیتابیسی انجام نمی‌دهیم.
+                    #
+                    # این مسیر برای ping و استفاده مستقیم
+                    # از model dict حفظ می‌شود.
+
+                    candidate_keys = [
+                        {
+                            "api_key": candidate.get(
+                                "api_key"
+                            ),
+                            "key_number": candidate.get(
+                                "api_key_number"
+                            ),
+                        }
+                    ]
+
+                else:
+
+                    candidate_keys = (
+                        await self.models.get_available_api_keys(
                             candidate["name"]
                         )
                     )
 
-                except Exception as exc:
-                    print(
-                        "⚠️ دریافت Active API Key ناموفق بود: "
-                        f"model={candidate['name']} | "
-                        f"error={exc}"
-                    )
-
-                api_key = (
-                    active_key["api_key"]
-                    if active_key is not None
-                    else None
-                )
-
-                api_key_number = (
-                    active_key["key_number"]
-                    if active_key is not None
-                    else None
-                )
-
-                kwargs: dict[str, Any] = {
-                    "model": litellm_model,
-                    "messages": messages,
-                    "timeout": timeout,
-                }
-
-                if api_key:
-                    kwargs["api_key"] = api_key
-
-                if candidate.get("base_url"):
-                    kwargs["api_base"] = (
-                        candidate["base_url"]
-                    )
-
-                if temperature is not None:
-                    kwargs["temperature"] = temperature
-
-                model_started = time.perf_counter()
-                api_response_received = False
-                
-                try:
+                if not candidate_keys:
 
                     print(
-                        "📡 AI MODEL ATTEMPT | "
-                        f"{index + 1}/{len(candidates)} | "
-                        f"model={litellm_model} | "
-                        f"key=#{api_key_number or '?'}"
+                        "⚠️ NO AVAILABLE API KEY | "
+                        f"model={litellm_model}"
                     )
-                    response = await self._completion(
-                        kwargs,
-                        api_key,
-                        statistics_name=candidate["name"],
-                        api_key_number=api_key_number,
-                        record_statistics=record_statistics,
+
+                    continue
+
+                # ---------------------------------------------
+                # Key Rotation
+                # ---------------------------------------------
+
+                model_exhausted = True
+
+                for key_index, key_data in enumerate(
+                    candidate_keys
+                ):
+
+                    api_key = (
+                        key_data.get(
+                            "api_key"
+                        )
                     )
-                    api_response_received = True
+
+                    api_key_number = (
+                        key_data.get(
+                            "key_number"
+                        )
+                    )
+
+                    kwargs: dict[str, Any] = {
+                        "model": litellm_model,
+                        "messages": messages,
+                        "timeout": timeout,
+                    }
+
+                    if api_key:
+                        kwargs["api_key"] = api_key
+
+                    if candidate.get("base_url"):
+                        kwargs["api_base"] = (
+                            candidate["base_url"]
+                        )
+
+                    if temperature is not None:
+                        kwargs["temperature"] = temperature
+
+                    model_started = (
+                        time.perf_counter()
+                    )
 
                     try:
-                        content = (
-                            response
-                            .choices[0]
-                            .message
-                            .content
+
+                        print(
+                            "📡 AI KEY ATTEMPT | "
+                            f"model={litellm_model} | "
+                            f"key=#{api_key_number or '?'} | "
+                            f"{key_index + 1}/{len(candidate_keys)}"
                         )
+
+                        response = (
+                            await self._completion(
+                                kwargs,
+                                api_key,
+                                statistics_name=(
+                                    candidate["name"]
+                                ),
+                                api_key_number=(
+                                    api_key_number
+                                ),
+                                record_statistics=(
+                                    record_statistics
+                                ),
+                            )
+                        )
+
+                        try:
+                            content = (
+                                response
+                                .choices[0]
+                                .message
+                                .content
+                            )
+
+                        except Exception as exc:
+                            raise AIGatewayError(
+                                "پاسخ مدل ساختار قابل استفاده‌ای نداشت."
+                            ) from exc
+
+                        if not content:
+                            raise AIGatewayError(
+                                "مدل پاسخ متنی خالی برگرداند."
+                            )
+
+                        content = str(
+                            content
+                        ).strip()
+
+                        model_latency_ms = (
+                            time.perf_counter()
+                            - model_started
+                        ) * 1000
+
+                        if record_statistics:
+                            try:
+                                await self.statistics.record_success(
+                                    candidate["name"],
+                                    model_latency_ms,
+                                )
+
+                            except Exception as stats_exc:
+                                print(
+                                    "⚠️ ثبت موفقیت مدل ناموفق بود: "
+                                    f"{stats_exc}"
+                                )
+
+                        print(
+                            "✅ AI KEY SUCCESS | "
+                            f"model={litellm_model} | "
+                            f"key=#{api_key_number or '?'} | "
+                            f"latency={model_latency_ms:.0f}ms"
+                        )
+
+                        if not return_metadata:
+                            return content
+
+                        return (
+                            content,
+                            {
+                                "model": litellm_model,
+                                "provider": candidate.get(
+                                    "provider"
+                                ),
+                                "model_id": candidate.get(
+                                    "model_id"
+                                ),
+                                "base_url": candidate.get(
+                                    "base_url"
+                                ),
+                                "api_key_number": (
+                                    api_key_number
+                                ),
+                                "usage": self._extract_usage(
+                                    response
+                                ),
+                            },
+                        )
+
+                    except APIKeyFailureError as exc:
+
+                        model_exhausted = False
+
+                        model_latency_ms = (
+                            time.perf_counter()
+                            - model_started
+                        ) * 1000
+
+                        last_error = exc
+
+                        print(
+                            "🔑 API KEY UNAVAILABLE | "
+                            f"model={litellm_model} | "
+                            f"key=#{api_key_number or '?'} | "
+                            f"status={exc.decision.status} | "
+                            f"reason={exc.decision.reason} | "
+                            "retry=NO"
+                        )
+
+                        # -------------------------------------
+                        # مشکل از همین Key بود.
+                        #
+                        # هیچ retry روی همین Key نداریم.
+                        # مستقیم Key بعدی همین Model.
+                        # -------------------------------------
+
+                        if (
+                            key_index
+                            + 1
+                            < len(candidate_keys)
+                        ):
+
+                            print(
+                                "🔁 SWITCH API KEY | "
+                                f"model={litellm_model} | "
+                                f"next_key=#"
+                                f"{candidate_keys[key_index + 1].get('key_number')}"
+                            )
+
+                            continue
+
+                        # هیچ Key سالم دیگری در این Model
+                        # باقی نمانده.
+                        print(
+                            "⚠️ ALL API KEYS EXHAUSTED | "
+                            f"model={litellm_model}"
+                        )
+
+                        break
 
                     except Exception as exc:
-                        raise AIGatewayError(
-                            "پاسخ مدل ساختار قابل استفاده‌ای نداشت."
-                        ) from exc
 
-                    if not content:
-                        raise AIGatewayError(
-                            "مدل پاسخ متنی خالی برگرداند."
+                        model_latency_ms = (
+                            time.perf_counter()
+                            - model_started
+                        ) * 1000
+
+                        last_error = exc
+
+                        error_category = (
+                            self._classify_error(
+                                exc
+                            )
                         )
 
-                    content = str(
-                        content
-                    ).strip()
-
-                    model_latency_ms = (
-                        time.perf_counter()
-                        - model_started
-                    ) * 1000
-
-                    if record_statistics:
-                        try:
-                            await self.statistics.record_success(
-                                candidate["name"],
-                                model_latency_ms,
+                        safe_error = (
+                            self._safe_error(
+                                str(exc),
+                                api_key,
                             )
-
-                        except Exception as stats_exc:
-                            print(
-                                "⚠️ ثبت موفقیت مدل ناموفق بود: "
-                                f"{stats_exc}"
-                            )
-
-
-                    # ---------------------------------------------
-                    # Statistics: SUCCESS
-                    # ---------------------------------------------
-
-
-                    print(
-                        "✅ AI MODEL SUCCESS | "
-                        f"model={litellm_model} | "
-                        f"latency={model_latency_ms:.0f}ms"
-                    )
-
-                    if not return_metadata:
-                        return content
-
-                    return (
-                        content,
-                        {
-                            "model": litellm_model,
-                            "provider": candidate.get(
-                                "provider"
-                            ),
-                            "model_id": candidate.get(
-                                "model_id"
-                            ),
-                            "base_url": candidate.get(
-                                "base_url"
-                            ),
-                            "api_key_number": api_key_number,
-                            "usage": self._extract_usage(
-                                response
-                            ),
-                        },
-                    )
-
-                except Exception as exc:
-
-                    model_latency_ms = (
-                        time.perf_counter()
-                        - model_started
-                    ) * 1000
-
-                    last_error = exc
-
-                    error_category = (
-                        self._classify_error(
-                            exc
                         )
-                    )
 
-                    safe_error = self._safe_error(
-                        str(exc),
-                        api_key,
-                    )
+                        if record_statistics:
+                            try:
+                                await self.statistics.record_failure(
+                                    candidate["name"]
+                                )
 
-                    # ---------------------------------------------
-                    # Statistics: FAILURE
-                    # ---------------------------------------------
+                            except Exception as stats_exc:
+                                print(
+                                    "⚠️ ثبت آمار شکست مدل ناموفق بود: "
+                                    f"{stats_exc}"
+                                )
 
-                    if record_statistics:
-                        try:
-                            await self.statistics.record_failure(
-                                candidate["name"],
-                            )
-
-                        except Exception as stats_exc:
-                            print(
-                                "⚠️ ثبت آمار شکست مدل ناموفق بود: "
-                                f"{stats_exc}"
-                            )
-
-                    print(
-                        "❌ AI MODEL FAILED | "
-                        f"model={litellm_model} | "
-                        f"class={error_category} | "
-                        f"latency={model_latency_ms:.0f}ms | "
-                        f"error={safe_error}"
-                    )
-
-                    if index + 1 < len(candidates):
                         print(
-                            "🔁 FALLBACK TO NEXT MODEL | "
-                            f"next={self._litellm_model(candidates[index + 1])}"
+                            "❌ AI MODEL FAILED | "
+                            f"model={litellm_model} | "
+                            f"key=#{api_key_number or '?'} | "
+                            f"class={error_category} | "
+                            f"latency={model_latency_ms:.0f}ms | "
+                            f"error={safe_error}"
                         )
 
-                        continue
+                        # -------------------------------------
+                        # این خطا Key-specific نیست.
+                        #
+                        # timeout / connection / 5xx و ...
+                        # منطق retry خود _completion را دارند.
+                        #
+                        # اگر تمام retryها هم شکست خورده‌اند،
+                        # Model را تمام‌شده در نظر می‌گیریم
+                        # و می‌رویم سراغ Model بعدی.
+                        # -------------------------------------
+
+                        break
+
+                # ---------------------------------------------
+                # همه Keyهای این Model unavailable شدند
+                # یا Model با یک خطای non-key شکست خورد.
+                #
+                # حالا fallback بین Modelها.
+                # ---------------------------------------------
+
+                if index + 1 < len(candidates):
+
+                    print(
+                        "🔁 FALLBACK TO NEXT MODEL | "
+                        f"next={self._litellm_model(candidates[index + 1])}"
+                    )
+
+                    continue
         # -------------------------------------------------
         # All models failed
         # -------------------------------------------------
