@@ -18,6 +18,8 @@ from core.time_manager import (
     now,
 )
 
+from .providers import AIProviderStore
+
 class AIModelStatisticsStore:
     TABLE = "ai_model_statistics"
 
@@ -831,24 +833,36 @@ class AIModelStatisticsStore:
 
 class AIModelStore:
     TABLE = "ai_models"
-    KEY_TABLE = "ai_model_api_keys"
 
-    KEY_STATUS_AVAILABLE = "AVAILABLE"
-    KEY_STATUS_COOLDOWN = "COOLDOWN"
-    KEY_STATUS_INVALID = "INVALID"
-    KEY_STATUS_DISABLED = "DISABLED"
-
-    KEY_STATUSES = frozenset(
-        {
-            KEY_STATUS_AVAILABLE,
-            KEY_STATUS_COOLDOWN,
-            KEY_STATUS_INVALID,
-            KEY_STATUS_DISABLED,
-        }
+    KEY_STATUS_AVAILABLE = (
+        AIProviderStore.KEY_STATUS_AVAILABLE
+    )
+    KEY_STATUS_COOLDOWN = (
+        AIProviderStore.KEY_STATUS_COOLDOWN
+    )
+    KEY_STATUS_INVALID = (
+        AIProviderStore.KEY_STATUS_INVALID
+    )
+    KEY_STATUS_DISABLED = (
+        AIProviderStore.KEY_STATUS_DISABLED
     )
 
-    def __init__(self, db: DatabaseManager) -> None:
+    KEY_STATUSES = (
+        AIProviderStore.KEY_STATUSES
+    )
+
+    def __init__(
+        self,
+        db: DatabaseManager,
+        providers: AIProviderStore | None = None,
+    ) -> None:
+
         self.db = db
+
+        self.providers = (
+            providers
+            or AIProviderStore(db)
+        )
 
         self._active_cache = TTLCache[
             str,
@@ -859,386 +873,57 @@ class AIModelStore:
         )
 
     async def _create_models_table(self) -> None:
+
         await self.db.create_table(
             self.TABLE,
-            columns={
-                "id": "INTEGER PRIMARY KEY AUTOINCREMENT",
-                "name": "TEXT NOT NULL UNIQUE",
-                "provider": "TEXT NOT NULL",
-                "model_id": "TEXT NOT NULL",
-                "base_url": "TEXT",
-                "is_active": (
-                    "INTEGER NOT NULL DEFAULT 0"
-                ),
-                "created_at": (
-                    "TEXT NOT NULL "
-                    "DEFAULT CURRENT_TIMESTAMP"
-                ),
-                "updated_at": (
-                    "TEXT NOT NULL "
-                    "DEFAULT CURRENT_TIMESTAMP"
-                ),
-            },
-            indexes=[
-                "is_active",
-                "provider",
-            ],
-        )
-
-    async def _create_key_table(
-        self,
-    ) -> None:
-
-        # -------------------------------------------------
-        # اگر جدول از نسخه قبلی وجود دارد،
-        # ابتدا schema آن را بررسی می‌کنیم.
-        # -------------------------------------------------
-
-        rows = await self.db.fetchall(
-            f"PRAGMA table_info({self.KEY_TABLE})"
-        )
-
-        existing_columns = {
-            row["name"]
-            for row in rows
-        }
-
-        # -------------------------------------------------
-        # Migration:
-        # schema قدیمی:
-        #
-        # id
-        # model_name
-        # api_key
-        # created_at
-        #
-        # ->
-        #
-        # id
-        # model_id
-        # key_number
-        # api_key
-        # is_active
-        # status
-        # cooldown_until
-        # created_at
-        # updated_at
-        # -------------------------------------------------
-
-        if (
-            existing_columns
-            and "model_name" in existing_columns
-            and "model_id" not in existing_columns
-        ):
-
-            legacy_table = (
-                f"{self.KEY_TABLE}_legacy"
-            )
-
-            # اگر migration قبلی نصفه‌کاره مانده باشد
-            # جدول موقت را پاک می‌کنیم.
-            await self.db.execute(
-                f"""
-                DROP TABLE IF EXISTS
-                {legacy_table}
-                """
-            )
-
-            await self.db.execute(
-                f"""
-                ALTER TABLE {self.KEY_TABLE}
-                RENAME TO {legacy_table}
-                """
-            )
-
-            # جدول جدید را بدون index می‌سازیم.
-            await self.db.create_table(
-                self.KEY_TABLE,
-                columns={
-                    "id": (
-                        "INTEGER PRIMARY KEY AUTOINCREMENT"
-                    ),
-
-                    "model_id": (
-                        "INTEGER NOT NULL "
-                        "REFERENCES ai_models(id) "
-                        "ON DELETE CASCADE"
-                    ),
-
-                    "key_number": (
-                        "INTEGER NOT NULL"
-                    ),
-
-                    "api_key": (
-                        "TEXT NOT NULL"
-                    ),
-
-                    "is_active": (
-                        "INTEGER NOT NULL DEFAULT 0"
-                    ),
-
-                    "status": (
-                        "TEXT NOT NULL "
-                        "DEFAULT 'AVAILABLE'"
-                    ),
-
-                    "status_reason": "TEXT",
-
-                    "cooldown_until": "TEXT",
-
-                    "created_at": (
-                        "TEXT NOT NULL "
-                        "DEFAULT CURRENT_TIMESTAMP"
-                    ),
-
-                    "updated_at": (
-                        "TEXT NOT NULL "
-                        "DEFAULT CURRENT_TIMESTAMP"
-                    ),
-                },
-                unique=[
-                    (
-                        "model_id",
-                        "key_number",
-                    ),
-                    (
-                        "model_id",
-                        "api_key",
-                    ),
-                ],
-            )
-
-            legacy_rows = await self.db.fetchall(
-                f"""
-                SELECT
-                    id,
-                    model_name,
-                    api_key,
-                    created_at
-                FROM {legacy_table}
-                ORDER BY id ASC
-                """
-            )
-
-            next_numbers: dict[int, int] = {}
-            active_models: set[int] = set()
-
-            for row in legacy_rows:
-
-                model = await self.db.fetchone(
-                    f"""
-                    SELECT id
-                    FROM {self.TABLE}
-                    WHERE name = ?
-                    LIMIT 1
-                    """,
-                    (
-                        str(row["model_name"])
-                        .strip()
-                        .lower(),
-                    ),
-                )
-
-                # اگر مدل دیگر وجود ندارد،
-                # کلید orphan را منتقل نمی‌کنیم.
-                if model is None:
-                    continue
-
-                model_id = int(
-                    model["id"]
-                )
-
-                next_number = (
-                    next_numbers.get(
-                        model_id,
-                        1,
-                    )
-                )
-
-                is_active = (
-                    1
-                    if model_id
-                    not in active_models
-                    else 0
-                )
-
-                await self.db.insert(
-                    self.KEY_TABLE,
-                    {
-                        "model_id": model_id,
-                        "key_number": next_number,
-                        "api_key": row["api_key"],
-                        "is_active": is_active,
-                        "status": "AVAILABLE",
-                        "cooldown_until": None,
-                        "created_at": (
-                            row["created_at"]
-                            or None
-                        ),
-                        "updated_at": (
-                            row["created_at"]
-                            or None
-                        ),
-                    },
-                    or_ignore=True,
-                )
-
-                next_numbers[model_id] = (
-                    next_number + 1
-                )
-
-                active_models.add(
-                    model_id
-                )
-
-            await self.db.execute(
-                f"""
-                DROP TABLE {legacy_table}
-                """
-            )
-
-        # -------------------------------------------------
-        # جدول اصلاً وجود نداشته
-        # -------------------------------------------------
-
-        elif not existing_columns:
-
-            await self.db.create_table(
-                self.KEY_TABLE,
-                columns={
-                    "id": (
-                        "INTEGER PRIMARY KEY AUTOINCREMENT"
-                    ),
-
-                    "model_id": (
-                        "INTEGER NOT NULL "
-                        "REFERENCES ai_models(id) "
-                        "ON DELETE CASCADE"
-                    ),
-
-                    "key_number": (
-                        "INTEGER NOT NULL"
-                    ),
-
-                    "api_key": (
-                        "TEXT NOT NULL"
-                    ),
-
-                    "is_active": (
-                        "INTEGER NOT NULL DEFAULT 0"
-                    ),
-
-                    "status": (
-                        "TEXT NOT NULL "
-                        "DEFAULT 'AVAILABLE'"
-                    ),
-
-                    "status_reason": "TEXT",
-
-                    "cooldown_until": "TEXT",
-
-                    "created_at": (
-                        "TEXT NOT NULL "
-                        "DEFAULT CURRENT_TIMESTAMP"
-                    ),
-
-                    "updated_at": (
-                        "TEXT NOT NULL "
-                        "DEFAULT CURRENT_TIMESTAMP"
-                    ),
-                },
-                unique=[
-                    (
-                        "model_id",
-                        "key_number",
-                    ),
-                    (
-                        "model_id",
-                        "api_key",
-                    ),
-                ],
-            )
-
-        # -------------------------------------------------
-        # اگر جدول جدید از قبل وجود دارد،
-        # migration لازم نیست.
-        # -------------------------------------------------
-
-        # -------------------------------------------------
-        # Indexes
-        # -------------------------------------------------
-
-        await self.db.create_table(
-            self.KEY_TABLE,
             columns={
                 "id": (
                     "INTEGER PRIMARY KEY AUTOINCREMENT"
                 ),
+
+                "name": (
+                    "TEXT NOT NULL UNIQUE"
+                ),
+
+                # source of truth
+                "provider_id": (
+                    "INTEGER "
+                    "REFERENCES ai_providers(id)"
+                ),
+
                 "model_id": (
-                    "INTEGER NOT NULL"
-                ),
-                "key_number": (
-                    "INTEGER NOT NULL"
-                ),
-                "api_key": (
                     "TEXT NOT NULL"
                 ),
+
+                # legacy fields kept temporarily
+                # برای migration/backward compatibility
+                "provider": (
+                    "TEXT NOT NULL DEFAULT ''"
+                ),
+
+                "base_url": "TEXT",
+
                 "is_active": (
                     "INTEGER NOT NULL DEFAULT 0"
                 ),
-                "status": (
-                    "TEXT NOT NULL DEFAULT 'AVAILABLE'"
-                ),
-                
-                "status_reason": "TEXT",
 
-                "cooldown_until": "TEXT",
-                
                 "created_at": (
                     "TEXT NOT NULL "
                     "DEFAULT CURRENT_TIMESTAMP"
                 ),
+
                 "updated_at": (
                     "TEXT NOT NULL "
                     "DEFAULT CURRENT_TIMESTAMP"
                 ),
             },
             indexes=[
-                "model_id",
                 "is_active",
-                "status",
+                "provider_id",
             ],
         )
 
-        # -------------------------------------------------
-        # Migration: status_reason
-        # -------------------------------------------------
-
-        rows = await self.db.fetchall(
-            f"PRAGMA table_info({self.KEY_TABLE})"
-        )
-
-        columns = {
-            row["name"]
-            for row in rows
-        }
-
-        if "status_reason" not in columns:
-            await self.db.execute(
-                f"""
-                ALTER TABLE {self.KEY_TABLE}
-                ADD COLUMN status_reason TEXT
-                """
-            )
-
-    async def _migrate_legacy_api_keys(
-        self,
-    ) -> None:
-        """
-        API Key قدیمی داخل ai_models را به
-        ai_model_api_keys منتقل می‌کند و سپس
-        ستون قدیمی را حذف می‌کند.
-        """
+    async def _migrate_provider_links(self) -> None:
 
         rows = await self.db.fetchall(
             f"PRAGMA table_info({self.TABLE})"
@@ -1249,225 +934,125 @@ class AIModelStore:
             for row in rows
         }
 
-        if "api_key" not in columns:
-            return
-
-        legacy_rows = await self.db.fetchall(
-            f"""
-            SELECT
-                id,
-                name,
-                api_key
-            FROM {self.TABLE}
-            WHERE api_key IS NOT NULL
-              AND TRIM(api_key) != ''
-            """
-        )
-
-        # ابتدا کلیدهای قدیمی را منتقل می‌کنیم.
-        for row in legacy_rows:
-
-            model_id = int(
-                row["id"]
-            )
-
-            existing = await self.db.fetchone(
-                f"""
-                SELECT id
-                FROM {self.KEY_TABLE}
-                WHERE model_id = ?
-                ORDER BY key_number ASC
-                LIMIT 1
-                """,
-                (model_id,),
-            )
-
-            if existing is not None:
-                continue
-
-            await self.db.insert(
-                self.KEY_TABLE,
-                {
-                    "model_id": model_id,
-                    "key_number": 1,
-                    "api_key": row["api_key"],
-                    "is_active": 1,
-                    "status": "AVAILABLE",
-                },
-                or_ignore=True,
-            )
-
-        # -------------------------------------------------
-        # حذف ستون api_key
-        # -------------------------------------------------
-
-        try:
+        if "provider_id" not in columns:
             await self.db.execute(
                 f"""
                 ALTER TABLE {self.TABLE}
-                DROP COLUMN api_key
+                ADD COLUMN provider_id INTEGER
                 """
             )
-
-        except Exception:
-            # Fallback برای SQLiteهای قدیمی‌تر
-            await self.db.execute(
-                f"""
-                DROP INDEX IF EXISTS
-                idx_{self.TABLE}_is_active
-                """
-            )
-
-            await self.db.execute(
-                f"""
-                DROP INDEX IF EXISTS
-                idx_{self.TABLE}_provider
-                """
-            )
-
-            await self.db.execute(
-                f"""
-                ALTER TABLE {self.TABLE}
-                RENAME TO {self.TABLE}_legacy
-                """
-            )
-
-            await self._create_models_table()
-
-            await self.db.execute(
-                f"""
-                INSERT INTO {self.TABLE}
-                (
-                    id,
-                    name,
-                    provider,
-                    model_id,
-                    base_url,
-                    is_active,
-                    created_at,
-                    updated_at
-                )
-                SELECT
-                    id,
-                    name,
-                    provider,
-                    model_id,
-                    base_url,
-                    is_active,
-                    created_at,
-                    updated_at
-                FROM {self.TABLE}_legacy
-                """
-            )
-
-            await self.db.execute(
-                f"""
-                DROP TABLE {self.TABLE}_legacy
-                """
-            )
-
-    async def _ensure_active_keys(
-        self,
-    ) -> None:
-        """
-        تضمین می‌کند هر مدل در صورت داشتن کلید،
-        دقیقاً حداقل یک کلید active داشته باشد.
-        """
 
         models = await self.db.fetchall(
             f"""
-            SELECT id
+            SELECT
+                id,
+                provider_id,
+                provider,
+                base_url
             FROM {self.TABLE}
+            ORDER BY id ASC
             """
         )
 
         for model in models:
 
-            model_id = int(
-                model["id"]
+            provider_id = model["provider_id"]
+
+            if provider_id:
+                provider = await self.providers.get(
+                    int(provider_id)
+                )
+
+                if provider is not None:
+                    continue
+
+            provider_name = (
+                str(
+                    model["provider"]
+                    or ""
+                ).strip().lower()
             )
 
-            active = await self.db.fetchone(
-                f"""
-                SELECT id
-                FROM {self.KEY_TABLE}
-                WHERE model_id = ?
-                  AND is_active = 1
-                ORDER BY id ASC
-                LIMIT 1
-                """,
-                (model_id,),
+            if not provider_name:
+                raise ValueError(
+                    f"مدل #{model['id']} "
+                    "Provider ندارد."
+                )
+
+            provider = (
+                await self.providers.ensure_provider(
+                    provider_name,
+                    model["base_url"],
+                )
             )
-
-            if active is not None:
-                continue
-
-            first_key = await self.db.fetchone(
-                f"""
-                SELECT id
-                FROM {self.KEY_TABLE}
-                WHERE model_id = ?
-                ORDER BY key_number ASC
-                LIMIT 1
-                """,
-                (model_id,),
-            )
-
-            if first_key is None:
-                continue
 
             await self.db.execute(
                 f"""
-                UPDATE {self.KEY_TABLE}
-                SET is_active = 1,
+                UPDATE {self.TABLE}
+                SET
+                    provider_id = ?,
+                    provider = ?,
+                    base_url = ?,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """,
                 (
-                    first_key["id"],
+                    provider["id"],
+                    provider["name"],
+                    provider["base_url"],
+                    model["id"],
                 ),
             )
 
     async def create_table(self) -> None:
-        # ---------------------------------------------
-        # اول مدل‌ها
-        # ---------------------------------------------
+
+        # -------------------------------------------------
+        # Provider + shared key pool
+        # -------------------------------------------------
+
+        await self.providers.create_table()
+
+        # -------------------------------------------------
+        # Models
+        # -------------------------------------------------
 
         await self._create_models_table()
 
-        # ---------------------------------------------
-        # سپس جدول کلیدها
-        # ---------------------------------------------
+        # -------------------------------------------------
+        # Old model -> provider migration
+        # -------------------------------------------------
 
-        await self._create_key_table()
+        await self._migrate_provider_links()
 
-        # ---------------------------------------------
-        # Migration از ساختار قبلی
-        # ---------------------------------------------
+        # -------------------------------------------------
+        # Old model-specific keys -> provider pool
+        # -------------------------------------------------
 
-        await self._migrate_legacy_api_keys()
+        await self.providers.migrate_legacy_model_keys()
 
-        # ---------------------------------------------
-        # تضمین active بودن حداقل یک کلید
-        # ---------------------------------------------
-
-        await self._ensure_active_keys()
+    # =========================================================
+    # MODEL CRUD
+    # =========================================================
 
     async def add(
         self,
         name: str,
         provider: str,
         model_id: str,
-        api_key: str,
-        base_url: Optional[str],
+        api_key: str | None = None,
+        base_url: str | None = None,
     ) -> None:
 
         normalized_name = (
             name.strip().lower()
         )
 
-        clean_api_key = (
-            api_key.strip()
+        provider_name = (
+            provider.strip().lower()
+        )
+
+        clean_model_id = (
+            model_id.strip()
         )
 
         if not normalized_name:
@@ -1475,22 +1060,36 @@ class AIModelStore:
                 "نام مدل نمی‌تواند خالی باشد."
             )
 
-        if not clean_api_key:
+        if not provider_name:
             raise ValueError(
-                "API Key نمی‌تواند خالی باشد."
+                "نام Provider نمی‌تواند خالی باشد."
+            )
+
+        if not clean_model_id:
+            raise ValueError(
+                "Model ID نمی‌تواند خالی باشد."
+            )
+
+        provider_row = (
+            await self.providers.get(
+                provider_name
+            )
+        )
+
+        if provider_row is None:
+            raise ValueError(
+                f"Provider «{provider_name}» "
+                "ثبت نشده است."
             )
 
         result = await self.db.insert(
             self.TABLE,
             {
                 "name": normalized_name,
-                "provider": provider.strip(),
-                "model_id": model_id.strip(),
-                "base_url": (
-                    base_url.strip()
-                    if base_url
-                    else None
-                ),
+                "provider_id": provider_row["id"],
+                "model_id": clean_model_id,
+                "provider": provider_row["name"],
+                "base_url": provider_row["base_url"],
             },
         )
 
@@ -1499,37 +1098,50 @@ class AIModelStore:
                 "شناسه مدل ساخته‌شده قابل دریافت نیست."
             )
 
-        model_id_db = int(
-            result.lastrowid
-        )
+        # -------------------------------------------------
+        # compatibility:
+        # اگر caller قدیمی API Key فرستاد،
+        # آن را به Pool Provider اضافه می‌کنیم.
+        # -------------------------------------------------
 
-        # اولین کلید = active
-        await self.db.insert(
-            self.KEY_TABLE,
-            {
-                "model_id": model_id_db,
-                "key_number": 1,
-                "api_key": clean_api_key,
-                "is_active": 1,
-                "status": "AVAILABLE",
-            },
-        )
+        if api_key:
+            await self.providers.add_api_key(
+                provider_row["id"],
+                api_key,
+            )
 
     async def get(
         self,
         name: str,
-    ) -> Optional[dict[str, Any]]:
+    ) -> dict[str, Any] | None:
 
-        row = await self.db.select_one(
-            self.TABLE,
-            where={
-                "name": name.strip().lower()
-            },
+        row = await self.db.fetchone(
+            f"""
+            SELECT
+                m.id,
+                m.name,
+                m.provider_id,
+                p.name AS provider,
+                m.model_id,
+                p.base_url AS base_url,
+                p.models_url AS models_url,
+                m.is_active,
+                m.created_at,
+                m.updated_at
+            FROM {self.TABLE} m
+            INNER JOIN ai_providers p
+                ON p.id = m.provider_id
+            WHERE m.name = ?
+            LIMIT 1
+            """,
+            (
+                name.strip().lower(),
+            ),
         )
 
         return (
             dict(row)
-            if row
+            if row is not None
             else None
         )
 
@@ -1539,11 +1151,23 @@ class AIModelStore:
 
         rows = await self.db.fetchall(
             f"""
-            SELECT *
-            FROM {self.TABLE}
+            SELECT
+                m.id,
+                m.name,
+                m.provider_id,
+                p.name AS provider,
+                m.model_id,
+                p.base_url AS base_url,
+                p.models_url AS models_url,
+                m.is_active,
+                m.created_at,
+                m.updated_at
+            FROM {self.TABLE} m
+            INNER JOIN ai_providers p
+                ON p.id = m.provider_id
             ORDER BY
-                is_active DESC,
-                name ASC
+                m.is_active DESC,
+                m.name ASC
             """
         )
 
@@ -1554,7 +1178,7 @@ class AIModelStore:
 
     async def get_active(
         self,
-    ) -> Optional[dict[str, Any]]:
+    ) -> dict[str, Any] | None:
 
         cached = self._active_cache.get(
             "active"
@@ -1567,11 +1191,25 @@ class AIModelStore:
                 else None
             )
 
-        row = await self.db.select_one(
-            self.TABLE,
-            where={
-                "is_active": 1,
-            },
+        row = await self.db.fetchone(
+            f"""
+            SELECT
+                m.id,
+                m.name,
+                m.provider_id,
+                p.name AS provider,
+                m.model_id,
+                p.base_url AS base_url,
+                p.models_url AS models_url,
+                m.is_active,
+                m.created_at,
+                m.updated_at
+            FROM {self.TABLE} m
+            INNER JOIN ai_providers p
+                ON p.id = m.provider_id
+            WHERE m.is_active = 1
+            LIMIT 1
+            """
         )
 
         if row is None:
@@ -1601,20 +1239,15 @@ class AIModelStore:
 
         async with self.db.maintenance_lock:
 
-            if self.db.connection is None:
-                raise RuntimeError(
-                    "Database connection is not available"
-                )
-
             cursor = None
 
             try:
                 await self.db.connection.execute(
                     f"""
                     UPDATE {self.TABLE}
-                    SET is_active = 0,
-                        updated_at =
-                            CURRENT_TIMESTAMP
+                    SET
+                        is_active = 0,
+                        updated_at = CURRENT_TIMESTAMP
                     """
                 )
 
@@ -1622,9 +1255,9 @@ class AIModelStore:
                     await self.db.connection.execute(
                         f"""
                         UPDATE {self.TABLE}
-                        SET is_active = 1,
-                            updated_at =
-                                CURRENT_TIMESTAMP
+                        SET
+                            is_active = 1,
+                            updated_at = CURRENT_TIMESTAMP
                         WHERE name = ?
                         """,
                         (normalized,),
@@ -1644,393 +1277,144 @@ class AIModelStore:
                 return True
 
             except Exception:
-                try:
-                    await self.db.connection.rollback()
-                except Exception:
-                    pass
-
+                await self.db.connection.rollback()
                 raise
 
             finally:
-                try:
-                    if cursor is not None:
-                        await cursor.close()
-                except Exception:
-                    pass
+                if cursor is not None:
+                    await cursor.close()
+
+    async def delete(
+        self,
+        name: str,
+    ) -> bool:
+
+        normalized = (
+            name.strip().lower()
+        )
+
+        result = await self.db.delete(
+            self.TABLE,
+            {
+                "name": normalized,
+            },
+        )
+
+        deleted = (
+            result.rowcount > 0
+        )
+
+        if deleted:
+            self._active_cache.delete(
+                "active"
+            )
+
+        # مهم:
+        # Provider را حذف نمی‌کنیم.
+        # چون ممکن است مدل‌های دیگری از همان Provider
+        # هنوز از Pool استفاده کنند.
+
+        return deleted
+
+    # =========================================================
+    # SHARED PROVIDER KEY POOL
+    # =========================================================
+
+    async def _get_provider_id(
+        self,
+        model_name: str,
+    ) -> int | None:
+
+        model = await self.get(
+            model_name
+        )
+
+        if model is None:
+            return None
+
+        return int(
+            model["provider_id"]
+        )
 
     async def get_api_keys(
         self,
         model_name: str,
     ) -> list[dict[str, Any]]:
 
-        model = await self.get(
-            model_name
+        provider_id = (
+            await self._get_provider_id(
+                model_name
+            )
         )
 
-        if model is None:
+        if provider_id is None:
             return []
 
-        model_id = int(
-            model["id"]
+        return await self.providers.get_api_keys(
+            provider_id
         )
-
-        # ---------------------------------------------
-        # اگر Cooldown یکی از Keyها تمام شده،
-        # وضعیتش را قبل از نمایش به AVAILABLE برگردان.
-        # ---------------------------------------------
-
-        try:
-            await self._restore_expired_cooldowns(
-                model_id
-            )
-
-        except Exception as exc:
-            print(
-                "⚠️ بروزرسانی COOLDOWNهای منقضی‌شده "
-                "برای اطلاعات مدل ناموفق بود | "
-                f"model={model_name} | "
-                f"error={exc}"
-            )
-
-        rows = await self.db.fetchall(
-            f"""
-            SELECT
-                id,
-                model_id,
-                key_number,
-                api_key,
-                is_active,
-                status,
-                status_reason,
-                cooldown_until,
-                created_at,
-                updated_at
-            FROM {self.KEY_TABLE}
-            WHERE model_id = ?
-            ORDER BY key_number ASC
-            """,
-            (
-                model_id,
-            ),
-        )
-
-        return [
-            dict(row)
-            for row in rows
-        ]
 
     async def get_active_api_key(
         self,
         model_name: str,
-    ) -> Optional[dict[str, Any]]:
+    ) -> dict[str, Any] | None:
 
-        model = await self.get(
+        keys = await self.get_api_keys(
             model_name
         )
 
-        if model is None:
-            return None
+        for key in keys:
+            if key["is_active"]:
+                return key
 
-        row = await self.db.fetchone(
-            f"""
-            SELECT
-                id,
-                model_id,
-                key_number,
-                api_key,
-                is_active,
-                status,
-                status_reason,
-                cooldown_until,
-                created_at,
-                updated_at
-            FROM {self.KEY_TABLE}
-            WHERE model_id = ?
-            AND is_active = 1
-            ORDER BY id ASC
-            LIMIT 1
-            """,
-            (
-                model["id"],
-            ),
-        )
-
-        if row is None:
-            return None
-
-        return dict(row)
-
-    @staticmethod
-    def _is_cooldown_expired(
-        cooldown_until: str | None,
-    ) -> bool:
-
-        if not cooldown_until:
-            return False
-
-        try:
-            expires_at = (
-                datetime.fromisoformat(
-                    cooldown_until
-                )
-            )
-
-        except (
-            TypeError,
-            ValueError,
-        ):
-            # تاریخ نامعتبر را expire شده فرض نمی‌کنیم.
-            # در این حالت Key همچنان unavailable می‌ماند
-            # تا اطلاعاتش دستی اصلاح شود.
-            return False
-
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(
-                tzinfo=timezone.utc
-            )
-
-        return (
-            expires_at
-            <= datetime.now(
-                timezone.utc
-            )
-        )
-
-
-    async def _restore_expired_cooldowns(
-        self,
-        model_id: int,
-    ) -> None:
-
-        rows = await self.db.fetchall(
-            f"""
-            SELECT
-                id,
-                cooldown_until
-            FROM {self.KEY_TABLE}
-            WHERE model_id = ?
-            AND status = 'COOLDOWN'
-            AND cooldown_until IS NOT NULL
-            """,
-            (
-                model_id,
-            ),
-        )
-
-        expired_keys = []
-
-        for row in rows:
-
-            cooldown_until = (
-                row["cooldown_until"]
-            )
-
-            if self._is_cooldown_expired(
-                cooldown_until
-            ):
-                expired_keys.append(
-                    (
-                        int(row["id"]),
-                        cooldown_until,
-                    )
-                )
-
-        if not expired_keys:
-            return
-
-        async with self.db.maintenance_lock:
-
-            if self.db.connection is None:
-                raise RuntimeError(
-                    "Database connection is not available"
-                )
-
-            try:
-
-                for key_id, cooldown_until in expired_keys:
-
-                    await self.db.connection.execute(
-                        f"""
-                        UPDATE {self.KEY_TABLE}
-                        SET
-                            status = 'AVAILABLE',
-                            status_reason = NULL,
-                            cooldown_until = NULL,
-                            updated_at =
-                                CURRENT_TIMESTAMP
-                        WHERE id = ?
-                        AND status = 'COOLDOWN'
-                        AND cooldown_until = ?
-                        """,
-                        (
-                            key_id,
-                            cooldown_until,
-                        ),
-                    )
-
-                await self.db.connection.commit()
-
-            except Exception:
-
-                try:
-                    await self.db.connection.rollback()
-                except Exception:
-                    pass
-
-                raise
+        return None
 
     async def get_available_api_keys(
         self,
         model_name: str,
     ) -> list[dict[str, Any]]:
 
-        model = await self.get(
-            model_name
+        provider_id = (
+            await self._get_provider_id(
+                model_name
+            )
         )
 
-        if model is None:
+        if provider_id is None:
             return []
 
-        model_id = int(
-            model["id"]
+        return await self.providers.get_available_api_keys(
+            provider_id
         )
-
-        # -------------------------------------------------
-        # اول COOLDOWNهای منقضی‌شده را برمی‌گردانیم.
-        # -------------------------------------------------
-
-        try:
-            await self._restore_expired_cooldowns(
-                model_id
-            )
-
-        except Exception as exc:
-            print(
-                "⚠️ بروزرسانی COOLDOWNهای منقضی‌شده "
-                "ناموفق بود | "
-                f"model={model_name} | "
-                f"error={exc}"
-            )
-
-        # -------------------------------------------------
-        # فقط Keyهای واقعاً قابل استفاده
-        # -------------------------------------------------
-
-        rows = await self.db.fetchall(
-            f"""
-            SELECT
-                id,
-                model_id,
-                key_number,
-                api_key,
-                is_active,
-                status,
-                status_reason,
-                cooldown_until,
-                created_at,
-                updated_at
-            FROM {self.KEY_TABLE}
-            WHERE model_id = ?
-              AND status = 'AVAILABLE'
-            ORDER BY
-                is_active DESC,
-                key_number ASC
-            """,
-            (
-                model_id,
-            ),
-        )
-
-        return [
-            dict(row)
-            for row in rows
-        ]
-
 
     async def get_api_key_candidates(
         self,
         model_name: str,
     ) -> list[dict[str, Any]]:
 
-        # -------------------------------------------------
-        # مرحله اول:
-        # اگر حتی یک Key قابل استفاده وجود دارد،
-        # فقط همان‌ها را برگردان.
-        # -------------------------------------------------
-
-        available_keys = (
-            await self.get_available_api_keys(
+        provider_id = (
+            await self._get_provider_id(
                 model_name
             )
         )
 
-        if available_keys:
-            return available_keys
-
-        # -------------------------------------------------
-        # هیچ Key قابل استفاده‌ای نداریم.
-        #
-        # حالا COOLDOWNها را برای Probe بررسی می‌کنیم.
-        #
-        # Keyهای INVALID / DISABLED هرگز Probe نمی‌شوند.
-        # -------------------------------------------------
-
-        model = await self.get(
-            model_name
-        )
-
-        if model is None:
+        if provider_id is None:
             return []
 
-        rows = await self.db.fetchall(
-            f"""
-            SELECT
-                id,
-                model_id,
-                key_number,
-                api_key,
-                is_active,
-                status,
-                status_reason,
-                cooldown_until,
-                created_at,
-                updated_at
-            FROM {self.KEY_TABLE}
-            WHERE model_id = ?
-            AND status = 'COOLDOWN'
-            ORDER BY
-                CASE
-                    WHEN cooldown_until IS NULL
-                    THEN 1
-                    ELSE 0
-                END ASC,
-                cooldown_until ASC,
-                is_active DESC,
-                key_number ASC
-            """,
-            (
-                model["id"],
-            ),
+        return await self.providers.get_api_key_candidates(
+            provider_id
         )
-
-        return [
-            dict(row)
-            for row in rows
-        ]
 
     async def get_available_api_key(
         self,
         model_name: str,
-    ) -> Optional[dict[str, Any]]:
+    ) -> dict[str, Any] | None:
 
         keys = await self.get_available_api_keys(
             model_name
         )
 
-        if not keys:
-            return None
-
-        return keys[0]
+        return keys[0] if keys else None
 
     async def set_api_key_status(
         self,
@@ -2042,97 +1426,22 @@ class AIModelStore:
         reason: str | None = None,
     ) -> bool:
 
-        model = await self.get(
-            model_name
+        provider_id = (
+            await self._get_provider_id(
+                model_name
+            )
         )
 
-        if model is None:
+        if provider_id is None:
             return False
 
-        status = (
-            status.strip().upper()
+        return await self.providers.set_api_key_status(
+            provider_id,
+            key_number,
+            status,
+            cooldown_until=cooldown_until,
+            reason=reason,
         )
-
-        if status not in self.KEY_STATUSES:
-            raise ValueError(
-                f"وضعیت API Key نامعتبر است: {status}"
-            )
-
-        key_number = int(
-            key_number
-        )
-
-        if key_number <= 0:
-            raise ValueError(
-                "شماره API Key نامعتبر است."
-            )
-
-        clean_reason = (
-            reason.strip().upper()
-            if reason
-            else None
-        )
-
-        # فقط COOLDOWN می‌تواند cooldown_until داشته باشد.
-        if status != self.KEY_STATUS_COOLDOWN:
-            cooldown_until = None
-
-        async with self.db.maintenance_lock:
-
-            if self.db.connection is None:
-                raise RuntimeError(
-                    "Database connection is not available"
-                )
-
-            cursor = None
-
-            try:
-                cursor = (
-                    await self.db.connection.execute(
-                        f"""
-                        UPDATE {self.KEY_TABLE}
-                        SET
-                            status = ?,
-                            status_reason = ?,
-                            cooldown_until = ?,
-                            updated_at =
-                                CURRENT_TIMESTAMP
-                        WHERE model_id = ?
-                        AND key_number = ?
-                        """,
-                        (
-                            status,
-                            clean_reason,
-                            cooldown_until,
-                            model["id"],
-                            key_number,
-                        ),
-                    )
-                )
-
-                if cursor.rowcount <= 0:
-                    await self.db.connection.rollback()
-                    return False
-
-                await self.db.connection.commit()
-
-                return True
-
-            except Exception:
-                try:
-                    await self.db.connection.rollback()
-                except Exception:
-                    pass
-
-                raise
-
-            finally:
-                try:
-                    if cursor is not None:
-                        await cursor.close()
-                except Exception:
-                    pass
-
 
     async def mark_api_key_available(
         self,
@@ -2147,7 +1456,6 @@ class AIModelStore:
             self.KEY_STATUS_AVAILABLE,
             reason=reason,
         )
-
 
     async def mark_api_key_cooldown(
         self,
@@ -2165,7 +1473,6 @@ class AIModelStore:
             reason=reason,
         )
 
-
     async def mark_api_key_invalid(
         self,
         model_name: str,
@@ -2179,7 +1486,6 @@ class AIModelStore:
             self.KEY_STATUS_INVALID,
             reason=reason,
         )
-
 
     async def mark_api_key_disabled(
         self,
@@ -2195,98 +1501,25 @@ class AIModelStore:
             reason=reason,
         )
 
-
     async def add_api_key(
         self,
         model_name: str,
         api_key: str,
-    ) -> Optional[int]:
+    ) -> int | None:
 
-        model = await self.get(
-            model_name
+        provider_id = (
+            await self._get_provider_id(
+                model_name
+            )
         )
 
-        if model is None:
+        if provider_id is None:
             return None
 
-        clean_api_key = (
-            api_key.strip()
+        return await self.providers.add_api_key(
+            provider_id,
+            api_key,
         )
-
-        if not clean_api_key:
-            raise ValueError(
-                "API Key نمی‌تواند خالی باشد."
-            )
-
-        existing = await self.db.fetchone(
-            f"""
-            SELECT id
-            FROM {self.KEY_TABLE}
-            WHERE model_id = ?
-              AND api_key = ?
-            LIMIT 1
-            """,
-            (
-                model["id"],
-                clean_api_key,
-            ),
-        )
-
-        if existing is not None:
-            return 0
-
-        next_number_row = (
-            await self.db.fetchone(
-                f"""
-                SELECT
-                    COALESCE(
-                        MAX(key_number),
-                        0
-                    ) + 1 AS next_number
-                FROM {self.KEY_TABLE}
-                WHERE model_id = ?
-                """,
-                (
-                    model["id"],
-                ),
-            )
-        )
-
-        key_number = int(
-            next_number_row["next_number"]
-        )
-
-        active = await self.db.fetchone(
-            f"""
-            SELECT id
-            FROM {self.KEY_TABLE}
-            WHERE model_id = ?
-              AND is_active = 1
-            LIMIT 1
-            """,
-            (
-                model["id"],
-            ),
-        )
-
-        is_active = (
-            0
-            if active is not None
-            else 1
-        )
-
-        await self.db.insert(
-            self.KEY_TABLE,
-            {
-                "model_id": model["id"],
-                "key_number": key_number,
-                "api_key": clean_api_key,
-                "is_active": is_active,
-                "status": "AVAILABLE",
-            },
-        )
-
-        return key_number
 
     async def activate_api_key(
         self,
@@ -2294,199 +1527,41 @@ class AIModelStore:
         key_number: int,
     ) -> bool:
 
-        model = await self.get(
-            model_name
+        provider_id = (
+            await self._get_provider_id(
+                model_name
+            )
         )
 
-        if model is None:
+        if provider_id is None:
             return False
 
-        key_number = int(
-            key_number
+        return await self.providers.activate_api_key(
+            provider_id,
+            key_number,
         )
-
-        async with self.db.maintenance_lock:
-
-            if self.db.connection is None:
-                raise RuntimeError(
-                    "Database connection is not available"
-                )
-
-            cursor = None
-
-            try:
-                target = (
-                    await self.db.connection.execute(
-                        f"""
-                        SELECT id
-                        FROM {self.KEY_TABLE}
-                        WHERE model_id = ?
-                          AND key_number = ?
-                        LIMIT 1
-                        """,
-                        (
-                            model["id"],
-                            key_number,
-                        ),
-                    )
-                )
-
-                target_row = (
-                    await target.fetchone()
-                )
-
-                await target.close()
-
-                if target_row is None:
-                    return False
-
-                await self.db.connection.execute(
-                    f"""
-                    UPDATE {self.KEY_TABLE}
-                    SET is_active = 0,
-                        updated_at =
-                            CURRENT_TIMESTAMP
-                    WHERE model_id = ?
-                    """,
-                    (
-                        model["id"],
-                    ),
-                )
-
-                cursor = (
-                    await self.db.connection.execute(
-                        f"""
-                        UPDATE {self.KEY_TABLE}
-                        SET is_active = 1,
-                            status = 'AVAILABLE',
-                            status_reason = NULL,
-                            cooldown_until = NULL,
-                            updated_at =
-                                CURRENT_TIMESTAMP
-                        WHERE model_id = ?
-                        AND key_number = ?
-                        """,
-                        (
-                            model["id"],
-                            key_number,
-                        ),
-                    )
-                )
-
-                if cursor.rowcount <= 0:
-                    await self.db.connection.rollback()
-                    return False
-
-                await self.db.connection.commit()
-
-                return True
-
-            except Exception:
-                try:
-                    await self.db.connection.rollback()
-                except Exception:
-                    pass
-
-                raise
-
-            finally:
-                try:
-                    if cursor is not None:
-                        await cursor.close()
-                except Exception:
-                    pass
 
     async def update_api_key(
         self,
         model_name: str,
         key_number: int,
-        api_key: str | None,
+        api_key: str,
     ) -> bool:
 
-        model = await self.get(
-            model_name
+        provider_id = (
+            await self._get_provider_id(
+                model_name
+            )
         )
 
-        if model is None:
+        if provider_id is None:
             return False
 
-        key_number = int(
-            key_number
+        return await self.providers.update_api_key(
+            provider_id,
+            key_number,
+            api_key,
         )
-
-        clean_api_key = (
-            api_key.strip()
-            if api_key
-            else None
-        )
-
-        if not clean_api_key:
-            raise ValueError(
-                "API Key نمی‌تواند خالی باشد."
-            )
-
-        result = await self.db.execute(
-            f"""
-            UPDATE {self.KEY_TABLE}
-            SET api_key = ?,
-                status = 'AVAILABLE',
-                status_reason = NULL,
-                cooldown_until = NULL,
-                updated_at =
-                    CURRENT_TIMESTAMP
-            WHERE model_id = ?
-            AND key_number = ?
-            """,
-            (
-                clean_api_key,
-                model["id"],
-                key_number,
-            ),
-        )
-
-        return result.rowcount > 0
-
-    async def delete(
-        self,
-        name: str,
-    ) -> bool:
-
-        normalized = (
-            name.strip().lower()
-        )
-
-        model = await self.get(
-            normalized
-        )
-
-        if model is None:
-            return False
-
-        await self.db.delete(
-            self.KEY_TABLE,
-            {
-                "model_id": model["id"],
-            },
-        )
-
-        cursor = await self.db.delete(
-            self.TABLE,
-            {
-                "name": normalized,
-            },
-        )
-
-        deleted = (
-            cursor.rowcount > 0
-        )
-
-        if deleted:
-            self._active_cache.delete(
-                "active"
-            )
-
-        return deleted
-
 
 class AIGroupSettingsStore:
     TABLE = "ai_group_settings"
@@ -3428,31 +2503,33 @@ class AITelemetrySettingsStore:
 
 
 
-
-
-
 class AIGatewayStore:
     def __init__(
         self,
         db: DatabaseManager,
-    ) -> None:
+    ):
+        self.providers = AIProviderStore(db)
 
-        self.models = AIModelStore(db)
-        self.model_statistics = AIModelStatisticsStore(db)
+        self.models = AIModelStore(
+            db,
+            self.providers,
+        )
+
+        self.api_keys = AIAPIKeyStore(db)
+
         self.groups = AIGroupSettingsStore(db)
         self.memory = AIMemoryStore(db)
         self.memory_settings = AIMemorySettingsStore(db)
-        self.api_keys = AIAPIKeyStore(db)
         self.timeline = AITimelineSettingsStore(db)
         self.telemetry = AITelemetrySettingsStore(db)
-
+        self.model_statistics = AIModelStatisticsStore(db)
 
     async def create_tables(self) -> None:
         await self.models.create_table()
-        await self.model_statistics.create_table()
         await self.groups.create_table()
         await self.memory.create_tables()
         await self.memory_settings.create_table()
-        await self.api_keys.create_table()
         await self.timeline.create_table()
         await self.telemetry.create_table()
+        await self.model_statistics.create_table()
+        await self.api_keys.create_table()

@@ -21,6 +21,7 @@ class AIGatewayPlugin(BasePlugin):
         )
 
         self.store = AIGatewayStore(db)
+        self.providers = self.store.providers
         self.models = self.store.models
         self.groups = self.store.groups
         self.memory = AIMemoryManager(

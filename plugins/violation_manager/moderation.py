@@ -23,16 +23,15 @@ from splusthon import SoroushClient
 async def resolve_target(
     client: SoroushClient,
     event: Any,
-) -> Optional[int]:
+) -> Optional[dict[str, Any]]:
     """
-    کاربر هدف رو پیدا می‌کنه.
+    کاربر هدف را پیدا می‌کند.
 
-    اولویت:
-    1. آرگومان:
-       - User ID
-       - Username
-       - Mention
-    2. ریپلای به پیام کاربر
+    خروجی:
+        {
+            "id": int,
+            "entity": object,
+        }
     """
 
     target = (
@@ -49,9 +48,23 @@ async def resolve_target(
 
         if target.lstrip("-").isdigit():
             try:
-                return int(target)
+                user_id = int(target)
+
             except ValueError:
-                pass
+                return None
+
+            try:
+                entity = await client.get_entity(
+                    user_id
+                )
+
+                return {
+                    "id": user_id,
+                    "entity": entity,
+                }
+
+            except Exception:
+                return None
 
         # -----------------------------------------
         # Username / Mention
@@ -62,7 +75,10 @@ async def resolve_target(
                 target
             )
 
-            return entity.id
+            return {
+                "id": entity.id,
+                "entity": entity,
+            }
 
         except Exception:
             return None
@@ -74,17 +90,31 @@ async def resolve_target(
     reply = await event.get_reply_message()
 
     if reply is not None:
-        return reply.sender_id
+
+        try:
+            entity = await reply.get_sender()
+
+        except Exception:
+            entity = None
+
+        if entity is None:
+            return None
+
+        return {
+            "id": entity.id,
+            "entity": entity,
+        }
 
     return None
 
 async def mute_user(
     client: SoroushClient,
     chat: Any,
-    user_id: int,
+    user: Any,
     hours: Optional[int] = None,
     minutes: Optional[int] = None,
 ) -> None:
+
     if minutes is not None:
         until_date = (
             now_utc()
@@ -109,7 +139,7 @@ async def mute_user(
 
     await client.edit_permissions(
         chat,
-        user_id,
+        user,
         until_date=until_date,
         send_messages=False,
         send_gifs=False,
@@ -119,7 +149,7 @@ async def mute_user(
         send_inline=False,
         send_polls=False,
     )
-
+    
 async def unmute_user(client: SoroushClient, chat: Any, user_id: int) -> None:
     await client.edit_permissions(chat, user_id, send_messages=True)
 

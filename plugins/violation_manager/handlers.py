@@ -712,7 +712,7 @@ async def on_reply_shortcut(self: "ViolationManagerPlugin", event: events.NewMes
         hours = settings["mute_hours"] or DEFAULT_MUTE_HOURS
         await moderation.mute_user(self.client, chat, target_id, hours)
         await event.reply(f"کاربر `{target_id}` به مدت {hours} ساعت میوت شد.")
-    elif text == "آنمیوت":
+    elif text in ("آنمیوت","انمیوت","ان میوت","آن میوت"):
         await moderation.unmute_user(self.client, chat, target_id)
         await event.reply(f"میوتِ کاربر `{target_id}` برداشته شد.")
     elif text in ("ریم","بن"):
