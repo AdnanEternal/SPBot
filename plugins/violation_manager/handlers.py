@@ -950,11 +950,10 @@ async def on_reply_shortcut(
     if text == "آنمیوت":
 
         try:
-            await moderation.mute_user(
+            await moderation.unmute_user(
                 self.client,
                 chat,
                 reply,
-                hours=hours,
             )
 
         except moderation.ModerationError as exc:
@@ -983,7 +982,6 @@ async def on_reply_shortcut(
             f"میوتِ کاربر `{target_id}` برداشته شد.",
         )
         return
-
     # =========================================
     # BAN
     # =========================================

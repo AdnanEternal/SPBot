@@ -6,7 +6,7 @@ from datetime import timedelta
 from typing import Any, Optional
 
 from core.time_manager import now_utc
-from splusthon import SoroushClient, errors
+from splusthon import SoroushClient, errors, types, functions
 
 
 class ModerationError(Exception):
@@ -319,15 +319,71 @@ async def _resolve_moderation_input(
 
     return input_user
 
-
-async def _validate_moderation(
+async def _validate_bot_permissions(
     client: SoroushClient,
     chat: Any,
-    user: Any,
-) -> Any:
+) -> None:
 
     # =========================================
-    # 1. BOT PERMISSIONS
+    # NORMAL SMALL GROUP
+    # =========================================
+
+    if isinstance(chat, types.Chat):
+
+        try:
+            me = await client.get_me()
+
+        except Exception as exc:
+            raise BotPermissionError() from exc
+
+        if me is None:
+            raise BotPermissionError()
+
+        try:
+            full_chat = await client(
+                functions.messages.GetFullChatRequest(
+                    chat.id,
+                )
+            )
+
+            participants = (
+                full_chat
+                .full_chat
+                .participants
+                .participants
+            )
+
+        except Exception as exc:
+            raise ModerationOperationError(
+                f"❌ بررسی دسترسی ربات ناموفق بود:\n{exc}"
+            ) from exc
+
+        bot_id = me.id
+
+        for participant in participants:
+
+            if getattr(
+                participant,
+                "user_id",
+                None,
+            ) != bot_id:
+                continue
+
+            if isinstance(
+                participant,
+                (
+                    types.ChatParticipantCreator,
+                    types.ChatParticipantAdmin,
+                ),
+            ):
+                return
+
+            raise BotPermissionError()
+
+        raise BotPermissionError()
+
+    # =========================================
+    # CHANNEL / MEGAGROUP
     # =========================================
 
     try:
@@ -375,6 +431,22 @@ async def _validate_moderation(
         False,
     ):
         raise BotPermissionError()
+    
+async def _validate_moderation(
+    client: SoroushClient,
+    chat: Any,
+    user: Any,
+) -> Any:
+
+    # =========================================
+    # 1. BOT PERMISSIONS
+    # =========================================
+
+    await _validate_bot_permissions(
+        client,
+        chat,
+    )
+
 
     # =========================================
     # 2. TARGET INPUT ENTITY
