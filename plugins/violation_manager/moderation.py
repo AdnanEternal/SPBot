@@ -234,7 +234,9 @@ async def _validate_moderation(
     # =========================================
 
     try:
-        me = await client.get_me()
+        me = await client.get_me(
+            input_peer=True
+        )
 
         bot_permissions = (
             await client.get_permissions(
