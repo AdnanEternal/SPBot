@@ -6,7 +6,7 @@ from datetime import timedelta
 from typing import Any, Optional
 
 from core.time_manager import now_utc
-from splusthon import SoroushClient
+from splusthon import SoroushClient, errors
 
 
 class ModerationError(Exception):
@@ -109,17 +109,18 @@ async def resolve_target(
     if reply is None:
         return None
 
-    try:
-        entity = await reply.get_sender()
-    except Exception:
-        entity = None
+    target_id = getattr(
+        reply,
+        "sender_id",
+        None,
+    )
 
-    if entity is None:
+    if target_id is None:
         return None
 
     return {
-        "id": entity.id,
-        "entity": entity,
+        "id": target_id,
+        "entity": reply,
     }
 
 
@@ -142,19 +143,26 @@ async def resolve_user_entity(
 
     except Exception:
         pass
-
-    # بعد entity معمولی.
+    
     try:
-        return await client.get_entity(
+        return await client.get_input_entity(
             int(user_id)
         )
     except Exception:
         return None
 
-
 def _is_not_member_error(
     exc: Exception,
 ) -> bool:
+
+    if isinstance(
+        exc,
+        (
+            errors.UserNotParticipantError,
+            errors.UserKickedError,
+        ),
+    ):
+        return True
 
     error_name = (
         type(exc).__name__
@@ -174,12 +182,21 @@ def _is_not_member_error(
         or "user_not_participant" in message
         or "not_member" in message
         or "not member" in message
+        or "kicked" in message
     )
-
 
 def _is_permission_error(
     exc: Exception,
 ) -> bool:
+
+    if isinstance(
+        exc,
+        (
+            errors.ChatAdminRequiredError,
+            errors.RightForbiddenError,
+        ),
+    ):
+        return True
 
     error_name = (
         type(exc).__name__
@@ -214,10 +231,15 @@ def _is_permission_error(
         )
     )
 
-
 def _is_admin_target_error(
     exc: Exception,
 ) -> bool:
+
+    if isinstance(
+        exc,
+        errors.UserAdminInvalidError,
+    ):
+        return True
 
     error_name = (
         type(exc).__name__
@@ -248,11 +270,61 @@ def _is_admin_target_error(
         )
     )
 
+
+async def _resolve_moderation_input(
+    client: SoroushClient,
+    user: Any,
+) -> Any:
+
+    if user is None:
+        raise TargetNotMemberError()
+
+    get_input_sender = getattr(
+        user,
+        "get_input_sender",
+        None,
+    )
+
+    # reply.Message / event.Message
+    if callable(get_input_sender):
+
+        try:
+            input_user = await get_input_sender()
+
+        except Exception as exc:
+            raise ModerationOperationError(
+                "❌ دریافت اطلاعات کاربر برای انجام عملیات ناموفق بود:\n"
+                f"{exc}"
+            ) from exc
+
+        if input_user is None:
+            raise TargetNotMemberError()
+
+        return input_user
+
+    # Entity / InputPeer / ID
+    try:
+        input_user = await client.get_input_entity(
+            user
+        )
+
+    except Exception as exc:
+        raise ModerationOperationError(
+            "❌ دریافت اطلاعات کاربر برای انجام عملیات ناموفق بود:\n"
+            f"{exc}"
+        ) from exc
+
+    if input_user is None:
+        raise TargetNotMemberError()
+
+    return input_user
+
+
 async def _validate_moderation(
     client: SoroushClient,
     chat: Any,
     user: Any,
-) -> None:
+) -> Any:
 
     # =========================================
     # 1. BOT PERMISSIONS
@@ -277,7 +349,10 @@ async def _validate_moderation(
 
     except Exception as exc:
 
-        if _is_permission_error(exc):
+        if (
+            _is_permission_error(exc)
+            or _is_not_member_error(exc)
+        ):
             raise BotPermissionError() from exc
 
         raise ModerationOperationError(
@@ -302,11 +377,13 @@ async def _validate_moderation(
         raise BotPermissionError()
 
     # =========================================
-    # 2. TARGET ENTITY
+    # 2. TARGET INPUT ENTITY
     # =========================================
 
-    if user is None:
-        raise TargetNotMemberError()
+    target_input = await _resolve_moderation_input(
+        client,
+        user,
+    )
 
     # =========================================
     # 3. TARGET MEMBERSHIP + ADMIN STATUS
@@ -315,7 +392,7 @@ async def _validate_moderation(
     try:
         target_permissions = await client.get_permissions(
             chat,
-            user,
+            target_input,
         )
 
     except Exception as exc:
@@ -354,6 +431,8 @@ async def _validate_moderation(
     ):
         raise TargetIsAdminError()
 
+    return target_input
+
 async def mute_user(
     client: SoroushClient,
     chat: Any,
@@ -361,8 +440,8 @@ async def mute_user(
     hours: Optional[int] = None,
     minutes: Optional[int] = None,
 ) -> None:
-
-    await _validate_moderation(
+    
+    user = await _validate_moderation(
         client,
         chat,
         user,
@@ -429,7 +508,7 @@ async def unmute_user(
     user: Any,
 ) -> None:
 
-    await _validate_moderation(
+    user = await _validate_moderation(
         client,
         chat,
         user,
@@ -472,7 +551,7 @@ async def ban_user(
     user: Any,
 ) -> None:
 
-    await _validate_moderation(
+    user = await _validate_moderation(
         client,
         chat,
         user,

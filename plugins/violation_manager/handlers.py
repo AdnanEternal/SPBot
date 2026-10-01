@@ -881,22 +881,16 @@ async def on_reply_shortcut(
     if reply is None:
         return
 
-    try:
-        target_entity = await reply.get_sender()
-    except Exception:
-        target_entity = None
-
-    if target_entity is None:
-        return
-
     target_id = getattr(
-        target_entity,
-        "id",
+        reply,
+        "sender_id",
         None,
     )
 
     if target_id is None:
         return
+
+    
 
     # =========================================
     # MUTE
@@ -917,7 +911,7 @@ async def on_reply_shortcut(
             await moderation.mute_user(
                 self.client,
                 chat,
-                target_entity,
+                reply,
                 hours=hours,
             )
 
@@ -956,10 +950,11 @@ async def on_reply_shortcut(
     if text == "آنمیوت":
 
         try:
-            await moderation.unmute_user(
+            await moderation.mute_user(
                 self.client,
                 chat,
-                target_entity,
+                reply,
+                hours=hours,
             )
 
         except moderation.ModerationError as exc:
@@ -996,10 +991,11 @@ async def on_reply_shortcut(
     if text == "بن":
 
         try:
+
             await moderation.ban_user(
                 self.client,
                 chat,
-                target_entity,
+                reply,
             )
 
         except moderation.ModerationError as exc:
