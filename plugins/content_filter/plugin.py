@@ -24,7 +24,7 @@ class ContentFilterPlugin(BasePlugin):
     """
 
     name = "Content Filter"
-    version = "2.6.1"
+    version = "2.6.2"
 
     # حداکثر تعداد تخلف قبل از درخواست مجازات.
     #

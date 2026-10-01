@@ -542,7 +542,7 @@ async def on_message(
 
         await event.reply(
             f"{sender_name} ⚠️ پیام شما به‌دلیل استفاده از "
-            "کلمهٔ فیلترشده حذف شد."
+            f"کلمهٔ فیلترشده «{matched_word}» حذف شد."
         )
 
     except Exception as e:

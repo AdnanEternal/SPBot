@@ -868,8 +868,6 @@ class AIModelStore:
                 ),
             },
 
-            # فعلاً provider_id را اینجا index نمی‌کنیم.
-            # چون ممکن است جدول قدیمی باشد و این ستون هنوز وجود نداشته باشد.
             indexes=[
                 "is_active",
             ],
