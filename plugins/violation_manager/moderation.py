@@ -256,55 +256,6 @@ async def _validate_moderation(
 ) -> None:
 
     # =========================================
-    # BOT PERMISSIONS
-    # =========================================
-
-    try:
-        # مهم:
-        # باید InputPeer خود ربات را بگیریم،
-        # نه User معمولی.
-        me = await client.get_me(
-            input_peer=True
-        )
-
-        if me is None:
-            raise BotPermissionError()
-
-        bot_permissions = (
-            await client.get_permissions(
-                chat,
-                me,
-            )
-        )
-
-    except BotPermissionError:
-        raise
-
-    except Exception as exc:
-
-        if _is_permission_error(exc):
-            raise BotPermissionError() from exc
-
-        raise ModerationOperationError(
-            f"❌ بررسی دسترسی ربات ناموفق بود:\n{exc}"
-        ) from exc
-
-    if (
-        bot_permissions is None
-        or not getattr(
-            bot_permissions,
-            "is_admin",
-            False,
-        )
-        or not getattr(
-            bot_permissions,
-            "ban_users",
-            False,
-        )
-    ):
-        raise BotPermissionError()
-
-    # =========================================
     # TARGET MEMBERSHIP
     # =========================================
 
@@ -353,13 +304,16 @@ async def _validate_moderation(
     ):
         raise TargetNotMemberError()
 
+    # =========================================
+    # TARGET ADMIN
+    # =========================================
+
     if getattr(
         target_permissions,
         "is_admin",
         False,
     ):
         raise TargetIsAdminError()
-
 
 async def mute_user(
     client: SoroushClient,
