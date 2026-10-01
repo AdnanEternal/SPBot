@@ -833,6 +833,192 @@ async def unmute_command(
         f"📍 گروه: `{target_group}`",
     )
 
+
+@command(
+    name="بن",
+    permission="everyone",
+    chat_type="all",
+    description="یه کاربر رو بن می‌کنه؛ محلی برای ادمین و ریموت برای Owner.",
+)
+async def ban_command(
+    self: "ViolationManagerPlugin",
+    event: events.NewMessage.Event,
+) -> None:
+
+    target_group, target_arg, remote = (
+        await _resolve_group_target(
+            self,
+            event,
+        )
+    )
+
+    if target_group is None:
+        await _safe_reply(
+            event,
+            "مثال:\n"
+            "داخل گروه:\n"
+            "!بن @username\n"
+            "یا روی پیام کاربر ریپلای کن.\n\n"
+            "ریموت توسط Owner:\n"
+            "!بن @username -100123456",
+        )
+        return
+
+    target_id = None
+    target_entity = None
+
+    # =========================================
+    # REMOTE
+    # =========================================
+
+    if remote:
+
+        if not target_arg:
+            await _safe_reply(
+                event,
+                "❌ برای اجرای ریموت باید کاربر را مشخص کنی.\n"
+                "مثال:\n"
+                "!بن 49245702 -100123456\n"
+                "یا:\n"
+                "!بن @username -100123456",
+            )
+            return
+
+        if target_arg.lstrip("-").isdigit():
+
+            try:
+                target_id = int(target_arg)
+            except ValueError:
+                await _safe_reply(
+                    event,
+                    "❌ شناسه کاربر نامعتبر است.",
+                )
+                return
+
+            target_entity = (
+                await moderation.resolve_user_entity(
+                    self.client,
+                    event,
+                    target_id,
+                )
+            )
+
+        else:
+
+            try:
+                target_entity = (
+                    await self.client.get_entity(
+                        target_arg
+                    )
+                )
+
+                target_id = target_entity.id
+
+            except Exception:
+                await _safe_reply(
+                    event,
+                    f"❌ نتونستم کاربر `{target_arg}` رو پیدا کنم.",
+                )
+                return
+
+    # =========================================
+    # LOCAL
+    # =========================================
+
+    else:
+
+        target = await moderation.resolve_target(
+            self.client,
+            event,
+        )
+
+        if target is None:
+            await _safe_reply(
+                event,
+                "مثال: !بن @username\n"
+                "یا روی پیام شخص ریپلای کن.",
+            )
+            return
+
+        target_id = target["id"]
+        target_entity = target["entity"]
+
+        if target_entity is None:
+            target_entity = (
+                await moderation.resolve_user_entity(
+                    self.client,
+                    event,
+                    target_id,
+                )
+            )
+
+    # =========================================
+    # ENTITY
+    # =========================================
+
+    if target_entity is None:
+        await _safe_reply(
+            event,
+            f"❌ نتونستم اطلاعات کاربر `{target_id}` رو پیدا کنم.",
+        )
+        return
+
+    # =========================================
+    # GROUP
+    # =========================================
+
+    chat = await _resolve_group_entity(
+        self,
+        target_group,
+    )
+
+    if chat is None:
+        await _safe_reply(
+            event,
+            f"❌ گروه `{target_group}` پیدا نشد.\n"
+            "مطمئن شو ربات داخل این گروه حضور داره.",
+        )
+        return
+
+    # =========================================
+    # MODERATION
+    # =========================================
+
+    try:
+
+        await moderation.ban_user(
+            self.client,
+            chat,
+            target_entity,
+        )
+
+    except moderation.ModerationError as exc:
+
+        await _safe_reply(
+            event,
+            str(exc),
+        )
+        return
+
+    except Exception as exc:
+
+        print(
+            "❌ خطای غیرمنتظره در !بن:",
+            exc,
+        )
+
+        await _safe_reply(
+            event,
+            f"❌ خطای غیرمنتظره در بن:\n{exc}",
+        )
+        return
+
+    await _safe_reply(
+        event,
+        f"✅ کاربر `{target_id}` بن شد.\n"
+        f"📍 گروه: `{target_group}`",
+    )
+
 @on_event(events.NewMessage(incoming=True))
 async def on_reply_shortcut(
     self: "ViolationManagerPlugin",

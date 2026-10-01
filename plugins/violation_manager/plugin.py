@@ -48,7 +48,7 @@ class ViolationNoticeThrottle:
  
 class ViolationManagerPlugin(BasePlugin):
     name = "Violation Manager"
-    version = "1.6.18"
+    version = "1.6.19"
 
     def __init__(
         self,
@@ -91,3 +91,4 @@ class ViolationManagerPlugin(BasePlugin):
     on_violation = handlers.on_violation
     on_punishment_request = handlers.on_punishment_request
     clear_record = handlers.clear_record
+    ban_command = handlers.ban_command
