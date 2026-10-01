@@ -30,7 +30,7 @@ class TargetIsAdminError(ModerationError):
 class BotPermissionError(ModerationError):
     def __init__(self):
         super().__init__(
-            "❌ ربات ادمین نیست و دسترسی لازم برای انجام این عملیات را ندارد."
+            "❌ ربات دسترسی لازم برای انجام این عملیات را ندارد."
         )
 
 
