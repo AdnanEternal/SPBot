@@ -248,7 +248,6 @@ def _is_admin_target_error(
         )
     )
 
-
 async def _validate_moderation(
     client: SoroushClient,
     chat: Any,
@@ -256,29 +255,73 @@ async def _validate_moderation(
 ) -> None:
 
     # =========================================
-    # TARGET MEMBERSHIP
+    # 1. BOT PERMISSIONS
+    # =========================================
+
+    try:
+        bot_input_entity = await client.get_me(
+            input_peer=True,
+        )
+
+    except Exception as exc:
+        raise BotPermissionError() from exc
+
+    if bot_input_entity is None:
+        raise BotPermissionError()
+
+    try:
+        bot_permissions = await client.get_permissions(
+            chat,
+            bot_input_entity,
+        )
+
+    except Exception as exc:
+
+        if _is_permission_error(exc):
+            raise BotPermissionError() from exc
+
+        raise ModerationOperationError(
+            f"❌ بررسی دسترسی ربات ناموفق بود:\n{exc}"
+        ) from exc
+
+    if bot_permissions is None:
+        raise BotPermissionError()
+
+    if not getattr(
+        bot_permissions,
+        "is_admin",
+        False,
+    ):
+        raise BotPermissionError()
+
+    if not getattr(
+        bot_permissions,
+        "ban_users",
+        False,
+    ):
+        raise BotPermissionError()
+
+    # =========================================
+    # 2. TARGET ENTITY
     # =========================================
 
     if user is None:
-        raise ModerationOperationError(
-            "❌ Entity کاربر پیدا نشد."
-        )
+        raise TargetNotMemberError()
+
+    # =========================================
+    # 3. TARGET MEMBERSHIP + ADMIN STATUS
+    # =========================================
 
     try:
-        target_permissions = (
-            await client.get_permissions(
-                chat,
-                user,
-            )
+        target_permissions = await client.get_permissions(
+            chat,
+            user,
         )
 
     except Exception as exc:
 
         if _is_not_member_error(exc):
             raise TargetNotMemberError() from exc
-
-        if _is_permission_error(exc):
-            raise BotPermissionError() from exc
 
         if _is_admin_target_error(exc):
             raise TargetIsAdminError() from exc
@@ -303,10 +346,6 @@ async def _validate_moderation(
         False,
     ):
         raise TargetNotMemberError()
-
-    # =========================================
-    # TARGET ADMIN
-    # =========================================
 
     if getattr(
         target_permissions,
