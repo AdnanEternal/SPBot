@@ -186,48 +186,6 @@ class AIModelStatisticsStore:
             },
         )
 
-        # -------------------------
-        # Migration
-        # -------------------------
-
-        rows = await self.db.fetchall(
-            f"PRAGMA table_info({self.TABLE})"
-        )
-
-        columns = {
-            row["name"]
-            for row in rows
-        }
-
-        migrations = {
-            "ping_success_count": (
-                "INTEGER NOT NULL DEFAULT 0"
-            ),
-            "ping_failure_count": (
-                "INTEGER NOT NULL DEFAULT 0"
-            ),
-            "ping_total_latency_ms": (
-                "REAL NOT NULL DEFAULT 0"
-            ),
-            "ping_average_latency_ms": (
-                "REAL NOT NULL DEFAULT 0"
-            ),
-            "ping_last_success_at": "TEXT",
-            "ping_last_failure_at": "TEXT",
-            "ping_last_error": "TEXT",
-        }
-
-        for column, definition in migrations.items():
-
-            if column in columns:
-                continue
-
-            await self.db.execute(
-                f"""
-                ALTER TABLE {self.TABLE}
-                ADD COLUMN {column} {definition}
-                """
-            )
             
     async def ensure(
         self,
@@ -930,13 +888,6 @@ class AIModelStore:
         # -------------------------------------------------
 
         await self._create_models_table()
-
-
-        # -------------------------------------------------
-        # Old model-specific keys -> provider pool
-        # -------------------------------------------------
-
-        await self.providers.migrate_legacy_model_keys()
 
     # =========================================================
     # MODEL CRUD
