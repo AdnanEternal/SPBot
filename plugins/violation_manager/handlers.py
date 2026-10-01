@@ -955,7 +955,7 @@ async def on_reply_shortcut(
                 chat,
                 reply,
             )
-
+ 
         except moderation.ModerationError as exc:
 
             await _safe_reply(

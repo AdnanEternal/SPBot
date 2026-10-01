@@ -78,7 +78,7 @@ class ViolationStore:
                 ADD COLUMN {column} {definition}
                 """
             )
-
+ 
     async def add(
         self,
         group_id: int,

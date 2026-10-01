@@ -45,7 +45,7 @@ class ViolationNoticeThrottle:
         )
 
         return True
-
+ 
 class ViolationManagerPlugin(BasePlugin):
     name = "Violation Manager"
     version = "1.6.15"
