@@ -944,11 +944,6 @@ class AIModelStore:
                 """
             )
 
-
-        # =========================================================
-        # PROVIDER_ID INDEX
-        # =========================================================
-
         await self.db.execute(
             f"""
             CREATE INDEX IF NOT EXISTS
@@ -965,59 +960,145 @@ class AIModelStore:
                 provider,
                 base_url
             FROM {self.TABLE}
+            WHERE provider_id IS NULL
+            OR provider_id = 0
             ORDER BY id ASC
             """
         )
 
+        if not models:
+            return
+
+        providers = (
+            await self.providers.get_all()
+        )
+
         for model in models:
 
-            provider_id = model["provider_id"]
-
-            if provider_id:
-                provider = await self.providers.get(
-                    int(provider_id)
-                )
-
-                if provider is not None:
-                    continue
-
-            provider_name = (
+            legacy_litellm_provider = (
                 str(
                     model["provider"]
                     or ""
-                ).strip().lower()
+                )
+                .strip()
+                .lower()
             )
 
-            if not provider_name:
+            legacy_base_url = (
+                str(
+                    model["base_url"]
+                    or ""
+                )
+                .strip()
+                .rstrip("/")
+            )
+
+            if not legacy_litellm_provider:
                 raise ValueError(
                     f"مدل #{model['id']} "
                     "Provider ندارد."
                 )
 
-            provider = (
-                await self.providers.ensure_provider(
-                    name=provider_name,
-                    base_url=model["base_url"],
-                    provider=provider_name,
-                )
-            )
+            # -------------------------------------------------
+            # پیدا کردن Provider واقعی بر اساس مشخصات اتصال
+            #
+            # مهم:
+            # provider = openai
+            #
+            # اینجا فقط LiteLLM Provider است
+            # و هرگز به عنوان نام داخلی Provider استفاده
+            # نمی‌شود.
+            # -------------------------------------------------
 
-            await self.db.execute(
-                f"""
-                UPDATE {self.TABLE}
-                SET
-                    provider_id = ?,
-                    provider = ?,
-                    base_url = ?,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-                """,
-                (
-                    provider["id"],
-                    provider["name"],
-                    provider["base_url"],
-                    model["id"],
-                ),
+            matching_providers = []
+
+            for provider in providers:
+
+                provider_litellm = (
+                    str(
+                        provider.get("provider")
+                        or ""
+                    )
+                    .strip()
+                    .lower()
+                )
+
+                provider_base_url = (
+                    str(
+                        provider.get("base_url")
+                        or ""
+                    )
+                    .strip()
+                    .rstrip("/")
+                )
+
+                if (
+                    provider_litellm
+                    == legacy_litellm_provider
+                    and provider_base_url
+                    == legacy_base_url
+                ):
+                    matching_providers.append(
+                        provider
+                    )
+
+            # -------------------------------------------------
+            # دقیقاً یک Provider پیدا شد
+            # -------------------------------------------------
+
+            if len(matching_providers) == 1:
+
+                provider = (
+                    matching_providers[0]
+                )
+
+                await self.db.execute(
+                    f"""
+                    UPDATE {self.TABLE}
+                    SET
+                        provider_id = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                    """,
+                    (
+                        int(provider["id"]),
+                        int(model["id"]),
+                    ),
+                )
+
+                continue
+
+            # -------------------------------------------------
+            # چند Provider با مشخصات یکسان
+            # -------------------------------------------------
+
+            if len(matching_providers) > 1:
+
+                names = ", ".join(
+                    provider["name"]
+                    for provider
+                    in matching_providers
+                )
+
+                raise ValueError(
+                    f"مدل #{model['id']} با "
+                    f"LiteLLM Provider=`{legacy_litellm_provider}` "
+                    f"و Base URL=`{legacy_base_url}` "
+                    f"به چند Provider قابل اتصال است: "
+                    f"{names}"
+                )
+
+            # -------------------------------------------------
+            # هیچ Provider موجودی پیدا نشد
+            # -------------------------------------------------
+
+            raise ValueError(
+                f"مدل #{model['id']} قابل Migration نیست.\n"
+                f"LiteLLM Provider: "
+                f"{legacy_litellm_provider}\n"
+                f"Base URL: "
+                f"{legacy_base_url or 'خالی'}\n"
+                "هیچ Provider موجودی با این مشخصات پیدا نشد."
             )
 
     async def create_table(self) -> None:
