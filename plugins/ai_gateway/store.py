@@ -981,8 +981,9 @@ class AIModelStore:
 
             provider = (
                 await self.providers.ensure_provider(
-                    provider_name,
-                    model["base_url"],
+                    name=provider_name,
+                    base_url=model["base_url"],
+                    provider=provider_name,
                 )
             )
 
@@ -1039,8 +1040,6 @@ class AIModelStore:
         name: str,
         provider: str,
         model_id: str,
-        api_key: str | None = None,
-        base_url: str | None = None,
     ) -> None:
 
         normalized_name = (
@@ -1088,7 +1087,9 @@ class AIModelStore:
                 "name": normalized_name,
                 "provider_id": provider_row["id"],
                 "model_id": clean_model_id,
-                "provider": provider_row["name"],
+
+                # legacy compatibility
+                "provider": provider_row["provider"],
                 "base_url": provider_row["base_url"],
             },
         )
@@ -1096,18 +1097,6 @@ class AIModelStore:
         if result.lastrowid is None:
             raise RuntimeError(
                 "شناسه مدل ساخته‌شده قابل دریافت نیست."
-            )
-
-        # -------------------------------------------------
-        # compatibility:
-        # اگر caller قدیمی API Key فرستاد،
-        # آن را به Pool Provider اضافه می‌کنیم.
-        # -------------------------------------------------
-
-        if api_key:
-            await self.providers.add_api_key(
-                provider_row["id"],
-                api_key,
             )
 
     async def get(
@@ -1121,7 +1110,8 @@ class AIModelStore:
                 m.id,
                 m.name,
                 m.provider_id,
-                p.name AS provider,
+                p.name AS provider_name,
+                p.provider AS provider,
                 m.model_id,
                 p.base_url AS base_url,
                 p.models_url AS models_url,
@@ -1155,7 +1145,8 @@ class AIModelStore:
                 m.id,
                 m.name,
                 m.provider_id,
-                p.name AS provider,
+                p.name AS provider_name,
+                p.provider AS provider,
                 m.model_id,
                 p.base_url AS base_url,
                 p.models_url AS models_url,
@@ -1197,7 +1188,8 @@ class AIModelStore:
                 m.id,
                 m.name,
                 m.provider_id,
-                p.name AS provider,
+                p.name AS provider_name,
+                p.provider AS provider,
                 m.model_id,
                 p.base_url AS base_url,
                 p.models_url AS models_url,

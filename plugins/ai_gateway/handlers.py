@@ -262,7 +262,750 @@ async def ai_telemetry_streamer(
 
 
 
+# =========================================================
+# PROVIDER MANAGEMENT
+# =========================================================
 
+
+@command(
+    name="ارائه دهنده افزودن",
+    permission="owner",
+    chat_type="all",
+    description="یک AI Provider جدید اضافه می‌کند.",
+)
+async def add_provider(
+    self,
+    event,
+):
+    args = (
+        event.args_text or ""
+    ).strip().split()
+
+    if len(args) not in {3, 4}:
+        await event.reply(
+            "❌ استفاده نادرست.\n\n"
+            "فرمت:\n"
+            "!ارائه دهنده افزودن "
+            "<نام> <provider> <base_url> [models_url]\n\n"
+            "مثال:\n"
+            "!ارائه دهنده افزودن gemini "
+            "openai https://example.com/v1"
+        )
+        return
+
+    name = args[0]
+    provider = args[1]
+    base_url = args[2]
+
+    models_url = (
+        args[3]
+        if len(args) == 4
+        else None
+    )
+
+    try:
+        provider_id = (
+            await self.providers.add(
+                name=name,
+                provider=provider,
+                base_url=base_url,
+                models_url=models_url,
+            )
+        )
+
+    except Exception as exc:
+        await event.reply(
+            f"❌ افزودن Provider ناموفق بود:\n{exc}"
+        )
+        return
+
+    try:
+        await event.delete()
+    except Exception:
+        pass
+
+    await event.reply(
+        f"✅ Provider «{name}» ساخته شد.\n\n"
+        f"🆔 ID: {provider_id}\n"
+        f"🔌 LiteLLM Provider: {provider}\n"
+        f"🌐 Base URL: {base_url}"
+    )
+
+
+@command(
+    name="ارائه دهنده ها",
+    permission="owner",
+    chat_type="all",
+    description="لیست AI Providerها را نشان می‌دهد.",
+)
+async def list_providers(
+    self,
+    event,
+):
+    providers = (
+        await self.providers.get_all()
+    )
+
+    if not providers:
+        await event.reply(
+            "📦 هیچ AI Provider ثبت نشده است."
+        )
+        return
+
+    lines = []
+
+    for provider in providers:
+
+        keys = (
+            await self.providers.get_api_keys(
+                provider["id"]
+            )
+        )
+
+        models = [
+            model
+            for model in (
+                await self.models.get_all()
+            )
+            if int(model["provider_id"])
+            == int(provider["id"])
+        ]
+
+        available_count = sum(
+            1
+            for key in keys
+            if key["status"] == "AVAILABLE"
+        )
+
+        lines.append(
+            f"🔌 `{provider['name']}`\n"
+            f"   LiteLLM: `{provider['provider']}`\n"
+            f"   Models: {len(models)}\n"
+            f"   Keys: {len(keys)} "
+            f"(available: {available_count})"
+        )
+
+    await event.reply(
+        "🔌 AI Providerها:\n\n"
+        + "\n\n".join(lines)
+    )
+
+
+@command(
+    name="ارائه دهنده اطلاعات",
+    permission="owner",
+    chat_type="all",
+    description="اطلاعات کامل یک Provider را نشان می‌دهد.",
+)
+async def provider_info(
+    self,
+    event,
+):
+    name = (
+        event.args_text or ""
+    ).strip()
+
+    if not name:
+        await event.reply(
+            "مثال: !ارائه دهنده اطلاعات gemini"
+        )
+        return
+
+    provider = await self.providers.get(
+        name
+    )
+
+    if provider is None:
+        await event.reply(
+            f"❌ Provider «{name}» پیدا نشد."
+        )
+        return
+
+    keys = (
+        await self.providers.get_api_keys(
+            provider["id"]
+        )
+    )
+
+    models = [
+        model
+        for model in (
+            await self.models.get_all()
+        )
+        if int(model["provider_id"])
+        == int(provider["id"])
+    ]
+
+    key_lines = []
+
+    for key in keys:
+
+        state = (
+            "🟢 فعال"
+            if key["is_active"]
+            else "⚪ عادی"
+        )
+
+        key_lines.append(
+            f"{state} "
+            f"#{key['key_number']} — "
+            f"{mask_secret(key['api_key'])} "
+            f"[{key['status']}]"
+        )
+
+    model_lines = [
+        (
+            f"🤖 `{model['name']}` — "
+            f"`{model['model_id']}`"
+        )
+        for model in models
+    ]
+
+    await event.reply(
+        f"🔌 Provider: `{provider['name']}`\n"
+        f"🔧 LiteLLM Provider: `{provider['provider']}`\n"
+        f"🌐 Base URL: "
+        f"{provider['base_url'] or 'پیش‌فرض'}\n"
+        f"📦 Models URL: "
+        f"{provider['models_url'] or 'Base URL + /models'}\n\n"
+
+        f"🔑 API Key Pool ({len(keys)}):\n"
+        + (
+            "\n".join(key_lines)
+            if key_lines
+            else "هیچ Key ثبت نشده."
+        )
+        + "\n\n"
+
+        f"🤖 Models ({len(models)}):\n"
+        + (
+            "\n".join(model_lines)
+            if model_lines
+            else "هیچ Model ثبت نشده."
+        )
+    )
+
+
+@command(
+    name="ارائه دهنده تنظیم",
+    permission="owner",
+    chat_type="all",
+    description="تنظیمات اتصال یک Provider را تغییر می‌دهد.",
+)
+async def update_provider(
+    self,
+    event,
+):
+    args = (
+        event.args_text or ""
+    ).strip().split()
+
+    if len(args) not in {3, 4}:
+        await event.reply(
+            "❌ استفاده نادرست.\n\n"
+            "فرمت:\n"
+            "!ارائه دهنده تنظیم "
+            "<نام> <provider> <base_url> [models_url]"
+        )
+        return
+
+    name = args[0]
+    provider = args[1]
+    base_url = args[2]
+
+    models_url = (
+        args[3]
+        if len(args) == 4
+        else None
+    )
+
+    try:
+        success = await self.providers.update(
+            name=name,
+            provider=provider,
+            base_url=base_url,
+            models_url=models_url,
+        )
+
+    except Exception as exc:
+        await event.reply(
+            f"❌ بروزرسانی Provider ناموفق بود:\n{exc}"
+        )
+        return
+
+    if not success:
+        await event.reply(
+            f"❌ Provider «{name}» پیدا نشد."
+        )
+        return
+
+    await event.reply(
+        f"✅ تنظیمات Provider «{name}» بروزرسانی شد."
+    )
+
+
+@command(
+    name="ارائه دهنده حذف",
+    permission="owner",
+    chat_type="all",
+    description="یک AI Provider را حذف می‌کند.",
+)
+async def delete_provider(
+    self,
+    event,
+):
+    name = (
+        event.args_text or ""
+    ).strip()
+
+    if not name:
+        await event.reply(
+            "مثال: !ارائه دهنده حذف gemini"
+        )
+        return
+
+    try:
+        deleted = await self.providers.delete(
+            name
+        )
+
+    except Exception as exc:
+        await event.reply(
+            f"❌ حذف Provider ناموفق بود:\n{exc}"
+        )
+        return
+
+    if not deleted:
+        await event.reply(
+            f"❌ Provider «{name}» پیدا نشد."
+        )
+        return
+
+    await event.reply(
+        f"✅ Provider «{name}» حذف شد."
+    )
+
+
+# =========================================================
+# PROVIDER API KEY POOL
+# =========================================================
+
+
+@command(
+    name="ارائه دهنده کلید افزودن",
+    permission="owner",
+    chat_type="all",
+    description="یک API Key به Pool یک Provider اضافه می‌کند.",
+)
+async def add_provider_api_key(
+    self,
+    event,
+):
+    args = (
+        event.args_text or ""
+    ).strip().split()
+
+    if len(args) != 2:
+        await event.reply(
+            "مثال:\n"
+            "!ارائه دهنده کلید افزودن gemini API_KEY"
+        )
+        return
+
+    provider_name = args[0]
+    api_key = args[1]
+
+    provider = await self.providers.get(
+        provider_name
+    )
+
+    if provider is None:
+        await event.reply(
+            f"❌ Provider «{provider_name}» پیدا نشد."
+        )
+        return
+
+    try:
+        key_number = (
+            await self.providers.add_api_key(
+                provider["id"],
+                api_key,
+            )
+        )
+
+    except Exception as exc:
+        await event.reply(
+            f"❌ افزودن API Key ناموفق بود:\n{exc}"
+        )
+        return
+
+    if key_number == 0:
+        await event.reply(
+            "⚠️ این API Key قبلاً در Pool همین Provider وجود دارد."
+        )
+        return
+
+    try:
+        await event.delete()
+    except Exception:
+        pass
+
+    await event.reply(
+        f"✅ API Key شماره #{key_number} "
+        f"به Pool Provider «{provider_name}» اضافه شد."
+    )
+
+
+@command(
+    name="ارائه دهنده کلید ها",
+    permission="owner",
+    chat_type="all",
+    description="Pool کلیدهای یک Provider را نشان می‌دهد.",
+)
+async def list_provider_api_keys(
+    self,
+    event,
+):
+    provider_name = (
+        event.args_text or ""
+    ).strip()
+
+    if not provider_name:
+        await event.reply(
+            "مثال: !ارائه دهنده کلید ها gemini"
+        )
+        return
+
+    provider = await self.providers.get(
+        provider_name
+    )
+
+    if provider is None:
+        await event.reply(
+            f"❌ Provider «{provider_name}» پیدا نشد."
+        )
+        return
+
+    keys = (
+        await self.providers.get_api_keys(
+            provider["id"]
+        )
+    )
+
+    if not keys:
+        await event.reply(
+            f"🔑 Pool Provider «{provider_name}» خالی است."
+        )
+        return
+
+    lines = []
+
+    for key in keys:
+
+        state = (
+            "🟢 ACTIVE"
+            if key["is_active"]
+            else "⚪"
+        )
+
+        lines.append(
+            f"{state} "
+            f"#{key['key_number']} — "
+            f"{mask_secret(key['api_key'])} — "
+            f"{key['status']}"
+        )
+
+    await event.reply(
+        f"🔑 API Key Pool — `{provider_name}`\n\n"
+        + "\n".join(lines)
+    )
+
+
+@command(
+    name="ارائه دهنده کلید فعال",
+    permission="owner",
+    chat_type="all",
+    description="کلید فعال Pool یک Provider را مشخص می‌کند.",
+)
+async def activate_provider_api_key(
+    self,
+    event,
+):
+    args = (
+        event.args_text or ""
+    ).strip().split()
+
+    if len(args) != 2:
+        await event.reply(
+            "مثال:\n"
+            "!ارائه دهنده کلید فعال gemini 2"
+        )
+        return
+
+    provider_name = args[0]
+
+    if not args[1].isdigit():
+        await event.reply(
+            "❌ شماره Key باید عدد باشد."
+        )
+        return
+
+    key_number = int(args[1])
+
+    provider = await self.providers.get(
+        provider_name
+    )
+
+    if provider is None:
+        await event.reply(
+            f"❌ Provider «{provider_name}» پیدا نشد."
+        )
+        return
+
+    try:
+        success = (
+            await self.providers.activate_api_key(
+                provider["id"],
+                key_number,
+            )
+        )
+
+    except Exception as exc:
+        await event.reply(
+            f"❌ تغییر Active Key ناموفق بود:\n{exc}"
+        )
+        return
+
+    if not success:
+        await event.reply(
+            f"❌ Key #{key_number} برای Provider "
+            f"«{provider_name}» پیدا نشد."
+        )
+        return
+
+    await event.reply(
+        f"✅ Key #{key_number} برای Provider "
+        f"«{provider_name}» فعال شد."
+    )
+
+
+@command(
+    name="ارائه دهنده کلید",
+    permission="owner",
+    chat_type="all",
+    description="یک API Key از Pool Provider را تغییر می‌دهد.",
+)
+async def update_provider_api_key(
+    self,
+    event,
+):
+    args = (
+        event.args_text or ""
+    ).strip().split()
+
+    if len(args) != 3:
+        await event.reply(
+            "مثال:\n"
+            "!ارائه دهنده کلید gemini 2 API_KEY"
+        )
+        return
+
+    provider_name = args[0]
+
+    if not args[1].isdigit():
+        await event.reply(
+            "❌ شماره Key باید عدد باشد."
+        )
+        return
+
+    key_number = int(args[1])
+    api_key = args[2]
+
+    provider = await self.providers.get(
+        provider_name
+    )
+
+    if provider is None:
+        await event.reply(
+            f"❌ Provider «{provider_name}» پیدا نشد."
+        )
+        return
+
+    try:
+        success = (
+            await self.providers.update_api_key(
+                provider["id"],
+                key_number,
+                api_key,
+            )
+        )
+
+    except Exception as exc:
+        await event.reply(
+            f"❌ بروزرسانی Key ناموفق بود:\n{exc}"
+        )
+        return
+
+    if not success:
+        await event.reply(
+            f"❌ Key #{key_number} پیدا نشد."
+        )
+        return
+
+    try:
+        await event.delete()
+    except Exception:
+        pass
+
+    await event.reply(
+        f"✅ Key #{key_number} Provider "
+        f"«{provider_name}» بروزرسانی شد."
+    )
+
+
+@command(
+    name="ارائه دهنده کلید حذف",
+    permission="owner",
+    chat_type="all",
+    description="یک API Key را از Pool Provider حذف می‌کند.",
+)
+async def delete_provider_api_key(
+    self,
+    event,
+):
+    args = (
+        event.args_text or ""
+    ).strip().split()
+
+    if len(args) != 2:
+        await event.reply(
+            "مثال:\n"
+            "!ارائه دهنده کلید حذف gemini 2"
+        )
+        return
+
+    provider_name = args[0]
+
+    if not args[1].isdigit():
+        await event.reply(
+            "❌ شماره Key باید عدد باشد."
+        )
+        return
+
+    key_number = int(args[1])
+
+    provider = await self.providers.get(
+        provider_name
+    )
+
+    if provider is None:
+        await event.reply(
+            f"❌ Provider «{provider_name}» پیدا نشد."
+        )
+        return
+
+    try:
+        deleted = (
+            await self.providers.delete_api_key(
+                provider["id"],
+                key_number,
+            )
+        )
+
+    except Exception as exc:
+        await event.reply(
+            f"❌ حذف Key ناموفق بود:\n{exc}"
+        )
+        return
+
+    if not deleted:
+        await event.reply(
+            f"❌ Key #{key_number} پیدا نشد."
+        )
+        return
+
+    await event.reply(
+        f"✅ Key #{key_number} از Pool Provider "
+        f"«{provider_name}» حذف شد."
+    )
+
+
+@command(
+    name="ارائه دهنده مدل ها",
+    permission="owner",
+    chat_type="all",
+    description="مدل‌های موجود روی API یک Provider را می‌گیرد.",
+)
+async def provider_remote_models(
+    self,
+    event,
+):
+    provider_name = (
+        event.args_text or ""
+    ).strip()
+
+    if not provider_name:
+        await event.reply(
+            "مثال: !ارائه دهنده مدل ها gemini"
+        )
+        return
+
+    provider = await self.providers.get(
+        provider_name
+    )
+
+    if provider is None:
+        await event.reply(
+            f"❌ Provider «{provider_name}» پیدا نشد."
+        )
+        return
+
+    keys = (
+        await self.providers.get_available_api_keys(
+            provider["id"]
+        )
+    )
+
+    if not keys:
+        await event.reply(
+            f"❌ هیچ API Key قابل استفاده‌ای "
+            f"در Pool Provider «{provider_name}» وجود ندارد."
+        )
+        return
+
+    api_key_data = {
+        "provider": provider["provider"],
+        "api_key": keys[0]["api_key"],
+        "base_url": provider["base_url"],
+        "models_url": provider["models_url"],
+    }
+
+    try:
+        models = (
+            await self.gateway.list_remote_models(
+                api_key_data
+            )
+        )
+
+    except AIGatewayError as exc:
+        await event.reply(
+            f"❌ دریافت Modelها ناموفق بود:\n{exc}"
+        )
+        return
+
+    if not models:
+        await event.reply(
+            f"📦 Provider «{provider_name}» هیچ مدلی برنگرداند."
+        )
+        return
+
+    await event.reply(
+        f"📦 Modelهای Provider «{provider_name}»:\n\n"
+        + "\n".join(
+            f"🔹 `{model}`"
+            for model in models
+        )
+    )
 
 
 # =========================================================
@@ -1007,7 +1750,7 @@ async def memory_message_limit(
     name="مدل افزودن",
     permission="owner",
     chat_type="all",
-    description="افزودن مدل AI با API Key شماره 1.",
+    description="یک Model را به Provider متصل می‌کند.",
 )
 async def add_model(
     self,
@@ -1017,42 +1760,41 @@ async def add_model(
         event.args_text or ""
     ).strip().split()
 
-    if len(args) not in {4, 5}:
+    if len(args) != 3:
         await event.reply(
             "❌ استفاده نادرست.\n\n"
             "فرمت:\n"
-            "!مدل افزودن <نام_مدل> <provider> "
-            "<model_id> <API_KEY> [BASE_URL]\n\n"
+            "!مدل افزودن <نام_مدل> <Provider> <Model_ID>\n\n"
             "مثال:\n"
-            "!مدل افزودن gpt5luna openai "
-            "gpt-5-luna sk-xxxxx "
-            "https://api.example.com/v1"
+            "!مدل افزودن gemini38flash "
+            "gemini gemini-3.8-flash"
         )
         return
 
     model_name = args[0]
-    provider = args[1]
+    provider_name = args[1]
     model_id = args[2]
-    api_key = args[3]
 
-    base_url = (
-        args[4]
-        if len(args) == 5
-        else None
+    provider = await self.providers.get(
+        provider_name
     )
+
+    if provider is None:
+        await event.reply(
+            f"❌ Provider «{provider_name}» پیدا نشد."
+        )
+        return
 
     try:
         await self.models.add(
             name=model_name,
-            provider=provider,
+            provider=provider_name,
             model_id=model_id,
-            api_key=api_key,
-            base_url=base_url,
         )
 
     except Exception as exc:
         await event.reply(
-            f"❌ خطا در افزودن مدل:\n{exc}"
+            f"❌ خطا در افزودن Model:\n{exc}"
         )
         return
 
@@ -1062,9 +1804,11 @@ async def add_model(
         pass
 
     await event.reply(
-        f"✅ مدل «{model_name}» اضافه شد.\n"
-        "🔑 API Key شماره #1 فعال شد.\n"
-        f"🤖 Model ID: {model_id}"
+        f"✅ Model «{model_name}» اضافه شد.\n\n"
+        f"🔌 Provider: {provider_name}\n"
+        f"🔧 LiteLLM: {provider['provider']}\n"
+        f"🤖 Model ID: {model_id}\n"
+        f"🔑 API Keyها از Pool همین Provider استفاده می‌کنند."
     )
 
 @command(
@@ -1303,7 +2047,7 @@ async def delete_model(
     name="مدل اطلاعات",
     permission="owner",
     chat_type="all",
-    description="جزئیات مدل و API Keyهای آن",
+    description="جزئیات Model و Provider مربوط به آن",
 )
 async def model_info(
     self,
@@ -1332,9 +2076,9 @@ async def model_info(
     for key in keys:
 
         state = (
-            "🟢 فعال"
+            "🟢 Active"
             if key["is_active"]
-            else "⚪ غیرفعال"
+            else "⚪"
         )
 
         key_lines.append(
@@ -1344,20 +2088,44 @@ async def model_info(
             f"[{key['status']}]"
         )
 
-    if not key_lines:
-        key_lines.append(
-            "هیچ API Key ثبت نشده."
-        )
+    provider = await self.providers.get(
+        model["provider_id"]
+    )
+
+    provider_name = (
+        provider["name"]
+        if provider
+        else model.get("provider_name", "?")
+    )
+
+    litellm_provider = (
+        provider["provider"]
+        if provider
+        else model["provider"]
+    )
+
+    base_url = (
+        provider["base_url"]
+        if provider
+        else model.get("base_url")
+    )
 
     await event.reply(
-        f"🤖 {model['name']}\n"
-        f"Provider: {model['provider']}\n"
-        f"Model ID: {model['model_id']}\n"
-        f"Base URL: "
-        f"{model['base_url'] or 'پیش فرض'}\n\n"
-        f"🔑 API Keys ({len(keys)}):\n"
-        + "\n".join(key_lines)
+        f"🤖 Model: `{model['name']}`\n"
+        f"🔌 Provider: `{provider_name}`\n"
+        f"🔧 LiteLLM Provider: `{litellm_provider}`\n"
+        f"🆔 Model ID: `{model['model_id']}`\n"
+        f"🌐 Base URL: "
+        f"{base_url or 'پیش‌فرض'}\n\n"
+
+        f"🔑 Shared API Key Pool ({len(keys)}):\n"
+        + (
+            "\n".join(key_lines)
+            if key_lines
+            else "هیچ API Key ثبت نشده."
+        )
         + "\n\n"
+
         f"Active Model: "
         f"{'بله' if model['is_active'] else 'خیر'}"
     )

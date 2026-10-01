@@ -34,9 +34,18 @@ class AIProviderStore:
             self.TABLE,
             columns={
                 "id": "INTEGER PRIMARY KEY AUTOINCREMENT",
+
+                # نام داخلی Provider در SPBot
+                # مثال: gemini
                 "name": "TEXT NOT NULL UNIQUE",
+
+                # Provider مورد استفاده LiteLLM
+                # مثال: openai
+                "provider": "TEXT NOT NULL DEFAULT ''",
+
                 "base_url": "TEXT NOT NULL DEFAULT ''",
                 "models_url": "TEXT",
+
                 "created_at": (
                     "TEXT NOT NULL "
                     "DEFAULT CURRENT_TIMESTAMP"
@@ -110,6 +119,31 @@ class AIProviderStore:
             ],
         )
 
+
+        # =========================================================
+        # PROVIDER COLUMN MIGRATION
+        # =========================================================
+
+        rows = await self.db.fetchall(
+            f"PRAGMA table_info({self.TABLE})"
+        )
+
+        columns = {
+            row["name"]
+            for row in rows
+        }
+
+        if "provider" not in columns:
+            await self.db.execute(
+                f"""
+                ALTER TABLE {self.TABLE}
+                ADD COLUMN provider TEXT NOT NULL DEFAULT ''
+                """
+            )
+
+
+
+
     async def get(
         self,
         provider: str | int,
@@ -156,6 +190,7 @@ class AIProviderStore:
     async def add(
         self,
         name: str,
+        provider: str,
         base_url: str,
         models_url: str | None = None,
     ) -> int:
@@ -164,13 +199,28 @@ class AIProviderStore:
             name.strip().lower()
         )
 
+        normalized_provider = (
+            provider.strip().lower()
+        )
+
         clean_base_url = (
             base_url.strip().rstrip("/")
+        )
+
+        clean_models_url = (
+            models_url.strip().rstrip("/")
+            if models_url
+            else None
         )
 
         if not normalized_name:
             raise ValueError(
                 "نام Provider نمی‌تواند خالی باشد."
+            )
+
+        if not normalized_provider:
+            raise ValueError(
+                "LiteLLM Provider نمی‌تواند خالی باشد."
             )
 
         if not clean_base_url:
@@ -192,12 +242,9 @@ class AIProviderStore:
             self.TABLE,
             {
                 "name": normalized_name,
+                "provider": normalized_provider,
                 "base_url": clean_base_url,
-                "models_url": (
-                    models_url.strip().rstrip("/")
-                    if models_url
-                    else None
-                ),
+                "models_url": clean_models_url,
             },
         )
 
@@ -209,16 +256,129 @@ class AIProviderStore:
         return int(
             result.lastrowid
         )
+    
+    async def update(
+        self,
+        name: str,
+        provider: str,
+        base_url: str,
+        models_url: str | None = None,
+    ) -> bool:
 
+        normalized_name = (
+            name.strip().lower()
+        )
+
+        normalized_provider = (
+            provider.strip().lower()
+        )
+
+        clean_base_url = (
+            base_url.strip().rstrip("/")
+        )
+
+        clean_models_url = (
+            models_url.strip().rstrip("/")
+            if models_url
+            else None
+        )
+
+        if not normalized_name:
+            raise ValueError(
+                "نام Provider نمی‌تواند خالی باشد."
+            )
+
+        if not normalized_provider:
+            raise ValueError(
+                "LiteLLM Provider نمی‌تواند خالی باشد."
+            )
+
+        if not clean_base_url:
+            raise ValueError(
+                "Base URL نمی‌تواند خالی باشد."
+            )
+
+        result = await self.db.execute(
+            f"""
+            UPDATE {self.TABLE}
+            SET
+                provider = ?,
+                base_url = ?,
+                models_url = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE name = ?
+            """,
+            (
+                normalized_provider,
+                clean_base_url,
+                clean_models_url,
+                normalized_name,
+            ),
+        )
+
+        return result.rowcount > 0
+
+
+    async def delete(
+        self,
+        name: str,
+    ) -> bool:
+
+        normalized_name = (
+            name.strip().lower()
+        )
+
+        provider = await self.get(
+            normalized_name
+        )
+
+        if provider is None:
+            return False
+
+        model_row = await self.db.fetchone(
+            """
+            SELECT COUNT(*) AS count
+            FROM ai_models
+            WHERE provider_id = ?
+            """,
+            (
+                int(provider["id"]),
+            ),
+        )
+
+        if model_row and int(model_row["count"]) > 0:
+            raise ValueError(
+                f"Provider «{normalized_name}» "
+                "هنوز توسط یک یا چند Model استفاده می‌شود."
+            )
+
+        result = await self.db.execute(
+            f"""
+            DELETE FROM {self.TABLE}
+            WHERE id = ?
+            """,
+            (
+                int(provider["id"]),
+            ),
+        )
+
+        return result.rowcount > 0
     async def ensure_provider(
         self,
         name: str,
         base_url: str | None,
+        provider: str | None = None,
         models_url: str | None = None,
     ) -> dict[str, Any]:
 
         normalized_name = (
             name.strip().lower()
+        )
+
+        normalized_provider = (
+            provider.strip().lower()
+            if provider
+            else ""
         )
 
         clean_base_url = (
@@ -238,6 +398,46 @@ class AIProviderStore:
                 or ""
             ).strip().rstrip("/")
 
+            existing_provider = (
+                existing.get("provider")
+                or ""
+            ).strip().lower()
+
+            # Provider قدیمی ممکن است provider_id
+            # داشته باشد ولی ستون provider آن خالی باشد.
+            if (
+                not existing_provider
+                and normalized_provider
+            ):
+                await self.db.execute(
+                    f"""
+                    UPDATE {self.TABLE}
+                    SET
+                        provider = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                    """,
+                    (
+                        normalized_provider,
+                        int(existing["id"]),
+                    ),
+                )
+
+                existing["provider"] = (
+                    normalized_provider
+                )
+
+            elif (
+                existing_provider
+                and normalized_provider
+                and existing_provider != normalized_provider
+            ):
+                raise ValueError(
+                    f"Provider «{normalized_name}» "
+                    "با دو LiteLLM Provider متفاوت "
+                    "پیدا شد."
+                )
+
             if (
                 existing_base
                 and clean_base_url
@@ -252,20 +452,21 @@ class AIProviderStore:
 
         provider_id = await self.add(
             normalized_name,
+            normalized_provider,
             clean_base_url,
             models_url,
         )
 
-        provider = await self.get(
+        result = await self.get(
             provider_id
         )
 
-        if provider is None:
+        if result is None:
             raise RuntimeError(
                 "Provider بعد از ساخت پیدا نشد."
             )
 
-        return provider
+        return result
 
     # =========================================================
     # COOLDOWN

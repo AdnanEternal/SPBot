@@ -127,16 +127,49 @@ class AIGatewayPlugin(BasePlugin):
     # -------------------------
 
     add_model = handlers.add_model
-    add_model_api_key = handlers.add_model_api_key
-    activate_model_api_key = handlers.activate_model_api_key
     list_models = handlers.list_models
     activate_model = handlers.activate_model
     delete_model = handlers.delete_model
     model_info = handlers.model_info
     model_statistics = handlers.model_statistics
     set_model_owner_score = handlers.set_model_owner_score
-    update_model_key = handlers.update_model_key
     ping_models = handlers.ping_models
+
+
+    # -------------------------
+    # Provider management
+    # -------------------------
+
+    add_provider = handlers.add_provider
+    list_providers = handlers.list_providers
+    provider_info = handlers.provider_info
+    update_provider = handlers.update_provider
+    delete_provider = handlers.delete_provider
+
+    add_provider_api_key = (
+        handlers.add_provider_api_key
+    )
+
+    list_provider_api_keys = (
+        handlers.list_provider_api_keys
+    )
+
+    activate_provider_api_key = (
+        handlers.activate_provider_api_key
+    )
+
+    update_provider_api_key = (
+        handlers.update_provider_api_key
+    )
+
+    delete_provider_api_key = (
+        handlers.delete_provider_api_key
+    )
+
+    provider_remote_models = (
+        handlers.provider_remote_models
+    )
+
 
     # -------------------------
     # API Key management
