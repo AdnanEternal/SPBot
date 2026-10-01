@@ -19,13 +19,12 @@ from typing import Any, Optional
 
 from splusthon import SoroushClient
 
-
 async def resolve_target(
     client: SoroushClient,
     event: Any,
 ) -> Optional[dict[str, Any]]:
     """
-    کاربر هدف را پیدا می‌کند.
+    کاربر هدف را پیدا می‌کند و هم ID و هم Entity را برمی‌گرداند.
 
     خروجی:
         {
@@ -47,9 +46,9 @@ async def resolve_target(
         # -----------------------------------------
 
         if target.lstrip("-").isdigit():
+
             try:
                 user_id = int(target)
-
             except ValueError:
                 return None
 
@@ -58,13 +57,13 @@ async def resolve_target(
                     user_id
                 )
 
-                return {
-                    "id": user_id,
-                    "entity": entity,
-                }
-
             except Exception:
                 return None
+
+            return {
+                "id": user_id,
+                "entity": entity,
+            }
 
         # -----------------------------------------
         # Username / Mention
@@ -75,29 +74,7 @@ async def resolve_target(
                 target
             )
 
-            return {
-                "id": entity.id,
-                "entity": entity,
-            }
-
         except Exception:
-            return None
-
-    # -----------------------------------------
-    # Reply
-    # -----------------------------------------
-
-    reply = await event.get_reply_message()
-
-    if reply is not None:
-
-        try:
-            entity = await reply.get_sender()
-
-        except Exception:
-            entity = None
-
-        if entity is None:
             return None
 
         return {
@@ -105,7 +82,71 @@ async def resolve_target(
             "entity": entity,
         }
 
-    return None
+    # -----------------------------------------
+    # Reply
+    # -----------------------------------------
+
+    reply = await event.get_reply_message()
+
+    if reply is None:
+        return None
+
+    try:
+        entity = await reply.get_sender()
+    except Exception:
+        entity = None
+
+    if entity is None:
+        return None
+
+    return {
+        "id": entity.id,
+        "entity": entity,
+    }
+
+
+async def resolve_user_entity(
+    client: SoroushClient,
+    event: Any,
+    user_id: int,
+) -> Optional[Any]:
+    """
+    Entity کاربر را برای عملیات moderation پیدا می‌کند.
+
+    اولویت:
+    1. sender خود event اگر همان user باشد.
+    2. get_entity با ID.
+    """
+
+    # -----------------------------------------
+    # Event sender
+    # -----------------------------------------
+
+    try:
+        sender = await event.get_sender()
+
+        if (
+            sender is not None
+            and getattr(sender, "id", None)
+            == int(user_id)
+        ):
+            return sender
+
+    except Exception:
+        pass
+
+    # -----------------------------------------
+    # Direct entity lookup
+    # -----------------------------------------
+
+    try:
+        return await client.get_entity(
+            int(user_id)
+        )
+
+    except Exception:
+        return None
+
 
 async def mute_user(
     client: SoroushClient,
@@ -149,10 +190,29 @@ async def mute_user(
         send_inline=False,
         send_polls=False,
     )
-    
-async def unmute_user(client: SoroushClient, chat: Any, user_id: int) -> None:
-    await client.edit_permissions(chat, user_id, send_messages=True)
 
 
-async def ban_user(client: SoroushClient, chat: Any, user_id: int) -> None:
-    await client.edit_permissions(chat, user_id, view_messages=False)
+async def unmute_user(
+    client: SoroushClient,
+    chat: Any,
+    user: Any,
+) -> None:
+
+    await client.edit_permissions(
+        chat,
+        user,
+        send_messages=True,
+    )
+
+
+async def ban_user(
+    client: SoroushClient,
+    chat: Any,
+    user: Any,
+) -> None:
+
+    await client.edit_permissions(
+        chat,
+        user,
+        view_messages=False,
+    )
