@@ -271,6 +271,31 @@ async def _notify(event, text: str):
             )
             return None
 
+
+async def _safe_reply(
+    event,
+    text: str,
+) -> None:
+
+    try:
+        await event.reply(text)
+        return
+
+    except Exception:
+        pass
+
+    try:
+        await event.respond(text)
+        return
+
+    except Exception as exc:
+        print(
+            "⚠️ ارسال پیام Violation Manager ناموفق بود: "
+            f"type={type(exc).__name__} "
+            f"error={exc}"
+        )
+
+
 @command(
     name="حذف سابقه",
     permission="admin",
@@ -448,12 +473,6 @@ async def my_record(self: "ViolationManagerPlugin", event: events.NewMessage.Eve
     chat_type="all",
     description="یه کاربر رو میوت می‌کنه؛ محلی برای ادمین و ریموت برای Owner.",
 )
-@command(
-    name="میوت",
-    permission="everyone",
-    chat_type="all",
-    description="یه کاربر رو میوت می‌کنه؛ محلی برای ادمین و ریموت برای Owner.",
-)
 async def mute_command(
     self: "ViolationManagerPlugin",
     event: events.NewMessage.Event,
@@ -467,13 +486,14 @@ async def mute_command(
     )
 
     if target_group is None:
-        await event.reply(
+        await _safe_reply(
+            event,
             "مثال:\n"
             "داخل گروه:\n"
             "!میوت @username\n"
             "یا روی پیام کاربر ریپلای کن.\n\n"
             "ریموت توسط Owner:\n"
-            "!میوت @username -100123456"
+            "!میوت @username -100123456",
         )
         return
 
@@ -487,44 +507,34 @@ async def mute_command(
     if remote:
 
         if not target_arg:
-            await event.reply(
+            await _safe_reply(
+                event,
                 "❌ برای اجرای ریموت باید کاربر را مشخص کنی.\n"
                 "مثال:\n"
                 "!میوت 49245702 -100123456\n"
                 "یا:\n"
-                "!میوت @username -100123456"
+                "!میوت @username -100123456",
             )
             return
-
-        # -------------------------------------
-        # User ID
-        # -------------------------------------
 
         if target_arg.lstrip("-").isdigit():
 
             try:
-                target_id = int(
-                    target_arg
-                )
-
+                target_id = int(target_arg)
             except ValueError:
-                target_id = None
+                await _safe_reply(
+                    event,
+                    "❌ شناسه کاربر نامعتبر است.",
+                )
+                return
 
-            if target_id is not None:
-
-                try:
-                    target_entity = (
-                        await self.client.get_entity(
-                            target_id
-                        )
-                    )
-
-                except Exception:
-                    target_entity = None
-
-        # -------------------------------------
-        # Username / Mention
-        # -------------------------------------
+            target_entity = (
+                await moderation.resolve_user_entity(
+                    self.client,
+                    event,
+                    target_id,
+                )
+            )
 
         else:
 
@@ -538,8 +548,9 @@ async def mute_command(
                 target_id = target_entity.id
 
             except Exception:
-                await event.reply(
-                    f"❌ نتونستم کاربر `{target_arg}` رو پیدا کنم."
+                await _safe_reply(
+                    event,
+                    f"❌ نتونستم کاربر `{target_arg}` رو پیدا کنم.",
                 )
                 return
 
@@ -555,34 +566,39 @@ async def mute_command(
         )
 
         if target is None:
-            await event.reply(
+            await _safe_reply(
+                event,
                 "مثال: !میوت @username\n"
-                "یا روی پیام شخص ریپلای کن."
+                "یا روی پیام شخص ریپلای کن.",
             )
             return
 
         target_id = target["id"]
         target_entity = target["entity"]
 
-    # =========================================
-    # Entity check
-    # =========================================
-
-    if target_entity is None:
-
-        target_entity = (
-            await moderation.resolve_user_entity(
-                self.client,
-                event,
-                target_id,
+        if target_entity is None:
+            target_entity = (
+                await moderation.resolve_user_entity(
+                    self.client,
+                    event,
+                    target_id,
+                )
             )
-        )
+
+    # =========================================
+    # ENTITY
+    # =========================================
 
     if target_entity is None:
-        await event.reply(
-            f"❌ Entity کاربر `{target_id}` پیدا نشد."
+        await _safe_reply(
+            event,
+            f"❌ نتونستم اطلاعات کاربر `{target_id}` رو پیدا کنم.",
         )
         return
+
+    # =========================================
+    # GROUP
+    # =========================================
 
     settings = await self.settings.get(
         target_group
@@ -599,36 +615,55 @@ async def mute_command(
     )
 
     if chat is None:
-        await event.reply(
+        await _safe_reply(
+            event,
             f"❌ گروه `{target_group}` پیدا نشد.\n"
-            "مطمئن شو ربات داخل این گروه حضور داره."
+            "مطمئن شو ربات داخل این گروه حضور داره.",
         )
         return
 
+    # =========================================
+    # MODERATION
+    # =========================================
+
     try:
+
         await moderation.mute_user(
             self.client,
             chat,
             target_entity,
-            hours,
+            hours=hours,
         )
 
     except moderation.ModerationError as exc:
-        await event.reply(
-            str(exc)
+
+        await _safe_reply(
+            event,
+            str(exc),
         )
         return
 
     except Exception as exc:
-        await event.reply(
-            f"❌ خطای غیرمنتظره در میوت:\n{exc}"
+
+        print(
+            "❌ خطای غیرمنتظره در !میوت:",
+            exc,
+        )
+
+        await _safe_reply(
+            event,
+            f"❌ خطای غیرمنتظره در میوت:\n{exc}",
         )
         return
-    await event.reply(
+
+    await _safe_reply(
+        event,
         f"✅ کاربر `{target_id}` "
         f"به مدت {hours} ساعت میوت شد.\n"
-        f"📍 گروه: `{target_group}`"
+        f"📍 گروه: `{target_group}`",
     )
+
+
 @command(
     name="آنمیوت",
     permission="everyone",
@@ -648,13 +683,14 @@ async def unmute_command(
     )
 
     if target_group is None:
-        await event.reply(
+        await _safe_reply(
+            event,
             "مثال:\n"
             "داخل گروه:\n"
             "!آنمیوت @username\n"
             "یا روی پیام کاربر ریپلای کن.\n\n"
             "ریموت توسط Owner:\n"
-            "!آنمیوت @username -100123456"
+            "!آنمیوت @username -100123456",
         )
         return
 
@@ -668,30 +704,30 @@ async def unmute_command(
     if remote:
 
         if not target_arg:
-            await event.reply(
-                "❌ برای اجرای ریموت باید کاربر را مشخص کنی."
+            await _safe_reply(
+                event,
+                "❌ برای اجرای ریموت باید کاربر را مشخص کنی.",
             )
             return
 
         if target_arg.lstrip("-").isdigit():
 
             try:
-                target_id = int(
-                    target_arg
-                )
-
+                target_id = int(target_arg)
             except ValueError:
-                target_id = None
+                await _safe_reply(
+                    event,
+                    "❌ شناسه کاربر نامعتبر است.",
+                )
+                return
 
-            if target_id is not None:
-                try:
-                    target_entity = (
-                        await self.client.get_entity(
-                            target_id
-                        )
-                    )
-                except Exception:
-                    target_entity = None
+            target_entity = (
+                await moderation.resolve_user_entity(
+                    self.client,
+                    event,
+                    target_id,
+                )
+            )
 
         else:
 
@@ -705,8 +741,9 @@ async def unmute_command(
                 target_id = target_entity.id
 
             except Exception:
-                await event.reply(
-                    f"❌ نتونستم کاربر `{target_arg}` رو پیدا کنم."
+                await _safe_reply(
+                    event,
+                    f"❌ نتونستم کاربر `{target_arg}` رو پیدا کنم.",
                 )
                 return
 
@@ -722,32 +759,29 @@ async def unmute_command(
         )
 
         if target is None:
-            await event.reply(
+            await _safe_reply(
+                event,
                 "مثال: !آنمیوت @username\n"
-                "یا روی پیام شخص ریپلای کن."
+                "یا روی پیام شخص ریپلای کن.",
             )
             return
 
         target_id = target["id"]
         target_entity = target["entity"]
 
-    # =========================================
-    # Entity check
-    # =========================================
-
-    if target_entity is None:
-
-        target_entity = (
-            await moderation.resolve_user_entity(
-                self.client,
-                event,
-                target_id,
+        if target_entity is None:
+            target_entity = (
+                await moderation.resolve_user_entity(
+                    self.client,
+                    event,
+                    target_id,
+                )
             )
-        )
 
     if target_entity is None:
-        await event.reply(
-            f"❌ Entity کاربر `{target_id}` پیدا نشد."
+        await _safe_reply(
+            event,
+            f"❌ نتونستم اطلاعات کاربر `{target_id}` رو پیدا کنم.",
         )
         return
 
@@ -757,13 +791,15 @@ async def unmute_command(
     )
 
     if chat is None:
-        await event.reply(
+        await _safe_reply(
+            event,
             f"❌ گروه `{target_group}` پیدا نشد.\n"
-            "مطمئن شو ربات داخل این گروه حضور داره."
+            "مطمئن شو ربات داخل این گروه حضور داره.",
         )
         return
 
     try:
+
         await moderation.unmute_user(
             self.client,
             chat,
@@ -771,21 +807,32 @@ async def unmute_command(
         )
 
     except moderation.ModerationError as exc:
-        await event.reply(
-            str(exc)
+
+        await _safe_reply(
+            event,
+            str(exc),
         )
         return
 
     except Exception as exc:
-        await event.reply(
-            f"❌ خطای غیرمنتظره در برداشتن میوت:\n{exc}"
+
+        print(
+            "❌ خطای غیرمنتظره در !آنمیوت:",
+            exc,
+        )
+
+        await _safe_reply(
+            event,
+            f"❌ خطای غیرمنتظره در برداشتن میوت:\n{exc}",
         )
         return
 
-    await event.reply(
+    await _safe_reply(
+        event,
         f"✅ میوتِ کاربر `{target_id}` برداشته شد.\n"
-        f"📍 گروه: `{target_group}`"
+        f"📍 گروه: `{target_group}`",
     )
+
 @on_event(events.NewMessage(incoming=True))
 async def on_reply_shortcut(
     self: "ViolationManagerPlugin",
@@ -799,12 +846,6 @@ async def on_reply_shortcut(
         event.raw_text or ""
     ).strip()
 
-    shortcuts = {
-        "mute":["میوت","سکوت","mute"],
-        "unmute":["آنمیوت","انمیوت"," ان میوت","آن میوت","unmute"],
-        "ban":["بن","ریم"]
-    }
-
     if text not in (
         "میوت",
         "آنمیوت",
@@ -812,16 +853,30 @@ async def on_reply_shortcut(
     ):
         return
 
-    chat = await event.get_chat()
+    try:
+        chat = await event.get_chat()
 
-    if not await is_chat_admin(
-        self.client,
-        chat,
-        event.sender_id,
-    ):
+        allowed = await is_chat_admin(
+            self.client,
+            chat,
+            event.sender_id,
+            raise_on_error=True,
+        )
+
+    except Exception as exc:
+        print(
+            "⚠️ بررسی دسترسی shortcut ناموفق بود:",
+            exc,
+        )
         return
 
-    reply = await event.get_reply_message()
+    if not allowed:
+        return
+
+    try:
+        reply = await event.get_reply_message()
+    except Exception:
+        return
 
     if reply is None:
         return
@@ -834,53 +889,71 @@ async def on_reply_shortcut(
     if target_entity is None:
         return
 
-    target_id = target_entity.id
+    target_id = getattr(
+        target_entity,
+        "id",
+        None,
+    )
 
-    if text in (
-        "میوت",
-        "سکوت",
-    ):
+    if target_id is None:
+        return
 
-        settings = await self.settings.get(
-            event.chat_id
-        )
+    # =========================================
+    # MUTE
+    # =========================================
 
-        hours = (
-            settings["mute_hours"]
-            or DEFAULT_MUTE_HOURS
-        )
+    if text == "میوت":
 
         try:
+            settings = await self.settings.get(
+                event.chat_id
+            )
+
+            hours = (
+                settings["mute_hours"]
+                or DEFAULT_MUTE_HOURS
+            )
+
             await moderation.mute_user(
                 self.client,
                 chat,
                 target_entity,
-                hours,
+                hours=hours,
             )
 
         except moderation.ModerationError as exc:
-            await event.reply(
-                str(exc)
+
+            await _safe_reply(
+                event,
+                str(exc),
             )
             return
 
         except Exception as exc:
-            await event.reply(
-                f"❌ خطای غیرمنتظره در میوت:\n{exc}"
+
+            print(
+                "❌ خطای shortcut میوت:",
+                exc,
+            )
+
+            await _safe_reply(
+                event,
+                f"❌ خطای غیرمنتظره در میوت:\n{exc}",
             )
             return
 
-        await event.reply(
+        await _safe_reply(
+            event,
             f"کاربر `{target_id}` "
-            f"به مدت {hours} ساعت میوت شد."
+            f"به مدت {hours} ساعت میوت شد.",
         )
+        return
 
-    elif text in (
-        "آنمیوت",
-        "انمیوت",
-        "ان میوت",
-        "آن میوت",
-    ):
+    # =========================================
+    # UNMUTE
+    # =========================================
+
+    if text == "آنمیوت":
 
         try:
             await moderation.unmute_user(
@@ -890,26 +963,37 @@ async def on_reply_shortcut(
             )
 
         except moderation.ModerationError as exc:
-            await event.reply(
-                str(exc)
+
+            await _safe_reply(
+                event,
+                str(exc),
             )
             return
 
         except Exception as exc:
-            await event.reply(
-                f"❌ خطای غیرمنتظره در برداشتن میوت:\n{exc}"
+
+            print(
+                "❌ خطای shortcut آنمیوت:",
+                exc,
+            )
+
+            await _safe_reply(
+                event,
+                f"❌ خطای غیرمنتظره در برداشتن میوت:\n{exc}",
             )
             return
 
-        await event.reply(
-            f"میوتِ کاربر `{target_id}` برداشته شد."
-
+        await _safe_reply(
+            event,
+            f"میوتِ کاربر `{target_id}` برداشته شد.",
         )
+        return
 
-    elif text in (
-        "ریم",
-        "بن",
-    ):
+    # =========================================
+    # BAN
+    # =========================================
+
+    if text == "بن":
 
         try:
             await moderation.ban_user(
@@ -919,20 +1003,31 @@ async def on_reply_shortcut(
             )
 
         except moderation.ModerationError as exc:
-            await event.reply(
-                str(exc)
+
+            await _safe_reply(
+                event,
+                str(exc),
             )
             return
 
         except Exception as exc:
-            await event.reply(
-                f"❌ خطای غیرمنتظره در بن:\n{exc}"
+
+            print(
+                "❌ خطای shortcut بن:",
+                exc,
+            )
+
+            await _safe_reply(
+                event,
+                f"❌ خطای غیرمنتظره در بن:\n{exc}",
             )
             return
 
-        await event.reply(
-            f"کاربر `{target_id}` بن شد."
+        await _safe_reply(
+            event,
+            f"کاربر `{target_id}` بن شد.",
         )
+
 @on_bus_event("punishment_request")
 async def on_punishment_request(
     self: "ViolationManagerPlugin",
@@ -1006,11 +1101,14 @@ async def on_punishment_request(
                     chat,
                     target_entity,
                 )
+
             except moderation.ModerationError as exc:
-                await event.reply(
-                    str(exc)
+                await _safe_reply(
+                    event,
+                    str(exc),
                 )
                 return
+                
             punishment_text = (
                 "🔨 مجازات: کاربر بن شد."
             )
@@ -1028,26 +1126,27 @@ async def on_punishment_request(
                     target_entity,
                     hours=hours,
                 )
-            except moderation.ModerationError as exc:
-                await event.reply(
-                    str(exc)
-                )
 
+            except moderation.ModerationError as exc:
+                await _safe_reply(
+                    event,
+                    str(exc),
+                )
                 return
             
 
 
-            "/"
+            
             if hours is None:
                 punishment_text = (
                     "🔇 مجازات: کاربر "
-                    f"به‌صورت دائمی میوت شد.\nبرای لغو این عمل از این دستور استفاده کنید:\n`آنمیوت {event.sender_id}!`\n(توجه:علامت تعجب '!' باید اول دستور باشد)"
+                    f"به‌صورت دائمی میوت شد.\nبرای لغو این عمل از این دستور استفاده کنید:\n`آنمیوت {user_id}!`\n(توجه:علامت تعجب '!' باید اول دستور باشد)"
                 )
 
             else:
                 punishment_text = (
                     "🔇 مجازات: کاربر میوت شد "
-                    f"({hours} ساعت).\nبرای لغو این عمل از این دستور استفاده کنید:\n`آنمیوت {event.sender_id}!`\n(توجه:علامت تعجب '!' باید اول دستور باشد)"
+                    f"({hours} ساعت).\nبرای لغو این عمل از این دستور استفاده کنید:\n`آنمیوت {user_id}!`\n(توجه:علامت تعجب '!' باید اول دستور باشد)"
                     
                 )
 
@@ -1210,9 +1309,11 @@ async def on_violation(
                     chat,
                     target_entity,
                 )
+
             except moderation.ModerationError as exc:
-                await event.reply(
-                    str(exc)
+                await _safe_reply(
+                    event,
+                    str(exc),
                 )
                 return
             
@@ -1233,9 +1334,11 @@ async def on_violation(
                     target_entity,
                     hours=hours,
                 )
+
             except moderation.ModerationError as exc:
-                await event.reply(
-                    str(exc)
+                await _safe_reply(
+                    event,
+                    str(exc),
                 )
                 return
     
@@ -1243,14 +1346,14 @@ async def on_violation(
                 punishment_text = (
                     "🔇 مجازات: کاربر "
                     "به‌صورت دائمی میوت شد.\n"
-                    f"برای لغو این دستور را بزنید: `!آنمیوت {event.sender_id}`"
+                    f"برای لغو این دستور را بزنید: `!آنمیوت {user_id}`"
                 )
 
             else:
                 punishment_text = (
                     "🔇 مجازات: کاربر میوت شد "
                     f"({hours} ساعت).\n"
-                    f"برای لغو این دستور را بزنید: `!آنمیوت {event.sender_id}`"
+                    f"برای لغو این دستور را بزنید: `!آنمیوت {user_id}`"
 
                 )
 

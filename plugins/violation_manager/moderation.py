@@ -13,36 +13,28 @@ class ModerationError(Exception):
     pass
 
 
-class TargetNotMemberError(
-    ModerationError
-):
+class TargetNotMemberError(ModerationError):
     def __init__(self):
         super().__init__(
             "❌ کاربر در این گروه عضو نیست."
         )
 
 
-class TargetIsAdminError(
-    ModerationError
-):
+class TargetIsAdminError(ModerationError):
     def __init__(self):
         super().__init__(
             "❌ کاربر ادمین است و نمی‌توان او را مجازات کرد."
         )
 
 
-class BotPermissionError(
-    ModerationError
-):
+class BotPermissionError(ModerationError):
     def __init__(self):
         super().__init__(
             "❌ ربات ادمین نیست یا دسترسی لازم برای انجام این عملیات را ندارد."
         )
 
 
-class ModerationOperationError(
-    ModerationError
-):
+class ModerationOperationError(ModerationError):
     pass
 
 
@@ -57,11 +49,15 @@ async def resolve_target(
         else ""
     )
 
+    # =========================================
+    # ARGUMENT
+    # =========================================
+
     if target:
 
-        # -----------------------------------------
+        # -------------------------------------
         # User ID
-        # -----------------------------------------
+        # -------------------------------------
 
         if target.lstrip("-").isdigit():
 
@@ -74,13 +70,10 @@ async def resolve_target(
                 entity = await client.get_entity(
                     user_id
                 )
-
             except Exception:
-                # Entity قابل resolve نیست.
-                # خود moderation بعداً membership را بررسی می‌کند.
                 return {
                     "id": user_id,
-                    "entity": user_id,
+                    "entity": None,
                 }
 
             return {
@@ -88,15 +81,14 @@ async def resolve_target(
                 "entity": entity,
             }
 
-        # -----------------------------------------
+        # -------------------------------------
         # Username / Mention
-        # -----------------------------------------
+        # -------------------------------------
 
         try:
             entity = await client.get_entity(
                 target
             )
-
         except Exception:
             return None
 
@@ -105,11 +97,14 @@ async def resolve_target(
             "entity": entity,
         }
 
-    # -----------------------------------------
-    # Reply
-    # -----------------------------------------
+    # =========================================
+    # REPLY
+    # =========================================
 
-    reply = await event.get_reply_message()
+    try:
+        reply = await event.get_reply_message()
+    except Exception:
+        return None
 
     if reply is None:
         return None
@@ -134,6 +129,7 @@ async def resolve_user_entity(
     user_id: int,
 ) -> Optional[Any]:
 
+    # اول از خود event استفاده کن.
     try:
         sender = await event.get_sender()
 
@@ -147,15 +143,13 @@ async def resolve_user_entity(
     except Exception:
         pass
 
+    # بعد entity معمولی.
     try:
         return await client.get_entity(
             int(user_id)
         )
-
     except Exception:
-        # اجازه می‌دهیم get_permissions خودش
-        # membership/entity را بررسی کند.
-        return int(user_id)
+        return None
 
 
 def _is_not_member_error(
@@ -163,7 +157,7 @@ def _is_not_member_error(
 ) -> bool:
 
     error_name = (
-        exc.__class__.__name__
+        type(exc).__name__
         .lower()
     )
 
@@ -177,12 +171,9 @@ def _is_not_member_error(
         or "notparticipant" in error_name
         or "not participant" in message
         or "not a participant" in message
+        or "user_not_participant" in message
         or "not_member" in message
         or "not member" in message
-        or (
-            "404" in message
-            and "not_found" in message
-        )
     )
 
 
@@ -191,7 +182,7 @@ def _is_permission_error(
 ) -> bool:
 
     error_name = (
-        exc.__class__.__name__
+        type(exc).__name__
         .lower()
     )
 
@@ -205,6 +196,7 @@ def _is_permission_error(
         "admin privileges are required",
         "chat admin privileges",
         "not enough rights",
+        "rightforbidden",
         "right_forbidden",
         "ban users",
         "ban_user",
@@ -223,6 +215,40 @@ def _is_permission_error(
     )
 
 
+def _is_admin_target_error(
+    exc: Exception,
+) -> bool:
+
+    error_name = (
+        type(exc).__name__
+        .lower()
+    )
+
+    message = (
+        str(exc)
+        .lower()
+    )
+
+    admin_phrases = (
+        "user_admin",
+        "useradmin",
+        "user is an administrator",
+        "user is admin",
+        "administrator",
+    )
+
+    return (
+        any(
+            phrase in error_name
+            for phrase in admin_phrases
+        )
+        or any(
+            phrase in message
+            for phrase in admin_phrases
+        )
+    )
+
+
 async def _validate_moderation(
     client: SoroushClient,
     chat: Any,
@@ -234,9 +260,15 @@ async def _validate_moderation(
     # =========================================
 
     try:
+        # مهم:
+        # باید InputPeer خود ربات را بگیریم،
+        # نه User معمولی.
         me = await client.get_me(
             input_peer=True
         )
+
+        if me is None:
+            raise BotPermissionError()
 
         bot_permissions = (
             await client.get_permissions(
@@ -245,10 +277,13 @@ async def _validate_moderation(
             )
         )
 
+    except BotPermissionError:
+        raise
+
     except Exception as exc:
 
         if _is_permission_error(exc):
-            raise BotPermissionError()
+            raise BotPermissionError() from exc
 
         raise ModerationOperationError(
             f"❌ بررسی دسترسی ربات ناموفق بود:\n{exc}"
@@ -256,14 +291,27 @@ async def _validate_moderation(
 
     if (
         bot_permissions is None
-        or not bot_permissions.is_admin
-        or not bot_permissions.ban_users
+        or not getattr(
+            bot_permissions,
+            "is_admin",
+            False,
+        )
+        or not getattr(
+            bot_permissions,
+            "ban_users",
+            False,
+        )
     ):
         raise BotPermissionError()
 
     # =========================================
     # TARGET MEMBERSHIP
     # =========================================
+
+    if user is None:
+        raise ModerationOperationError(
+            "❌ Entity کاربر پیدا نشد."
+        )
 
     try:
         target_permissions = (
@@ -276,10 +324,13 @@ async def _validate_moderation(
     except Exception as exc:
 
         if _is_not_member_error(exc):
-            raise TargetNotMemberError()
+            raise TargetNotMemberError() from exc
 
         if _is_permission_error(exc):
-            raise BotPermissionError()
+            raise BotPermissionError() from exc
+
+        if _is_admin_target_error(exc):
+            raise TargetIsAdminError() from exc
 
         raise ModerationOperationError(
             f"❌ بررسی وضعیت کاربر ناموفق بود:\n{exc}"
@@ -301,10 +352,6 @@ async def _validate_moderation(
         False,
     ):
         raise TargetNotMemberError()
-
-    # =========================================
-    # TARGET ADMIN
-    # =========================================
 
     if getattr(
         target_permissions,
@@ -345,7 +392,7 @@ async def mute_user(
         until_date = (
             now_utc()
             + timedelta(
-                hours=hours
+                hours=int(hours)
             )
         )
 
@@ -375,13 +422,7 @@ async def mute_user(
         if _is_permission_error(exc):
             raise BotPermissionError() from exc
 
-        message = str(exc).lower()
-
-        if (
-            "user_admin" in message
-            or "user is an administrator" in message
-            or "administrator" in message
-        ):
+        if _is_admin_target_error(exc):
             raise TargetIsAdminError() from exc
 
         raise ModerationOperationError(
@@ -406,7 +447,14 @@ async def unmute_user(
         await client.edit_permissions(
             chat,
             user,
+            until_date=None,
             send_messages=True,
+            send_gifs=True,
+            send_media=True,
+            send_stickers=True,
+            send_games=True,
+            send_inline=True,
+            send_polls=True,
         )
 
     except Exception as exc:
@@ -417,13 +465,7 @@ async def unmute_user(
         if _is_permission_error(exc):
             raise BotPermissionError() from exc
 
-        message = str(exc).lower()
-
-        if (
-            "user_admin" in message
-            or "user is an administrator" in message
-            or "administrator" in message
-        ):
+        if _is_admin_target_error(exc):
             raise TargetIsAdminError() from exc
 
         raise ModerationOperationError(
@@ -459,13 +501,7 @@ async def ban_user(
         if _is_permission_error(exc):
             raise BotPermissionError() from exc
 
-        message = str(exc).lower()
-
-        if (
-            "user_admin" in message
-            or "user is an administrator" in message
-            or "administrator" in message
-        ):
+        if _is_admin_target_error(exc):
             raise TargetIsAdminError() from exc
 
         raise ModerationOperationError(
