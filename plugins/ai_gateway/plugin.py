@@ -28,7 +28,6 @@ class AIGatewayPlugin(BasePlugin):
             self.store.memory,
             self.store.memory_settings,
         )
-        self.api_keys = self.store.api_keys
 
         self.gateway = AIGateway(
             self.models,
@@ -170,16 +169,6 @@ class AIGatewayPlugin(BasePlugin):
         handlers.provider_remote_models
     )
 
-
-    # -------------------------
-    # API Key management
-    # -------------------------
-
-    add_api_key = handlers.add_api_key
-    list_api_keys = handlers.list_api_keys
-    delete_api_key = handlers.delete_api_key
-    api_key_models = handlers.api_key_models
-    api_key_models_ping = handlers.api_key_models_ping
 
     # -------------------------
     # Group AI settings

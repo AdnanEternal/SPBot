@@ -887,21 +887,13 @@ class AIModelStore:
 
                 # source of truth
                 "provider_id": (
-                    "INTEGER "
+                    "INTEGER NOT NULL "
                     "REFERENCES ai_providers(id)"
                 ),
 
                 "model_id": (
                     "TEXT NOT NULL"
                 ),
-
-                # legacy fields kept temporarily
-                # برای migration/backward compatibility
-                "provider": (
-                    "TEXT NOT NULL DEFAULT ''"
-                ),
-
-                "base_url": "TEXT",
 
                 "is_active": (
                     "INTEGER NOT NULL DEFAULT 0"
@@ -925,182 +917,6 @@ class AIModelStore:
             ],
         )
 
-    async def _migrate_provider_links(self) -> None:
-
-        rows = await self.db.fetchall(
-            f"PRAGMA table_info({self.TABLE})"
-        )
-
-        columns = {
-            row["name"]
-            for row in rows
-        }
-
-        if "provider_id" not in columns:
-            await self.db.execute(
-                f"""
-                ALTER TABLE {self.TABLE}
-                ADD COLUMN provider_id INTEGER
-                """
-            )
-
-        await self.db.execute(
-            f"""
-            CREATE INDEX IF NOT EXISTS
-            idx_{self.TABLE}_provider_id
-            ON {self.TABLE} (provider_id)
-            """
-        )
-
-        models = await self.db.fetchall(
-            f"""
-            SELECT
-                id,
-                provider_id,
-                provider,
-                base_url
-            FROM {self.TABLE}
-            WHERE provider_id IS NULL
-            OR provider_id = 0
-            ORDER BY id ASC
-            """
-        )
-
-        if not models:
-            return
-
-        providers = (
-            await self.providers.get_all()
-        )
-
-        for model in models:
-
-            legacy_litellm_provider = (
-                str(
-                    model["provider"]
-                    or ""
-                )
-                .strip()
-                .lower()
-            )
-
-            legacy_base_url = (
-                str(
-                    model["base_url"]
-                    or ""
-                )
-                .strip()
-                .rstrip("/")
-            )
-
-            if not legacy_litellm_provider:
-                raise ValueError(
-                    f"مدل #{model['id']} "
-                    "Provider ندارد."
-                )
-
-            # -------------------------------------------------
-            # پیدا کردن Provider واقعی بر اساس مشخصات اتصال
-            #
-            # مهم:
-            # provider = openai
-            #
-            # اینجا فقط LiteLLM Provider است
-            # و هرگز به عنوان نام داخلی Provider استفاده
-            # نمی‌شود.
-            # -------------------------------------------------
-
-            matching_providers = []
-
-            for provider in providers:
-
-                provider_litellm = (
-                    str(
-                        provider.get("provider")
-                        or ""
-                    )
-                    .strip()
-                    .lower()
-                )
-
-                provider_base_url = (
-                    str(
-                        provider.get("base_url")
-                        or ""
-                    )
-                    .strip()
-                    .rstrip("/")
-                )
-
-                if (
-                    provider_litellm
-                    == legacy_litellm_provider
-                    and provider_base_url
-                    == legacy_base_url
-                ):
-                    matching_providers.append(
-                        provider
-                    )
-
-            # -------------------------------------------------
-            # دقیقاً یک Provider پیدا شد
-            # -------------------------------------------------
-
-            if len(matching_providers) == 1:
-
-                provider = (
-                    matching_providers[0]
-                )
-
-                await self.db.execute(
-                    f"""
-                    UPDATE {self.TABLE}
-                    SET
-                        provider_id = ?,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE id = ?
-                    """,
-                    (
-                        int(provider["id"]),
-                        int(model["id"]),
-                    ),
-                )
-
-                continue
-
-            # -------------------------------------------------
-            # چند Provider با مشخصات یکسان
-            # -------------------------------------------------
-
-            if len(matching_providers) > 1:
-
-                names = ", ".join(
-                    provider["name"]
-                    for provider
-                    in matching_providers
-                )
-
-                raise ValueError(
-                    f"مدل #{model['id']} با "
-                    f"LiteLLM Provider=`{legacy_litellm_provider}` "
-                    f"و Base URL=`{legacy_base_url}` "
-                    f"به چند Provider قابل اتصال است: "
-                    f"{names}"
-                )
-
-            # -------------------------------------------------
-            # هیچ Provider موجودی پیدا نشد
-            # -------------------------------------------------
-
-            raise ValueError(
-                f"مدل #{model['id']} قابل Migration نیست.\n"
-                f"LiteLLM Provider: "
-                f"{legacy_litellm_provider}\n"
-                f"Base URL: "
-                f"{legacy_base_url or 'خالی'}\n"
-                "هیچ Provider موجودی با این مشخصات پیدا نشد."
-            )
-
     async def create_table(self) -> None:
 
         # -------------------------------------------------
@@ -1115,11 +931,6 @@ class AIModelStore:
 
         await self._create_models_table()
 
-        # -------------------------------------------------
-        # Old model -> provider migration
-        # -------------------------------------------------
-
-        await self._migrate_provider_links()
 
         # -------------------------------------------------
         # Old model-specific keys -> provider pool
@@ -1183,10 +994,6 @@ class AIModelStore:
                 "name": normalized_name,
                 "provider_id": provider_row["id"],
                 "model_id": clean_model_id,
-
-                # legacy compatibility
-                "provider": provider_row["provider"],
-                "base_url": provider_row["base_url"],
             },
         )
 
@@ -1442,21 +1249,6 @@ class AIModelStore:
             provider_id
         )
 
-    async def get_active_api_key(
-        self,
-        model_name: str,
-    ) -> dict[str, Any] | None:
-
-        keys = await self.get_api_keys(
-            model_name
-        )
-
-        for key in keys:
-            if key["is_active"]:
-                return key
-
-        return None
-
     async def get_available_api_keys(
         self,
         model_name: str,
@@ -1492,17 +1284,6 @@ class AIModelStore:
         return await self.providers.get_api_key_candidates(
             provider_id
         )
-
-    async def get_available_api_key(
-        self,
-        model_name: str,
-    ) -> dict[str, Any] | None:
-
-        keys = await self.get_available_api_keys(
-            model_name
-        )
-
-        return keys[0] if keys else None
 
     async def set_api_key_status(
         self,
@@ -1545,111 +1326,6 @@ class AIModelStore:
             reason=reason,
         )
 
-    async def mark_api_key_cooldown(
-        self,
-        model_name: str,
-        key_number: int,
-        cooldown_until: str | None,
-        reason: str | None = None,
-    ) -> bool:
-
-        return await self.set_api_key_status(
-            model_name,
-            key_number,
-            self.KEY_STATUS_COOLDOWN,
-            cooldown_until=cooldown_until,
-            reason=reason,
-        )
-
-    async def mark_api_key_invalid(
-        self,
-        model_name: str,
-        key_number: int,
-        reason: str | None = None,
-    ) -> bool:
-
-        return await self.set_api_key_status(
-            model_name,
-            key_number,
-            self.KEY_STATUS_INVALID,
-            reason=reason,
-        )
-
-    async def mark_api_key_disabled(
-        self,
-        model_name: str,
-        key_number: int,
-        reason: str | None = None,
-    ) -> bool:
-
-        return await self.set_api_key_status(
-            model_name,
-            key_number,
-            self.KEY_STATUS_DISABLED,
-            reason=reason,
-        )
-
-    async def add_api_key(
-        self,
-        model_name: str,
-        api_key: str,
-    ) -> int | None:
-
-        provider_id = (
-            await self._get_provider_id(
-                model_name
-            )
-        )
-
-        if provider_id is None:
-            return None
-
-        return await self.providers.add_api_key(
-            provider_id,
-            api_key,
-        )
-
-    async def activate_api_key(
-        self,
-        model_name: str,
-        key_number: int,
-    ) -> bool:
-
-        provider_id = (
-            await self._get_provider_id(
-                model_name
-            )
-        )
-
-        if provider_id is None:
-            return False
-
-        return await self.providers.activate_api_key(
-            provider_id,
-            key_number,
-        )
-
-    async def update_api_key(
-        self,
-        model_name: str,
-        key_number: int,
-        api_key: str,
-    ) -> bool:
-
-        provider_id = (
-            await self._get_provider_id(
-                model_name
-            )
-        )
-
-        if provider_id is None:
-            return False
-
-        return await self.providers.update_api_key(
-            provider_id,
-            key_number,
-            api_key,
-        )
 
 class AIGroupSettingsStore:
     TABLE = "ai_group_settings"
@@ -1970,24 +1646,6 @@ class AIMemorySettingsStore:
             },
         )
 
-        # Migration برای دیتابیس‌های قدیمی
-        rows = await self.db.fetchall(
-            f"PRAGMA table_info({self.TABLE})"
-        )
-
-        columns = {
-            row["name"]
-            for row in rows
-        }
-
-        if "message_limit" not in columns:
-            await self.db.execute(
-                f"""
-                ALTER TABLE {self.TABLE}
-                ADD COLUMN message_limit INTEGER
-                NOT NULL DEFAULT {self.DEFAULT_MESSAGE_LIMIT}
-                """
-            )
 
     async def _ensure(self, group_id: int) -> None:
         await self.db.insert(
@@ -2256,106 +1914,6 @@ class AIMemoryStore:
 
 
 
-class AIAPIKeyStore:
-    TABLE = "ai_api_keys"
-
-    def __init__(
-        self,
-        db: DatabaseManager,
-    ) -> None:
-        self.db = db
-
-    async def create_table(self) -> None:
-        await self.db.create_table(
-            self.TABLE,
-            columns={
-                "id": "INTEGER PRIMARY KEY AUTOINCREMENT",
-                "name": "TEXT NOT NULL UNIQUE",
-                "provider": "TEXT NOT NULL",
-                "api_key": "TEXT NOT NULL",
-                "base_url": "TEXT",
-                "models_url": "TEXT",
-                "created_at": (
-                    "TEXT NOT NULL "
-                    "DEFAULT CURRENT_TIMESTAMP"
-                ),
-                "updated_at": (
-                    "TEXT NOT NULL "
-                    "DEFAULT CURRENT_TIMESTAMP"
-                ),
-            },
-            indexes=["provider"],
-        )
-
-    async def add(
-        self,
-        name: str,
-        provider: str,
-        api_key: str,
-        base_url: str | None = None,
-        models_url: str | None = None,
-    ) -> None:
-        await self.db.insert(
-            self.TABLE,
-            {
-                "name": name.strip().lower(),
-                "provider": provider.strip(),
-                "api_key": api_key.strip(),
-                "base_url": (
-                    base_url.strip()
-                    if base_url
-                    else None
-                ),
-                "models_url": (
-                    models_url.strip()
-                    if models_url
-                    else None
-                ),
-            },
-        )
-
-    async def get(
-        self,
-        name: str,
-    ) -> dict | None:
-        row = await self.db.select_one(
-            self.TABLE,
-            where={
-                "name": name.strip().lower()
-            },
-        )
-
-        return dict(row) if row else None
-
-    async def get_all(
-        self,
-    ) -> list[dict]:
-        rows = await self.db.fetchall(
-            f"""
-            SELECT *
-            FROM {self.TABLE}
-            ORDER BY name ASC
-            """
-        )
-
-        return [
-            dict(row)
-            for row in rows
-        ]
-
-    async def delete(
-        self,
-        name: str,
-    ) -> bool:
-        cursor = await self.db.delete(
-            self.TABLE,
-            {
-                "name": name.strip().lower()
-            },
-        )
-
-        return cursor.rowcount > 0
-
 
 
 
@@ -2392,32 +1950,6 @@ class AITimelineSettingsStore:
             },
         )
 
-        rows = await self.db.fetchall(
-            f"PRAGMA table_info({self.TABLE})"
-        )
-
-        columns = {
-            row["name"]
-            for row in rows
-        }
-
-        if "message_limit" not in columns:
-            await self.db.execute(
-                f"""
-                ALTER TABLE {self.TABLE}
-                ADD COLUMN message_limit INTEGER
-                NOT NULL DEFAULT {self.DEFAULT_MESSAGE_LIMIT}
-                """
-            )
-
-        if "max_chars" not in columns:
-            await self.db.execute(
-                f"""
-                ALTER TABLE {self.TABLE}
-                ADD COLUMN max_chars INTEGER
-                NOT NULL DEFAULT {self.DEFAULT_MAX_CHARS}
-                """
-            )
 
         await self.db.insert(
             self.TABLE,
@@ -2603,8 +2135,6 @@ class AIGatewayStore:
             self.providers,
         )
 
-        self.api_keys = AIAPIKeyStore(db)
-
         self.groups = AIGroupSettingsStore(db)
         self.memory = AIMemoryStore(db)
         self.memory_settings = AIMemorySettingsStore(db)
@@ -2620,4 +2150,3 @@ class AIGatewayStore:
         await self.timeline.create_table()
         await self.telemetry.create_table()
         await self.model_statistics.create_table()
-        await self.api_keys.create_table()

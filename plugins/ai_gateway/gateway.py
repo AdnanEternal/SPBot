@@ -738,19 +738,9 @@ class AIGateway:
             ),
         }
 
-    
     @staticmethod
     def _normalize_provider(provider: str) -> str:
-        provider = provider.strip().lower()
-
-        if provider in {
-            "zai",
-            "z.ai",
-            "z-ai",
-        }:
-            return "openai"
-
-        return provider
+        return provider.strip().lower()
 
     @staticmethod
     def _models_url(api_key_data: dict) -> str:
