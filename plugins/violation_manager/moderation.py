@@ -26,11 +26,10 @@ class TargetIsAdminError(ModerationError):
             "❌ کاربر ادمین است و نمی‌توان او را مجازات کرد."
         )
 
-
 class BotPermissionError(ModerationError):
     def __init__(self):
         super().__init__(
-            "❌ ربات ادمین نیست یا دسترسی لازم برای انجام این عملیات را ندارد."
+            "❌ ربات ادمین نیست و دسترسی لازم برای انجام این عملیات را ندارد."
         )
 
 
@@ -325,19 +324,28 @@ async def _validate_bot_permissions(
 ) -> None:
 
     # =========================================
+    # GET BOT ENTITY
+    # =========================================
+
+    try:
+        me = await client.get_me()
+
+    except Exception as exc:
+        print(
+            "❌ BOT PERMISSION DEBUG:",
+            type(exc).__name__,
+            repr(exc),
+        )
+        raise BotPermissionError() from exc
+
+    if me is None:
+        raise BotPermissionError()
+
+    # =========================================
     # NORMAL SMALL GROUP
     # =========================================
 
     if isinstance(chat, types.Chat):
-
-        try:
-            me = await client.get_me()
-
-        except Exception as exc:
-            raise BotPermissionError() from exc
-
-        if me is None:
-            raise BotPermissionError()
 
         try:
             full_chat = await client(
@@ -346,19 +354,23 @@ async def _validate_bot_permissions(
                 )
             )
 
-            participants = (
-                full_chat
-                .full_chat
-                .participants
-                .participants
+        except Exception as exc:
+            print(
+                "❌ BOT PERMISSION DEBUG:",
+                type(exc).__name__,
+                repr(exc),
             )
 
-        except Exception as exc:
             raise ModerationOperationError(
                 f"❌ بررسی دسترسی ربات ناموفق بود:\n{exc}"
             ) from exc
 
-        bot_id = me.id
+        participants = (
+            full_chat
+            .full_chat
+            .participants
+            .participants
+        )
 
         for participant in participants:
 
@@ -366,7 +378,7 @@ async def _validate_bot_permissions(
                 participant,
                 "user_id",
                 None,
-            ) != bot_id:
+            ) != me.id:
                 continue
 
             if isinstance(
@@ -387,23 +399,18 @@ async def _validate_bot_permissions(
     # =========================================
 
     try:
-        bot_input_entity = await client.get_me(
-            input_peer=True,
-        )
-
-    except Exception as exc:
-        raise BotPermissionError() from exc
-
-    if bot_input_entity is None:
-        raise BotPermissionError()
-
-    try:
         bot_permissions = await client.get_permissions(
             chat,
-            bot_input_entity,
+            me,
         )
 
     except Exception as exc:
+
+        print(
+            "❌ BOT PERMISSION DEBUG:",
+            type(exc).__name__,
+            repr(exc),
+        )
 
         if (
             _is_permission_error(exc)
@@ -431,7 +438,7 @@ async def _validate_bot_permissions(
         False,
     ):
         raise BotPermissionError()
-    
+        
 async def _validate_moderation(
     client: SoroushClient,
     chat: Any,
