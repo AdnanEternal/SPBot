@@ -917,9 +917,11 @@ class AIModelStore:
                     "DEFAULT CURRENT_TIMESTAMP"
                 ),
             },
+
+            # فعلاً provider_id را اینجا index نمی‌کنیم.
+            # چون ممکن است جدول قدیمی باشد و این ستون هنوز وجود نداشته باشد.
             indexes=[
                 "is_active",
-                "provider_id",
             ],
         )
 
@@ -941,6 +943,19 @@ class AIModelStore:
                 ADD COLUMN provider_id INTEGER
                 """
             )
+
+
+        # =========================================================
+        # PROVIDER_ID INDEX
+        # =========================================================
+
+        await self.db.execute(
+            f"""
+            CREATE INDEX IF NOT EXISTS
+            idx_{self.TABLE}_provider_id
+            ON {self.TABLE} (provider_id)
+            """
+        )
 
         models = await self.db.fetchall(
             f"""
