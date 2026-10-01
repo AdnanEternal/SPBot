@@ -613,12 +613,17 @@ async def mute_command(
             hours,
         )
 
-    except Exception as exc:
+    except moderation.ModerationError as exc:
         await event.reply(
-            f"❌ اعمال میوت ناموفق بود:\n{exc}"
+            str(exc)
         )
         return
 
+    except Exception as exc:
+        await event.reply(
+            f"❌ خطای غیرمنتظره در میوت:\n{exc}"
+        )
+        return
     await event.reply(
         f"✅ کاربر `{target_id}` "
         f"به مدت {hours} ساعت میوت شد.\n"
@@ -765,9 +770,15 @@ async def unmute_command(
             target_entity,
         )
 
+    except moderation.ModerationError as exc:
+        await event.reply(
+            str(exc)
+        )
+        return
+
     except Exception as exc:
         await event.reply(
-            f"❌ برداشتن میوت ناموفق بود:\n{exc}"
+            f"❌ خطای غیرمنتظره در برداشتن میوت:\n{exc}"
         )
         return
 
@@ -787,6 +798,12 @@ async def on_reply_shortcut(
     text = (
         event.raw_text or ""
     ).strip()
+
+    shortcuts = {
+        "mute":["میوت","سکوت","mute"],
+        "unmute":["آنمیوت","انمیوت"," ان میوت","آن میوت","unmute"],
+        "ban":["بن","ریم"]
+    }
 
     if text not in (
         "میوت",
@@ -841,9 +858,15 @@ async def on_reply_shortcut(
                 hours,
             )
 
+        except moderation.ModerationError as exc:
+            await event.reply(
+                str(exc)
+            )
+            return
+
         except Exception as exc:
             await event.reply(
-                f"❌ اعمال میوت ناموفق بود:\n{exc}"
+                f"❌ خطای غیرمنتظره در میوت:\n{exc}"
             )
             return
 
@@ -866,14 +889,21 @@ async def on_reply_shortcut(
                 target_entity,
             )
 
+        except moderation.ModerationError as exc:
+            await event.reply(
+                str(exc)
+            )
+            return
+
         except Exception as exc:
             await event.reply(
-                f"❌ برداشتن میوت ناموفق بود:\n{exc}"
+                f"❌ خطای غیرمنتظره در برداشتن میوت:\n{exc}"
             )
             return
 
         await event.reply(
             f"میوتِ کاربر `{target_id}` برداشته شد."
+
         )
 
     elif text in (
@@ -888,16 +918,21 @@ async def on_reply_shortcut(
                 target_entity,
             )
 
+        except moderation.ModerationError as exc:
+            await event.reply(
+                str(exc)
+            )
+            return
+
         except Exception as exc:
             await event.reply(
-                f"❌ بن کردن کاربر ناموفق بود:\n{exc}"
+                f"❌ خطای غیرمنتظره در بن:\n{exc}"
             )
             return
 
         await event.reply(
             f"کاربر `{target_id}` بن شد."
         )
-
 @on_bus_event("punishment_request")
 async def on_punishment_request(
     self: "ViolationManagerPlugin",
@@ -965,13 +1000,17 @@ async def on_punishment_request(
     try:
 
         if settings["punishment_type"] == "ban":
-
-            await moderation.ban_user(
-                self.client,
-                chat,
-                target_entity,
-            )
-
+            try:
+                await moderation.ban_user(
+                    self.client,
+                    chat,
+                    target_entity,
+                )
+            except moderation.ModerationError as exc:
+                await event.reply(
+                    str(exc)
+                )
+                return
             punishment_text = (
                 "🔨 مجازات: کاربر بن شد."
             )
@@ -982,12 +1021,20 @@ async def on_punishment_request(
                 "mute_hours"
             ]
 
-            await moderation.mute_user(
-                self.client,
-                chat,
-                target_entity,
-                hours=hours,
-            )
+            try:
+                await moderation.mute_user(
+                    self.client,
+                    chat,
+                    target_entity,
+                    hours=hours,
+                )
+            except moderation.ModerationError as exc:
+                await event.reply(
+                    str(exc)
+                )
+
+                return
+            
 
 
             "/"
@@ -1157,13 +1204,18 @@ async def on_violation(
     try:
 
         if settings["punishment_type"] == "ban":
-
-            await moderation.ban_user(
-                self.client,
-                chat,
-                target_entity,
-            )
-
+            try:
+                await moderation.ban_user(
+                    self.client,
+                    chat,
+                    target_entity,
+                )
+            except moderation.ModerationError as exc:
+                await event.reply(
+                    str(exc)
+                )
+                return
+            
             punishment_text = (
                 "🔨 مجازات: کاربر بن شد."
             )
@@ -1174,14 +1226,18 @@ async def on_violation(
                 "mute_hours"
             ]
 
-            await moderation.mute_user(
-                self.client,
-                chat,
-                target_entity,
-                hours=hours,
-            )
-
-            
+            try:
+                await moderation.mute_user(
+                    self.client,
+                    chat,
+                    target_entity,
+                    hours=hours,
+                )
+            except moderation.ModerationError as exc:
+                await event.reply(
+                    str(exc)
+                )
+                return
     
             if hours is None:
                 punishment_text = (
