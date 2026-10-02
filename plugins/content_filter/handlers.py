@@ -214,7 +214,7 @@ async def add_word(
     (
         target_group,
         word,
-        _,
+        remote,
     ) = await _resolve_group_target(
         self,
         event,
@@ -222,6 +222,8 @@ async def add_word(
     )
 
     if target_group is None:
+        if remote:
+            return
         await event.reply(
             "❌ گروه هدف مشخص نشده.\n"
             "داخل گروه:\n"
@@ -268,7 +270,7 @@ async def remove_word(
     (
         target_group,
         word,
-        _,
+        remote,
     ) = await _resolve_group_target(
         self,
         event,
@@ -276,6 +278,8 @@ async def remove_word(
     )
 
     if target_group is None:
+        if remote:
+            return
         await event.reply(
             "❌ گروه هدف مشخص نشده.\n"
             "داخل گروه:\n"
@@ -329,7 +333,7 @@ async def list_words(
     (
         target_group,
         remaining,
-        _,
+        remote,
     ) = await _resolve_group_target(
         self,
         event,
@@ -337,6 +341,8 @@ async def list_words(
     )
 
     if target_group is None:
+        if remote:
+            return
         await event.reply(
             "❌ در PV باید شناسه گروه را وارد کنی.\n"
             "ریموت توسط Owner:\n"
@@ -393,13 +399,15 @@ async def set_admin_filter_permission(
     (
         target_group,
         remaining,
-        _,
+        remote,
     ) = await _resolve_group_target(
         self,
         event,
     )
 
     if target_group is None:
+        if remote:
+            return
         await event.reply(
             "❌ گروه هدف مشخص نشده.\n"
             "مثال:\n"

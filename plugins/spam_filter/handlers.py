@@ -9,7 +9,7 @@ from core.decorators import (
 )
 
 
-from core.permissions import is_chat_admin
+from core.permissions import is_chat_admin, is_owner
 
 from . import detection
 from .actions import (
@@ -58,9 +58,9 @@ def _extract_optional_group_target(
     )
 
 
-def _resolve_spam_group_target(
+async def _resolve_spam_group_target(
     event,
-) -> tuple[int | None, str]:
+) -> tuple[int | None, str, bool]:
     raw = (
         event.args_text or ""
     ).strip()
@@ -71,56 +71,48 @@ def _resolve_spam_group_target(
         )
     )
 
+    # -------------------------------------------------
+    # REMOTE GROUP
+    # -------------------------------------------------
+
     if target_group is not None:
-        return target_group, clean_args
+
+        if not is_owner(
+            event.sender_id
+        ):
+            await event.reply(
+                "❌ اجرای ریموت این کامند فقط "
+                "برای Owner مجازه."
+            )
+
+            return (
+                None,
+                clean_args,
+                True,
+            )
+
+        return (
+            target_group,
+            clean_args,
+            False,
+        )
+
+    # -------------------------------------------------
+    # LOCAL GROUP
+    # -------------------------------------------------
 
     if event.is_group:
-        return event.chat_id, clean_args
-
-    return None, clean_args
-
-
-@command(
-    name="اسپم معاف",
-    permission="admin",
-    chat_type="all",
-    description="یک کاربر را از Spam Filter معاف می‌کند.",
-)
-async def add_whitelist(
-    self: "SpamFilterPlugin",
-    event: events.NewMessage.Event,
-) -> None:
-    target_group, args = (
-        _resolve_spam_group_target(event)
-    )
-
-    if target_group is None:
-        await event.reply(
-            "❌ گروه هدف مشخص نشده."
+        return (
+            event.chat_id,
+            clean_args,
+            False,
         )
-        return
 
-    if not args.isdigit():
-        await event.reply(
-            "❌ شناسه کاربر باید عددی باشد."
-        )
-        return
-
-    added = await self.whitelist.add(
-        target_group,
-        int(args),
+    return (
+        None,
+        clean_args,
+        False,
     )
-
-    if not added:
-        await event.reply(
-            "ℹ️ کاربر از قبل معاف است."
-        )
-        return
-
-    await event.reply(
-        f"✅ کاربر `{args}` معاف شد."
-    )
-
 
 @command(
     name="اسپم رفع معافیت",
@@ -132,9 +124,12 @@ async def remove_whitelist(
     self: "SpamFilterPlugin",
     event: events.NewMessage.Event,
 ) -> None:
-    target_group, args = (
-        _resolve_spam_group_target(event)
+    target_group, args, remote_denied= (
+        await _resolve_spam_group_target(event)
     )
+
+    if remote_denied:
+        return
 
     if target_group is None:
         await event.reply(
@@ -163,6 +158,50 @@ async def remove_whitelist(
         f"✅ معافیت `{args}` حذف شد."
     )
 
+@command(
+    name="اسپم معاف",
+    permission="admin",
+    chat_type="all",
+    description="یک کاربر را از Spam Filter معاف می‌کند.",
+)
+async def add_whitelist(
+    self: "SpamFilterPlugin",
+    event: events.NewMessage.Event,
+) -> None:
+    target_group, args, remote_denied = (
+        _resolve_spam_group_target(event)
+    )
+
+    if target_group is None:
+        await event.reply(
+            "❌ گروه هدف مشخص نشده."
+        )
+        return
+    
+    if remote_denied:
+        return
+    
+    if not args.isdigit():
+        await event.reply(
+            "❌ شناسه کاربر باید عددی باشد."
+        )
+        return
+
+    added = await self.whitelist.add(
+        target_group,
+        int(args),
+    )
+
+    if not added:
+        await event.reply(
+            "ℹ️ کاربر از قبل معاف است."
+        )
+        return
+
+    await event.reply(
+        f"✅ کاربر `{args}` معاف شد."
+    )
+
 
 @command(
     name="اسپم معاف ها",
@@ -174,10 +213,13 @@ async def list_whitelist(
     self: "SpamFilterPlugin",
     event: events.NewMessage.Event,
 ) -> None:
-    target_group, args = (
-        _resolve_spam_group_target(event)
+    target_group, args, remote_denied = (
+        await _resolve_spam_group_target(event)
     )
-
+    
+    if remote_denied:
+        return
+    
     if target_group is None:
         await event.reply(
             "❌ گروه هدف مشخص نشده."
@@ -310,8 +352,8 @@ async def add_forbidden_rule(
     self: "SpamFilterPlugin",
     event: events.NewMessage.Event,
 ) -> None:
-    target_group, pattern = (
-        _resolve_spam_group_target(event)
+    target_group, pattern, remote_denied = (
+        await _resolve_spam_group_target(event)
     )
 
     if target_group is None:
@@ -356,8 +398,8 @@ async def add_allowed_rule(
     self: "SpamFilterPlugin",
     event: events.NewMessage.Event,
 ) -> None:
-    target_group, pattern = (
-        _resolve_spam_group_target(event)
+    target_group, pattern, remote_denied= (
+        await _resolve_spam_group_target(event)
     )
 
     if target_group is None:
@@ -401,8 +443,8 @@ async def remove_forbidden_rule(
     self: "SpamFilterPlugin",
     event: events.NewMessage.Event,
 ) -> None:
-    target_group, pattern = (
-        _resolve_spam_group_target(event)
+    target_group, pattern, remote_denied= (
+        await _resolve_spam_group_target(event)
     )
 
     if target_group is None:
@@ -444,8 +486,8 @@ async def remove_allowed_rule(
     self: "SpamFilterPlugin",
     event: events.NewMessage.Event,
 ) -> None:
-    target_group, pattern = (
-        _resolve_spam_group_target(event)
+    target_group, pattern, remote_denied= (
+        await _resolve_spam_group_target(event)
     )
 
     if target_group is None:
@@ -487,8 +529,8 @@ async def list_text_rules(
     self: "SpamFilterPlugin",
     event: events.NewMessage.Event,
 ) -> None:
-    target_group, args = (
-        _resolve_spam_group_target(event)
+    target_group, args, remote_denied= (
+        await _resolve_spam_group_target(event)
     )
 
     if target_group is None:
