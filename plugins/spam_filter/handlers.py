@@ -171,6 +171,9 @@ async def add_whitelist(
     target_group, args, remote_denied = (
         await _resolve_spam_group_target(event)
     )
+    
+    if remote_denied:
+        return
 
     if target_group is None:
         await event.reply(
@@ -180,8 +183,6 @@ async def add_whitelist(
 
 
 
-    if remote_denied:
-        return
     
     if not args.isdigit():
         await event.reply(
