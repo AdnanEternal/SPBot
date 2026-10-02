@@ -169,7 +169,7 @@ async def add_whitelist(
     event: events.NewMessage.Event,
 ) -> None:
     target_group, args, remote_denied = (
-        _resolve_spam_group_target(event)
+        await _resolve_spam_group_target(event)
     )
 
     if target_group is None:
@@ -177,7 +177,9 @@ async def add_whitelist(
             "❌ گروه هدف مشخص نشده."
         )
         return
-    
+
+
+
     if remote_denied:
         return
     
