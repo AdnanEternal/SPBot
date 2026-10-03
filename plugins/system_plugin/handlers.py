@@ -82,7 +82,7 @@ async def _send_admin_list(
             )
 
         text_parts.extend([
-            "",
+            "----------------------------------",
             f"👤 ادمین شماره {index}:",
             f"📝 نام: {full_name}",
             f"🔗 نام کاربری: "
