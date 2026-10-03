@@ -585,4 +585,13 @@ async def on_message(
     if not _is_admin_list_shortcut(text):
         return
 
+    chat = await event.get_chat()
+
+    if not await is_chat_admin(
+        self.client,
+        chat,
+        event.sender_id,
+    ):
+        return
+
     await self.list_admins(event)
