@@ -1,9 +1,14 @@
 from typing import TYPE_CHECKING
 
-from splusthon import events
+from splusthon import events, types, utils
+from splusthon.tl import functions, types
 
-from core.decorators import command
-from core.permissions import is_chat_admin, is_owner
+from core.decorators import command, on_event
+from core.permissions import (
+    get_admins,
+    is_chat_admin,
+    is_owner,
+)
 
 from .backup.backup import DatabaseBackupManager
 from .github_manager.manager import GitHubManager
@@ -13,6 +18,42 @@ if TYPE_CHECKING:
     from .plugin import SystemPlugin
 
 HELP_PAGE_SIZE = 6
+
+def _is_admin_list_shortcut(text: str) -> bool:
+    text = (text or "").strip()
+
+    if not text:
+        return False
+
+    parts = text.split()
+
+    # لیست ادمین / ادمین لیست
+    if len(parts) == 2:
+        if set(parts) == {"لیست", "ادمین"}:
+            return True
+
+        # لیست ادمینها / ادمینها لیست
+        if set(parts) == {"لیست", "ادمینها"}:
+            return True
+
+        return False
+
+    # لیست ادمین ها / ادمین ها لیست
+    if len(parts) == 3:
+        return (
+            "لیست" in parts
+            and "ادمین" in parts
+            and "ها" in parts
+        )
+
+    return False
+
+
+def _utf16_length(text: str) -> int:
+    return len(
+        text.encode("utf-16-le")
+    ) // 2
+
 
 
 @command(
@@ -112,8 +153,143 @@ async def show_help(
 
 
 
+@command(
+    name="لیست ادمین ها",
+    permission="admin",
+    chat_type="group",
+    description="لیست ادمین‌های گروه را نشان می‌دهد.",
+)
+async def list_admins(
+    self: "SystemPlugin",
+    event: events.NewMessage.Event,
+) -> None:
 
+    try:
+        chat = await event.get_chat()
 
+        admins = await get_admins(
+            self.client,
+            chat,
+            force_refresh=True,
+        )
+
+    except Exception:
+        print(
+            "❌ خطا در دریافت لیست ادمین‌های گروه:"
+        )
+        import traceback
+        traceback.print_exc()
+
+        await event.reply(
+            "❌ دریافت لیست ادمین‌ها ناموفق بود."
+        )
+        return
+
+    if admins is None:
+        await event.reply(
+            "❌ امکان دریافت ادمین‌های این گروه وجود ندارد."
+        )
+        return
+
+    if not admins:
+        await event.reply(
+            "ℹ️ هیچ ادمینی پیدا نشد."
+        )
+        return
+
+    text_parts = [
+        "👑 ادمین‌های این گروه:",
+        f"تعداد: {len(admins)} نفر",
+    ]
+
+    entity_positions = []
+
+    for index, admin in enumerate(
+        admins,
+        start=1,
+    ):
+        entity = admin.entity
+
+        first_name = (
+            getattr(
+                entity,
+                "first_name",
+                None,
+            )
+            or ""
+        ).strip()
+
+        last_name = (
+            getattr(
+                entity,
+                "last_name",
+                None,
+            )
+            or ""
+        ).strip()
+
+        username = (
+            getattr(
+                entity,
+                "username",
+                None,
+            )
+            or None
+        )
+
+        full_name = (
+            f"{first_name} {last_name}"
+        ).strip()
+
+        if not full_name:
+            full_name = str(
+                admin.user_id
+            )
+
+        text_parts.extend([
+            "",
+            f"ادمین شماره {index}:",
+            f"نام: {full_name}",
+            f"نام کاربری: "
+            f"{('@' + username) if username else 'ندارد'}",
+            f"نقش: {admin.title}",
+            "[مشاهده نمایه]",
+        ])
+
+        # موقعیت همین "مشاهده نمایه" در متن نهایی
+        current_text = "\n".join(text_parts)
+        label = "[مشاهده نمایه]"
+
+        offset = _utf16_length(
+            current_text[:-len(label)]
+        )
+
+        length = _utf16_length(
+            label
+        )
+
+        input_user = utils.get_input_user(
+            entity
+        )
+
+        mention = types.InputMessageEntityMentionName(
+            offset=offset,
+            length=length,
+            user_id=input_user,
+        )
+
+        entity_positions.append(
+            mention
+        )
+
+    text = "\n".join(text_parts)
+
+    await self.client.send_message(
+        event.chat_id,
+        text,
+        formatting_entities=entity_positions,
+        parse_mode=None,
+    )
 
 
 
@@ -393,3 +569,20 @@ async def plugin_update(
         f"به v{plugin.version} "
         f"در runtime بروزرسانی شد."
     )
+
+
+@on_event(events.NewMessage(incoming=True))
+async def on_message(
+    self: "SystemPlugin",
+    event: events.NewMessage.Event,
+) -> None:
+
+    if not event.is_group:
+        return
+
+    text = event.raw_text or ""
+
+    if not _is_admin_list_shortcut(text):
+        return
+
+    await self.list_admins(event)
