@@ -34,7 +34,7 @@ async def _send_admin_list(
 
     text_parts = [
         "👑 ادمین‌های این گروه:",
-        f"تعداد: {len(admins)} نفر",
+        f"👥 تعداد: {len(admins)} نفر",
     ]
 
     entity_positions = []
@@ -83,12 +83,12 @@ async def _send_admin_list(
 
         text_parts.extend([
             "",
-            f"ادمین شماره {index}:",
-            f"نام: {full_name}",
-            f"نام کاربری: "
+            f"👤 ادمین شماره {index}:",
+            f"📝 نام: {full_name}",
+            f"🔗 نام کاربری: "
             f"{('@' + username) if username else 'ندارد'}",
-            f"نقش: {admin.title}",
-            "[مشاهده نمایه]",
+            f"🏷️ نقش: {admin.title}",
+            "🔎 [مشاهده نمایه]",
         ])
 
     text = "\n".join(text_parts)
