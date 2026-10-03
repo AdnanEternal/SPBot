@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING
 
-from splusthon import events, types, utils
+from splusthon import events, utils
 from splusthon.tl import functions, types
 
 from core.decorators import command, on_event
@@ -18,6 +18,124 @@ if TYPE_CHECKING:
     from .plugin import SystemPlugin
 
 HELP_PAGE_SIZE = 6
+
+
+async def _send_admin_list(
+    self: "SystemPlugin",
+    event: events.NewMessage.Event,
+    admins,
+) -> None:
+
+    if not admins:
+        await event.reply(
+            "ℹ️ هیچ ادمینی پیدا نشد."
+        )
+        return
+
+    text_parts = [
+        "👑 ادمین‌های این گروه:",
+        f"تعداد: {len(admins)} نفر",
+    ]
+
+    entity_positions = []
+
+    for index, admin in enumerate(
+        admins,
+        start=1,
+    ):
+        entity = admin.entity
+
+        first_name = (
+            getattr(
+                entity,
+                "first_name",
+                None,
+            )
+            or ""
+        ).strip()
+
+        last_name = (
+            getattr(
+                entity,
+                "last_name",
+                None,
+            )
+            or ""
+        ).strip()
+
+        username = (
+            getattr(
+                entity,
+                "username",
+                None,
+            )
+            or None
+        )
+
+        full_name = (
+            f"{first_name} {last_name}"
+        ).strip()
+
+        if not full_name:
+            full_name = str(
+                admin.user_id
+            )
+
+        text_parts.extend([
+            "",
+            f"ادمین شماره {index}:",
+            f"نام: {full_name}",
+            f"نام کاربری: "
+            f"{('@' + username) if username else 'ندارد'}",
+            f"نقش: {admin.title}",
+            "[مشاهده نمایه]",
+        ])
+
+    text = "\n".join(text_parts)
+
+    # entity ها را بعد از ساخته شدن متن کامل محاسبه می‌کنیم.
+    search_from = 0
+
+    for admin in admins:
+        label = "[مشاهده نمایه]"
+
+        position = text.find(
+            label,
+            search_from,
+        )
+
+        if position == -1:
+            continue
+
+        entity = admin.entity
+
+        input_user = utils.get_input_user(
+            entity
+        )
+
+        entity_positions.append(
+            types.InputMessageEntityMentionName(
+                offset=_utf16_length(
+                    text[:position]
+                ),
+                length=_utf16_length(
+                    label
+                ),
+                user_id=input_user,
+            )
+        )
+
+        search_from = (
+            position
+            + len(label)
+        )
+
+    await event.reply(
+        text,
+        formatting_entities=entity_positions,
+        parse_mode=None,
+    )
+
 
 def _is_admin_list_shortcut(text: str) -> bool:
     text = (text or "").strip()
@@ -191,106 +309,11 @@ async def list_admins(
         )
         return
 
-    if not admins:
-        await event.reply(
-            "ℹ️ هیچ ادمینی پیدا نشد."
-        )
-        return
-
-    text_parts = [
-        "👑 ادمین‌های این گروه:",
-        f"تعداد: {len(admins)} نفر",
-    ]
-
-    entity_positions = []
-
-    for index, admin in enumerate(
+    await _send_admin_list(
+        self,
+        event,
         admins,
-        start=1,
-    ):
-        entity = admin.entity
-
-        first_name = (
-            getattr(
-                entity,
-                "first_name",
-                None,
-            )
-            or ""
-        ).strip()
-
-        last_name = (
-            getattr(
-                entity,
-                "last_name",
-                None,
-            )
-            or ""
-        ).strip()
-
-        username = (
-            getattr(
-                entity,
-                "username",
-                None,
-            )
-            or None
-        )
-
-        full_name = (
-            f"{first_name} {last_name}"
-        ).strip()
-
-        if not full_name:
-            full_name = str(
-                admin.user_id
-            )
-
-        text_parts.extend([
-            "",
-            f"ادمین شماره {index}:",
-            f"نام: {full_name}",
-            f"نام کاربری: "
-            f"{('@' + username) if username else 'ندارد'}",
-            f"نقش: {admin.title}",
-            "[مشاهده نمایه]",
-        ])
-
-        # موقعیت همین "مشاهده نمایه" در متن نهایی
-        current_text = "\n".join(text_parts)
-        label = "[مشاهده نمایه]"
-
-        offset = _utf16_length(
-            current_text[:-len(label)]
-        )
-
-        length = _utf16_length(
-            label
-        )
-
-        input_user = utils.get_input_user(
-            entity
-        )
-
-        mention = types.InputMessageEntityMentionName(
-            offset=offset,
-            length=length,
-            user_id=input_user,
-        )
-
-        entity_positions.append(
-            mention
-        )
-
-    text = "\n".join(text_parts)
-
-    await self.client.send_message(
-        event.chat_id,
-        text,
-        formatting_entities=entity_positions,
-        parse_mode=None,
     )
-
 
 
 
@@ -578,27 +601,45 @@ async def on_message(
 ) -> None:
 
     if not event.is_group:
-        print("not event.is_group")
         return
 
-    print("event.is_group")
 
     text = event.raw_text or ""
 
     if not _is_admin_list_shortcut(text):
-        print("not _is_admin_list_shortcut")
         return
     
-    print("_is_admin_list_shortcut")
     
     chat = await event.get_chat()
 
-    if not await is_chat_admin(
-        self.client,
-        chat,
-        event.sender_id,
-    ):
-        print("not is_chat_admin")
+    try:
+        admins = await get_admins(
+            self.client,
+            chat,
+            force_refresh=True,
+        )
+
+    except Exception:
+        print(
+            "❌ خطا در دریافت ادمین‌ها برای shortcut:"
+        )
+        import traceback
+        traceback.print_exc()
         return
-    print("is_chat_admin")
-    await self.list_admins(event)
+
+    if not any(
+        admin.user_id == event.sender_id
+        for admin in admins
+    ):
+        return
+
+    if admins is None:
+        print("get_admins returned None")
+        return
+
+
+    await _send_admin_list(
+        self,
+        event,
+        admins,
+    )
