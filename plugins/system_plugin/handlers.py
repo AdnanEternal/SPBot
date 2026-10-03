@@ -578,13 +578,19 @@ async def on_message(
 ) -> None:
 
     if not event.is_group:
+        print("not event.is_group")
         return
+
+    print("event.is_group")
 
     text = event.raw_text or ""
 
     if not _is_admin_list_shortcut(text):
+        print("not _is_admin_list_shortcut")
         return
-
+    
+    print("_is_admin_list_shortcut")
+    
     chat = await event.get_chat()
 
     if not await is_chat_admin(
@@ -592,6 +598,7 @@ async def on_message(
         chat,
         event.sender_id,
     ):
+        print("not is_chat_admin")
         return
-
+    print("is_chat_admin")
     await self.list_admins(event)
