@@ -35,6 +35,73 @@ MUTE_DURATION_UNITS = {
     "روز": 24 * 60 * 60,
 }
 
+REPLY_TRIGGERS = {
+    "ban": {
+        "بن",
+        "ریم",
+    },
+    "mute": {
+        "میوت",
+        "سکوت",
+    },
+    "unmute": {
+        "آنمیوت",
+        "انمیوت",
+        "ان میوت",
+        "آن میوت",
+        "حذف میوت"
+    },
+}
+
+
+def _find_reply_trigger(
+    text: str,
+    trigger_type: str,
+) -> str | None:
+    normalized = (
+        text or ""
+    ).strip()
+
+    triggers = REPLY_TRIGGERS.get(
+        trigger_type,
+        (),
+    )
+
+    # تریگرهای طولانی‌تر اول بررسی شوند.
+    for trigger in sorted(
+        triggers,
+        key=len,
+        reverse=True,
+    ):
+        if normalized == trigger:
+            return trigger
+
+    return None
+
+def _extract_reply_mute_trigger(
+    text: str,
+) -> tuple[str | None, str]:
+    normalized = (
+        text or ""
+    ).strip()
+
+    for trigger in sorted(
+        REPLY_TRIGGERS["mute"],
+        key=len,
+        reverse=True,
+    ):
+        pattern = re.fullmatch(
+            rf"{re.escape(trigger)}\s*(.*)",
+            normalized,
+        )
+
+        if pattern:
+            return (
+                trigger,
+                pattern.group(1).strip(),
+            )
+
+    return None, ""
 
 def _parse_reply_mute_duration(
     text: str,
@@ -51,6 +118,9 @@ def _parse_reply_mute_duration(
     میوت 6 روز
     میوت6روز
 
+    همین فرمت‌ها برای تمام تریگرهای موجود
+    در REPLY_TRIGGERS["mute"] معتبر هستند.
+
     عدد بدون واحد = ساعت
     بدون عدد = میوت دائمی
 
@@ -59,11 +129,20 @@ def _parse_reply_mute_duration(
         seconds=None یعنی دائمی
     """
 
-    normalized = (
-        text or ""
-    ).strip()
+    trigger, duration_text = (
+        _extract_reply_mute_trigger(text)
+    )
 
-    # حذف فاصله/کاراکترهای نامرئی مزاحم
+    if trigger is None:
+        return False, None
+
+    # فقط خود تریگر = میوت دائمی
+    if not duration_text:
+        return True, None
+
+    normalized = duration_text
+
+    # حذف کاراکترهای نامرئی
     normalized = re.sub(
         r"[\u200c\u200d\u200e\u200f\ufeff]",
         "",
@@ -80,13 +159,9 @@ def _parse_reply_mute_duration(
 
     normalized = normalized.strip()
 
-    # میوت دائمی
-    if normalized == "میوت":
-        return True, None
-
     # عدد تنها = ساعت
     match = re.fullmatch(
-        r"میوت\s*(\d+)",
+        r"(\d+)",
         normalized,
     )
 
@@ -96,18 +171,24 @@ def _parse_reply_mute_duration(
         if value <= 0:
             return False, None
 
-        return True, value * 60 * 60
+        return (
+            True,
+            value * 60 * 60,
+        )
 
     # عدد + واحد
     match = re.fullmatch(
-        r"میوت\s*(\d+)\s*(ثانیه|ث|ساعت|س|روز|ر)",
+        r"(\d+)\s*(ثانیه|ث|ساعت|س|روز|ر)",
         normalized,
     )
 
     if not match:
         return False, None
 
-    value = int(match.group(1))
+    value = int(
+        match.group(1)
+    )
+
     unit = match.group(2)
 
     if value <= 0:
@@ -1127,16 +1208,32 @@ async def on_reply_shortcut(
         event.raw_text or ""
     ).strip()
 
+    mute_trigger, mute_args = (
+        _extract_reply_mute_trigger(text)
+    )
+
+    ban_trigger = _find_reply_trigger(
+        text,
+        "ban",
+    )
+
+    unmute_trigger = _find_reply_trigger(
+        text,
+        "unmute",
+    )
+
+    # این پیام هیچ Reply Trigger معتبری نیست.
     if (
-        not text.startswith("میوت")
-        and text not in (
-            "آنمیوت",
-            "بن",
-        )
+        mute_trigger is None
+        and ban_trigger is None
+        and unmute_trigger is None
     ):
         return
 
-    if text.startswith("میوت"):
+    mute_seconds = None
+
+    if mute_trigger is not None:
+
         valid_mute, mute_seconds = (
             _parse_reply_mute_duration(text)
         )
@@ -1150,7 +1247,8 @@ async def on_reply_shortcut(
                 "میوت 2\n"
                 "میوت 200 ث\n"
                 "میوت 2 ساعت\n"
-                "میوت 6 روز",
+                "میوت 6 روز\n"
+                "سکوت 2 ساعت",
             )
             return
 
@@ -1196,7 +1294,7 @@ async def on_reply_shortcut(
     # MUTE
     # =========================================
 
-    if text.startswith("میوت"):
+    if mute_trigger is not None:
 
         try:
             await moderation.mute_user(
@@ -1236,17 +1334,24 @@ async def on_reply_shortcut(
 
         else:
 
-            if mute_seconds % (24 * 60 * 60) == 0:
+            if mute_seconds % (
+                24 * 60 * 60
+            ) == 0:
+
                 duration_text = (
                     f"{mute_seconds // (24 * 60 * 60)} روز"
                 )
 
-            elif mute_seconds % (60 * 60) == 0:
+            elif mute_seconds % (
+                60 * 60
+            ) == 0:
+
                 duration_text = (
                     f"{mute_seconds // (60 * 60)} ساعت"
                 )
 
             else:
+
                 duration_text = (
                     f"{mute_seconds} ثانیه"
                 )
@@ -1266,7 +1371,7 @@ async def on_reply_shortcut(
     # UNMUTE
     # =========================================
 
-    if text == "آنمیوت":
+    if unmute_trigger is not None:
 
         try:
             await moderation.unmute_user(
@@ -1305,7 +1410,7 @@ async def on_reply_shortcut(
     # BAN
     # =========================================
 
-    if text == "بن":
+    if ban_trigger is not None:
 
         try:
 
