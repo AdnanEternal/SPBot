@@ -42,6 +42,9 @@ class AITelemetryManager:
             | None
         ) = None
 
+        self._target_group_id: int | None = None
+        self._target_group_entity = None
+
     # =====================================================
     # STATE
     # =====================================================
@@ -64,13 +67,35 @@ class AITelemetryManager:
         self._target_group_id = int(
             group_id
         )
+        self._target_group_entity = None
 
     def clear_target(self) -> None:
         self._target_group_id = None
+        self._target_group_entity = None
 
     # =====================================================
     # WORKER
     # =====================================================
+
+
+    async def _resolve_target_entity(
+        self,
+        group_id: int,
+    ):
+        try:
+            return await self.client.get_entity(
+                int(group_id)
+            )
+
+        except Exception as exc:
+            print(
+                "⚠️ AI Telemetry - "
+                f"resolve مقصد ناموفق بود: "
+                f"chat_id={group_id} "
+                f"type={type(exc).__name__} "
+                f"error={exc}"
+            )
+            return None
 
     async def start(self) -> None:
         if (
@@ -362,10 +387,32 @@ class AITelemetryManager:
                     )
                 )
 
-                await self.client.send_message(
+                target_group_id = int(
                     payload[
                         "target_group_id"
-                    ],
+                    ]
+                )
+
+                target_entity = (
+                    self._target_group_entity
+                )
+
+                if target_entity is None:
+                    target_entity = (
+                        await self._resolve_target_entity(
+                            target_group_id
+                        )
+                    )
+
+                    if target_entity is None:
+                        continue
+
+                    self._target_group_entity = (
+                        target_entity
+                    )
+
+                await self.client.send_message(
+                    target_entity,
                     message,
                 )
 

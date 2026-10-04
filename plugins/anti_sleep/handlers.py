@@ -9,7 +9,7 @@ if TYPE_CHECKING:
 
 
 @command(
-    name="مقابله با خاموشی در همین گروه",
+    name="ضد خاموشی",
     permission="owner",
     chat_type="group",
     description=(

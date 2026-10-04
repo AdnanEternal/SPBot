@@ -12,7 +12,7 @@ from plugins.system_plugin.github_manager.manager import (
 
 class AntiSleepPlugin(BasePlugin):
     name = "Anti Sleep"
-    version = "1.0.1"
+    version = "1.0.2"
 
     def __init__(
         self,
@@ -30,6 +30,28 @@ class AntiSleepPlugin(BasePlugin):
 
         self.store = AntiSleepStore(self.db)
         self._heartbeat_task: asyncio.Task | None = None
+        self._chat_entity = None
+
+
+    async def _resolve_chat_entity(
+        self,
+        chat_id: int,
+    ):
+        try:
+            return await self.client.get_entity(
+                int(chat_id)
+            )
+
+        except Exception as exc:
+            print(
+                "⚠️ Anti Sleep - "
+                f"resolve گروه ناموفق بود: "
+                f"chat_id={chat_id} "
+                f"type={type(exc).__name__} "
+                f"error={exc}"
+            )
+            return None
+
 
     async def on_load(self) -> None:
         await self.store.create_table()
@@ -41,10 +63,17 @@ class AntiSleepPlugin(BasePlugin):
             settings["enabled"]
             and settings["chat_id"] is not None
         ):
+            self._chat_entity = (
+                await self._resolve_chat_entity(
+                    int(settings["chat_id"])
+                )
+            )
+
             await self.start_heartbeat()
 
     async def on_disable(self) -> None:
         await self.stop_heartbeat()
+        self._chat_entity = None
 
     async def start_heartbeat(self) -> None:
         if (
@@ -107,6 +136,19 @@ class AntiSleepPlugin(BasePlugin):
                     settings["chat_id"]
                 )
 
+                chat = self._chat_entity
+
+                if chat is None:
+                    chat = await self._resolve_chat_entity(
+                        chat_id
+                    )
+
+                    if chat is None:
+                        await asyncio.sleep(30)
+                        continue
+
+                    self._chat_entity = chat
+
                 github_result = "❌ ناموفق"
 
                 try:
@@ -128,7 +170,7 @@ class AntiSleepPlugin(BasePlugin):
 
                 try:
                     await self.client.send_message(
-                        chat_id,
+                        chat,
                         (
                             "💓 Anti Sleep Heartbeat\n"
                             f"🕒 {timestamp}\n"
