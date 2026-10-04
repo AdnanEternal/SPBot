@@ -3,8 +3,11 @@ from typing import TYPE_CHECKING
 from splusthon import events
 from splusthon.tl import functions, types
 
-from core.decorators import command
-from core.permissions import get_admins
+from core.decorators import command, on_event
+from core.permissions import (
+    get_admins,
+    is_chat_admin,
+)
 from core.time_manager import format_project_time
 
 if TYPE_CHECKING:
@@ -195,6 +198,22 @@ async def _get_message_count(
         "count",
         None,
     )
+
+
+def _is_group_stats_shortcut(
+    text: str,
+) -> bool:
+
+    normalized = "".join(
+        (text or "").split()
+    )
+
+    return normalized in {
+        "امارگروه",
+        "گروهامار",
+        "آمارگروه",
+        "گروهآمار",
+    }
 
 
 @command(
@@ -418,3 +437,32 @@ async def group_stats(
         await event.reply(
             "❌ دریافت آمار گروه ناموفق بود."
         )
+
+
+        
+@on_event(events.NewMessage(incoming=True))
+async def on_message(
+    self: "GroupManagerPlugin",
+    event: events.NewMessage.Event,
+) -> None:
+
+    if not event.is_group:
+        return
+
+    if not _is_group_stats_shortcut(
+        event.raw_text or ""
+    ):
+        return
+
+    chat = await event.get_chat()
+
+    if not await is_chat_admin(
+        self.client,
+        chat,
+        event.sender_id,
+    ):
+        return
+
+    await self.group_stats(
+        event
+    )

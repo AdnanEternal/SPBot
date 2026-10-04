@@ -23,3 +23,4 @@ class GroupManagerPlugin(BasePlugin):
         )
 
     group_stats = handlers.group_stats
+    on_message = handlers.on_message
