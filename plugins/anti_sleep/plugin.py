@@ -38,20 +38,28 @@ class AntiSleepPlugin(BasePlugin):
         chat_id: int,
     ):
         try:
-            return await self.client.get_entity(
-                int(chat_id)
-            )
+            dialogs = await self.client.get_dialogs()
 
         except Exception as exc:
             print(
                 "⚠️ Anti Sleep - "
-                f"resolve گروه ناموفق بود: "
+                f"دریافت لیست گروه‌ها ناموفق بود: "
                 f"chat_id={chat_id} "
                 f"type={type(exc).__name__} "
                 f"error={exc}"
             )
             return None
 
+        for dialog in dialogs:
+            if dialog.id == int(chat_id):
+                return dialog.entity
+
+        print(
+            "⚠️ Anti Sleep - "
+            f"گروه در dialogs پیدا نشد: chat_id={chat_id}"
+        )
+
+        return None
 
     async def on_load(self) -> None:
         await self.store.create_table()

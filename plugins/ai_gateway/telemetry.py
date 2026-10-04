@@ -30,8 +30,6 @@ class AITelemetryManager:
     ) -> None:
         self.client = client
 
-        self._target_group_id: int | None = None
-
         self._queue: (
             asyncio.Queue[dict[str, Any]]
             | None
@@ -83,19 +81,28 @@ class AITelemetryManager:
         group_id: int,
     ):
         try:
-            return await self.client.get_entity(
-                int(group_id)
-            )
+            dialogs = await self.client.get_dialogs()
 
         except Exception as exc:
             print(
                 "⚠️ AI Telemetry - "
-                f"resolve مقصد ناموفق بود: "
+                f"دریافت لیست گروه‌ها ناموفق بود: "
                 f"chat_id={group_id} "
                 f"type={type(exc).__name__} "
                 f"error={exc}"
             )
             return None
+
+        for dialog in dialogs:
+            if dialog.id == int(group_id):
+                return dialog.entity
+
+        print(
+            "⚠️ AI Telemetry - "
+            f"گروه در dialogs پیدا نشد: chat_id={group_id}"
+        )
+
+        return None
 
     async def start(self) -> None:
         if (
