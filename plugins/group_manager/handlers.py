@@ -8,10 +8,25 @@ from core.permissions import (
     get_admins,
     is_chat_admin,
 )
-from core.time_manager import format_project_time
+from core.time_manager import (
+    format_project_jalali_date,
+    format_project_time,
+)
 
 if TYPE_CHECKING:
     from .plugin import GroupManagerPlugin
+
+
+
+
+
+
+
+
+
+
+
+
 
 async def _get_restricted_and_banned_counts(
     client,
@@ -351,11 +366,11 @@ async def group_stats(
         ]
 
         if creation_date is not None:
+
             lines.append(
                 "📅 تاریخ ساخت: "
-                + format_project_time(
-                    creation_date,
-                    "%Y/%m/%d",
+                + format_project_jalali_date(
+                    creation_date
                 )
             )
 

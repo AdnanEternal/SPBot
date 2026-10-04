@@ -126,6 +126,108 @@ def now_in(
         target_timezone
     )
 
+def _gregorian_to_jalali(
+    gy: int,
+    gm: int,
+    gd: int,
+) -> tuple[int, int, int]:
+    g_days_in_month = [
+        31, 28, 31, 30, 31, 30,
+        31, 31, 30, 31, 30, 31,
+    ]
+
+    gy -= 1600
+    gm -= 1
+    gd -= 1
+
+    g_day_no = (
+        365 * gy
+        + (gy + 3) // 4
+        - (gy + 99) // 100
+        + (gy + 399) // 400
+    )
+
+    for i in range(gm):
+        g_day_no += g_days_in_month[i]
+
+    if (
+        gm > 1
+        and (
+            (gy + 1600) % 4 == 0
+            and (
+                (gy + 1600) % 100 != 0
+                or (gy + 1600) % 400 == 0
+            )
+        )
+    ):
+        g_day_no += 1
+
+    g_day_no += gd
+
+    j_day_no = g_day_no - 79
+
+    j_np = j_day_no // 12053
+    j_day_no %= 12053
+
+    jy = (
+        979
+        + 33 * j_np
+        + 4 * (j_day_no // 1461)
+    )
+
+    j_day_no %= 1461
+
+    if j_day_no >= 366:
+        jy += (
+            j_day_no - 1
+        ) // 365
+
+        j_day_no = (
+            j_day_no - 1
+        ) % 365
+
+    if j_day_no < 186:
+        jm = (
+            1
+            + j_day_no // 31
+        )
+
+        jd = (
+            1
+            + j_day_no % 31
+        )
+
+    else:
+        jm = (
+            7
+            + (j_day_no - 186) // 30
+        )
+
+        jd = (
+            1
+            + (j_day_no - 186) % 30
+        )
+
+    return jy, jm, jd
+
+
+def format_project_jalali_date(
+    value: datetime,
+) -> str:
+    local = to_project_timezone(
+        value
+    )
+
+    jy, jm, jd = _gregorian_to_jalali(
+        local.year,
+        local.month,
+        local.day,
+    )
+
+    return (
+        f"{jy:04d}/{jm:02d}/{jd:02d}"
+    )
+
 
 def to_project_timezone(
     value: datetime,
