@@ -91,14 +91,18 @@ def _extract_reply_mute_trigger(
         reverse=True,
     ):
         pattern = re.fullmatch(
-            rf"{re.escape(trigger)}\s*(.*)",
+            rf"{re.escape(trigger)}(?:\s*(\d.*))?",
             normalized,
         )
 
         if pattern:
             return (
                 trigger,
-                pattern.group(1).strip(),
+                (
+                    pattern.group(1).strip()
+                    if pattern.group(1)
+                    else ""
+                ),
             )
 
     return None, ""
