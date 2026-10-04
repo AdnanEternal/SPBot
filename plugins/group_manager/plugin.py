@@ -14,6 +14,7 @@ class GroupManagerPlugin(BasePlugin):
         db,
         event_bus,
     ):
+        
         super().__init__(
             client,
             command_manager,

@@ -245,6 +245,7 @@ async def group_stats(
                 .full_chat
             )
 
+
         else:
             await event.reply(
                 "❌ این چت برای دریافت آمار گروه پشتیبانی نمی‌شود."
