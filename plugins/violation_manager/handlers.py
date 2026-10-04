@@ -1230,6 +1230,28 @@ async def on_reply_shortcut(
     ):
         return
 
+
+
+    try:
+        chat = await event.get_chat()
+
+        allowed = await is_chat_admin(
+            self.client,
+            chat,
+            event.sender_id,
+            raise_on_error=True,
+        )
+
+    except Exception as exc:
+        print(
+            "⚠️ بررسی دسترسی shortcut ناموفق بود:",
+            exc,
+        )
+        return
+
+    if not allowed:
+        return
+    
     mute_seconds = None
 
     if mute_trigger is not None:
@@ -1251,27 +1273,6 @@ async def on_reply_shortcut(
                 "سکوت 2 ساعت",
             )
             return
-
-    try:
-        chat = await event.get_chat()
-
-        allowed = await is_chat_admin(
-            self.client,
-            chat,
-            event.sender_id,
-            raise_on_error=True,
-        )
-
-    except Exception as exc:
-        print(
-            "⚠️ بررسی دسترسی shortcut ناموفق بود:",
-            exc,
-        )
-        return
-
-    if not allowed:
-        return
-
     try:
         reply = await event.get_reply_message()
     except Exception:
