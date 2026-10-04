@@ -714,16 +714,16 @@ async def on_message(
         traceback.print_exc()
         return
 
-    if not any(
-        admin.user_id == event.sender_id
-        for admin in admins
-    ):
-        return
 
     if admins is None:
         print("get_admins returned None")
         return
 
+    if not any(
+        admin.user_id == event.sender_id
+        for admin in admins
+    ):
+        return
 
     await _send_admin_list(
         self,
