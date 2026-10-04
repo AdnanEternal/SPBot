@@ -2,6 +2,8 @@ from typing import TYPE_CHECKING
 
 from splusthon import events
 
+import re
+
 from core.decorators import command, on_bus_event, on_event
 from core.permissions import is_chat_admin, is_owner
 
@@ -22,6 +24,99 @@ DEFAULT_MUTE_HOURS = 1
 
 
 SOFT_SCORE_MAX = 5
+
+
+MUTE_DURATION_UNITS = {
+    "ث": 1,
+    "ثانیه": 1,
+    "س": 60 * 60,
+    "ساعت": 60 * 60,
+    "ر": 24 * 60 * 60,
+    "روز": 24 * 60 * 60,
+}
+
+
+def _parse_reply_mute_duration(
+    text: str,
+) -> tuple[bool, int | None]:
+    """
+    فرمت‌های مجاز:
+
+    میوت
+    میوت 2
+    میوت 2 ساعت
+    میوت2ساعت
+    میوت 200 ث
+    میوت200ثانیه
+    میوت 6 روز
+    میوت6روز
+
+    عدد بدون واحد = ساعت
+    بدون عدد = میوت دائمی
+
+    خروجی:
+        (valid, seconds)
+        seconds=None یعنی دائمی
+    """
+
+    normalized = (
+        text or ""
+    ).strip()
+
+    # حذف فاصله/کاراکترهای نامرئی مزاحم
+    normalized = re.sub(
+        r"[\u200c\u200d\u200e\u200f\ufeff]",
+        "",
+        normalized,
+    )
+
+    # تبدیل ارقام فارسی و عربی به انگلیسی
+    normalized = normalized.translate(
+        str.maketrans(
+            "۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩",
+            "01234567890123456789",
+        )
+    )
+
+    normalized = normalized.strip()
+
+    # میوت دائمی
+    if normalized == "میوت":
+        return True, None
+
+    # عدد تنها = ساعت
+    match = re.fullmatch(
+        r"میوت\s*(\d+)",
+        normalized,
+    )
+
+    if match:
+        value = int(match.group(1))
+
+        if value <= 0:
+            return False, None
+
+        return True, value * 60 * 60
+
+    # عدد + واحد
+    match = re.fullmatch(
+        r"میوت\s*(\d+)\s*(ثانیه|ث|ساعت|س|روز|ر)",
+        normalized,
+    )
+
+    if not match:
+        return False, None
+
+    value = int(match.group(1))
+    unit = match.group(2)
+
+    if value <= 0:
+        return False, None
+
+    return (
+        True,
+        value * MUTE_DURATION_UNITS[unit],
+    )
 
 async def _resolve_group_entity(
     self: "ViolationManagerPlugin",
@@ -1032,12 +1127,32 @@ async def on_reply_shortcut(
         event.raw_text or ""
     ).strip()
 
-    if text not in (
-        "میوت",
-        "آنمیوت",
-        "بن",
+    if (
+        not text.startswith("میوت")
+        and text not in (
+            "آنمیوت",
+            "بن",
+        )
     ):
         return
+
+    if text.startswith("میوت"):
+        valid_mute, mute_seconds = (
+            _parse_reply_mute_duration(text)
+        )
+
+        if not valid_mute:
+            await _safe_reply(
+                event,
+                "❌ فرمت میوت نامعتبر است.\n"
+                "مثال:\n"
+                "میوت\n"
+                "میوت 2\n"
+                "میوت 200 ث\n"
+                "میوت 2 ساعت\n"
+                "میوت 6 روز",
+            )
+            return
 
     try:
         chat = await event.get_chat()
@@ -1077,28 +1192,18 @@ async def on_reply_shortcut(
         return
 
     
-
     # =========================================
     # MUTE
     # =========================================
 
-    if text == "میوت":
+    if text.startswith("میوت"):
 
         try:
-            settings = await self.settings.get(
-                event.chat_id
-            )
-
-            hours = (
-                settings["mute_hours"]
-                or DEFAULT_MUTE_HOURS
-            )
-
             await moderation.mute_user(
                 self.client,
                 chat,
                 reply,
-                hours=hours,
+                seconds=mute_seconds,
             )
 
         except moderation.ModerationError as exc:
@@ -1122,10 +1227,38 @@ async def on_reply_shortcut(
             )
             return
 
+        if mute_seconds is None:
+
+            response = (
+                f"کاربر `{target_id}` "
+                "به‌صورت دائمی میوت شد."
+            )
+
+        else:
+
+            if mute_seconds % (24 * 60 * 60) == 0:
+                duration_text = (
+                    f"{mute_seconds // (24 * 60 * 60)} روز"
+                )
+
+            elif mute_seconds % (60 * 60) == 0:
+                duration_text = (
+                    f"{mute_seconds // (60 * 60)} ساعت"
+                )
+
+            else:
+                duration_text = (
+                    f"{mute_seconds} ثانیه"
+                )
+
+            response = (
+                f"کاربر `{target_id}` "
+                f"به مدت {duration_text} میوت شد."
+            )
+
         await _safe_reply(
             event,
-            f"کاربر `{target_id}` "
-            f"به مدت {hours} ساعت میوت شد.",
+            response,
         )
         return
 

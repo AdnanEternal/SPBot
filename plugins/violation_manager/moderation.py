@@ -375,6 +375,7 @@ async def mute_user(
     user: Any,
     hours: Optional[int] = None,
     minutes: Optional[int] = None,
+    seconds: Optional[int] = None,
 ) -> None:
 
     user = await _validate_moderation(
@@ -387,7 +388,19 @@ async def mute_user(
     # MUTE DURATION
     # =========================================
 
-    if minutes is not None:
+    if seconds is not None:
+
+        until_date = (
+            now_utc()
+            + timedelta(
+                seconds=max(
+                    1,
+                    int(seconds),
+                )
+            )
+        )
+
+    elif minutes is not None:
 
         until_date = (
             now_utc()
