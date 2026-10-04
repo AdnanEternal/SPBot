@@ -20,6 +20,64 @@ if TYPE_CHECKING:
 HELP_PAGE_SIZE = 6
 
 
+
+ADMIN_LIST_MAX_CHARS = 1200
+
+
+def _build_admin_block(
+    index: int,
+    admin,
+) -> str:
+
+    entity = admin.entity
+
+    first_name = (
+        getattr(
+            entity,
+            "first_name",
+            None,
+        )
+        or ""
+    ).strip()
+
+    last_name = (
+        getattr(
+            entity,
+            "last_name",
+            None,
+        )
+        or ""
+    ).strip()
+
+    username = (
+        getattr(
+            entity,
+            "username",
+            None,
+        )
+        or None
+    )
+
+    full_name = (
+        f"{first_name} {last_name}"
+    ).strip()
+
+    if not full_name:
+        full_name = str(
+            admin.user_id
+        )
+
+    return "\n".join([
+        "----------------------------------",
+        f"👤 ادمین شماره {index}:",
+        f"📝 نام: {full_name}",
+        f"🔗 نام کاربری: "
+        f"{('@' + username) if username else 'ندارد'}",
+        f"🏷️ نقش: {admin.title}",
+        "🔎 [مشاهده نمایه]",
+    ])
+
+
 async def _send_admin_list(
     self: "SystemPlugin",
     event: events.NewMessage.Event,
@@ -32,109 +90,138 @@ async def _send_admin_list(
         )
         return
 
-    text_parts = [
+    header = "\n".join([
         "👑 ادمین‌های این گروه:",
         f"👥 تعداد: {len(admins)} نفر",
+    ])
+
+    # هر آیتم شامل متن + ادمین خودش است.
+    admin_items = [
+        (
+            _build_admin_block(
+                index,
+                admin,
+            ),
+            admin,
+        )
+        for index, admin in enumerate(
+            admins,
+            start=1,
+        )
     ]
 
-    entity_positions = []
+    messages = []
 
-    for index, admin in enumerate(
-        admins,
-        start=1,
-    ):
-        entity = admin.entity
-
-        first_name = (
-            getattr(
-                entity,
-                "first_name",
-                None,
-            )
-            or ""
-        ).strip()
-
-        last_name = (
-            getattr(
-                entity,
-                "last_name",
-                None,
-            )
-            or ""
-        ).strip()
-
-        username = (
-            getattr(
-                entity,
-                "username",
-                None,
-            )
-            or None
-        )
-
-        full_name = (
-            f"{first_name} {last_name}"
-        ).strip()
-
-        if not full_name:
-            full_name = str(
-                admin.user_id
-            )
-
-        text_parts.extend([
-            "----------------------------------",
-            f"👤 ادمین شماره {index}:",
-            f"📝 نام: {full_name}",
-            f"🔗 نام کاربری: "
-            f"{('@' + username) if username else 'ندارد'}",
-            f"🏷️ نقش: {admin.title}",
-            "🔎 [مشاهده نمایه]",
-        ])
-
-    text = "\n".join(text_parts)
-
-    # entity ها را بعد از ساخته شدن متن کامل محاسبه می‌کنیم.
-    search_from = 0
-
-    for admin in admins:
-        label = "[مشاهده نمایه]"
-
-        position = text.find(
-            label,
-            search_from,
-        )
-
-        if position == -1:
-            continue
-
-        entity = admin.entity
-
-        input_user = utils.get_input_user(
-            entity
-        )
-
-        entity_positions.append(
-            types.InputMessageEntityMentionName(
-                offset=_utf16_length(
-                    text[:position]
-                ),
-                length=_utf16_length(
-                    label
-                ),
-                user_id=input_user,
-            )
-        )
-
-        search_from = (
-            position
-            + len(label)
-        )
-
-    await event.reply(
-        text,
-        formatting_entities=entity_positions,
-        parse_mode=None,
+    current_items = []
+    current_length = (
+        len(header) + 2
     )
+
+    for block, admin in admin_items:
+
+        separator_length = (
+            2
+            if current_items
+            else 0
+        )
+
+        required_length = (
+            separator_length
+            + len(block)
+        )
+
+        # اگر این block داخل پیام جا نمی‌شود،
+        # پیام فعلی را می‌بندیم.
+        if (
+            current_items
+            and
+            current_length
+            + required_length
+            > ADMIN_LIST_MAX_CHARS
+        ):
+            messages.append(
+                current_items
+            )
+
+            current_items = []
+
+            # بعد از پیام اول، header دیگر وجود ندارد.
+            current_length = 0
+
+            separator_length = 0
+            required_length = len(block)
+
+        current_items.append(
+            (block, admin)
+        )
+
+        current_length += required_length
+
+    if current_items:
+        messages.append(
+            current_items
+        )
+
+    # -------------------------------------------------
+    # ارسال
+    # -------------------------------------------------
+
+    for message_index, items in enumerate(
+        messages,
+    ):
+
+        parts = []
+
+        if message_index == 0:
+            parts.append(header)
+
+        for block, _admin in items:
+            parts.append(block)
+
+        text = "\n\n".join(parts)
+
+        entity_positions = []
+
+        search_from = 0
+
+        for _block, admin in items:
+
+            label = "[مشاهده نمایه]"
+
+            position = text.find(
+                label,
+                search_from,
+            )
+
+            if position == -1:
+                continue
+
+            input_user = utils.get_input_user(
+                admin.entity
+            )
+
+            entity_positions.append(
+                types.InputMessageEntityMentionName(
+                    offset=_utf16_length(
+                        text[:position]
+                    ),
+                    length=_utf16_length(
+                        label
+                    ),
+                    user_id=input_user,
+                )
+            )
+
+            search_from = (
+                position
+                + len(label)
+            )
+
+        await event.reply(
+            text,
+            formatting_entities=entity_positions,
+            parse_mode=None,
+        )
 
 
 def _is_admin_list_shortcut(text: str) -> bool:
