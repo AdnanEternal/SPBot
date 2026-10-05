@@ -133,6 +133,7 @@ class AIGatewayPlugin(BasePlugin):
     model_statistics = handlers.model_statistics
     set_model_owner_score = handlers.set_model_owner_score
     ping_models = handlers.ping_models
+    activate_group_model = handlers.activate_group_model
 
 
     # -------------------------
