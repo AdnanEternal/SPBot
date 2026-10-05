@@ -10,6 +10,8 @@ from core.plugin_manager import PluginManager
 
 async def run_bot(
     shutdown_event: asyncio.Event,
+    *,
+    run_startup: bool = False,
 ) -> bool:
     """
     خروجی:
@@ -40,7 +42,9 @@ async def run_bot(
             client
         )
 
-        await plugin_manager.load_all_plugins()
+        await plugin_manager.load_all_plugins(
+            run_startup=run_startup,
+        )
         await plugin_manager.enable_all_plugins()
 
         print(
@@ -127,6 +131,8 @@ async def async_main() -> None:
 
     signal_handlers = []
 
+    run_startup = True
+
     def request_shutdown() -> None:
         if not shutdown_event.is_set():
             print(
@@ -158,8 +164,11 @@ async def async_main() -> None:
 
             try:
                 should_exit = await run_bot(
-                    shutdown_event
+                    shutdown_event,
+                    run_startup=run_startup,
                 )
+
+                run_startup = False
 
                 if should_exit:
                     print(

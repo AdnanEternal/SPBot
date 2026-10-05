@@ -16,6 +16,7 @@ from core.event_bus import EventBus
 class BasePlugin:
     name: Optional[str] = None
     version: str = "1.0.0"
+    startup_priority: int = 0
 
     def __init__(
         self,
@@ -226,6 +227,9 @@ class BasePlugin:
         self._bus_listeners.clear()
 
         self.command_manager.remove_plugin_commands(self)
+
+    async def on_startup(self) -> None:
+        pass
 
     async def on_load(self) -> None:
         pass

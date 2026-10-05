@@ -175,11 +175,31 @@ class PluginManager:
     async def load_all_plugins(
         self,
         plugins_dir: str = "plugins",
+        *,
+        run_startup: bool = False,
     ) -> None:
 
         await self.db.connect()
 
         self.discover_plugins(plugins_dir)
+
+        if run_startup:
+            startup_plugins = sorted(
+                self.plugins.values(),
+                key=lambda plugin: plugin.startup_priority,
+            )
+
+            for plugin in startup_plugins:
+                try:
+                    await plugin.on_startup()
+
+                except Exception:
+                    print(
+                        f"\n❌ خطا در startup پلاگین "
+                        f"'{plugin.name}'"
+                    )
+                    traceback.print_exc()
+                    raise
 
         failed_plugins = []
 

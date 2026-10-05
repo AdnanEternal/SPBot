@@ -37,7 +37,8 @@ class SystemPlugin(BasePlugin):
         self.runtime_update_lock = asyncio.Lock()
 
     name = "System"
-    version = "2.9.12"
+    version = "2.9.13"
+    startup_priority = -100
 
     show_help = handlers.show_help
     github_check = handlers.github_check
@@ -49,3 +50,4 @@ class SystemPlugin(BasePlugin):
     plugin_update = handlers.plugin_update
     list_admins = handlers.list_admins
     on_message = handlers.on_message
+    on_startup = handlers.on_startup

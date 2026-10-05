@@ -10,7 +10,10 @@ from core.permissions import (
     is_owner,
 )
 
-from .backup.backup import DatabaseBackupManager
+from .backup.backup import (
+    AUTO_RESTORE_DATABASE_ON_STARTUP,
+    DatabaseBackupManager,
+)
 from .github_manager.manager import GitHubManager
 from .plugin_updater import PluginUpdateManager
 
@@ -487,6 +490,32 @@ async def github_check(
 
     await event.reply("✅ اتصال به GitHub با موفقیت برقرار شد.")
 
+async def on_startup(
+    self: "SystemPlugin",
+) -> None:
+
+    if not AUTO_RESTORE_DATABASE_ON_STARTUP:
+        print(
+            "ℹ️ بازیابی خودکار دیتابیس هنگام startup خاموش است."
+        )
+        return
+
+    print(
+        "♻️ بازیابی خودکار دیتابیس هنگام startup..."
+    )
+
+    github = GitHubManager()
+
+    backup = DatabaseBackupManager(
+        db=self.db,
+        github=github,
+    )
+
+    await backup.restore_backup()
+
+    print(
+        "✅ بازیابی خودکار دیتابیس هنگام startup انجام شد."
+    )
 
 @command(
     name="دیتابیس بکاپ",

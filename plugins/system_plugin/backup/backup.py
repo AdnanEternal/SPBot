@@ -8,6 +8,9 @@ from core.database_manager import DatabaseManager
 from ..github_manager.manager import GitHubManager
 from core.time_manager import format_project_time, now_in
 
+AUTO_RESTORE_DATABASE_ON_STARTUP = True
+
+
 class DatabaseBackupManager:
     LOCK_TIMEOUT = 30
     INTEGRITY_TIMEOUT = 30
