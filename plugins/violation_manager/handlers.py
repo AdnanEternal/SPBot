@@ -43,8 +43,6 @@ REPLY_TRIGGERS = {
     "mute": {
         "میوت",
         "سکوت",
-        "سیک",
-        "سیکتیر"
     },
     "unmute": {
         "آنمیوت",
@@ -55,6 +53,24 @@ REPLY_TRIGGERS = {
     },
 }
 
+
+SPECIAL_REPLY_TRIGGERS = {
+    "سیک",
+    "سیکتیر",
+}
+
+def _find_special_reply_trigger(
+    text: str,
+) -> str | None:
+
+    normalized = (
+        text or ""
+    ).strip()
+
+    if normalized in SPECIAL_REPLY_TRIGGERS:
+        return normalized
+
+    return None
 
 def _find_reply_trigger(
     text: str,
@@ -1214,6 +1230,11 @@ async def on_reply_shortcut(
         event.raw_text or ""
     ).strip()
 
+
+    special_trigger = _find_special_reply_trigger(
+        text
+    )
+
     mute_trigger, mute_args = (
         _extract_reply_mute_trigger(text)
     )
@@ -1230,12 +1251,12 @@ async def on_reply_shortcut(
 
     # این پیام هیچ Reply Trigger معتبری نیست.
     if (
-        mute_trigger is None
+        special_trigger is None
+        and mute_trigger is None
         and ban_trigger is None
         and unmute_trigger is None
     ):
         return
-
 
 
     try:
@@ -1257,7 +1278,99 @@ async def on_reply_shortcut(
 
     if not allowed:
         return
-    
+    # =========================================
+    # SPECIAL MUTE TRIGGER
+    # =========================================
+
+    if special_trigger is not None:
+
+        try:
+            reply = await event.get_reply_message()
+
+        except Exception as exc:
+            print(
+                "⚠️ دریافت Reply برای Special Trigger ناموفق بود:",
+                exc,
+            )
+            return
+
+        if reply is None:
+            return
+
+        target_id = getattr(
+            reply,
+            "sender_id",
+            None,
+        )
+
+        if target_id is None:
+            return
+
+        # -----------------------------------------
+        # TARGET ADMIN CHECK
+        # -----------------------------------------
+
+        try:
+            target_is_admin = await is_chat_admin(
+                self.client,
+                chat,
+                target_id,
+                raise_on_error=True,
+            )
+
+        except Exception as exc:
+            print(
+                "⚠️ بررسی ادمین بودن هدف برای "
+                f"Special Trigger ناموفق بود: {exc}"
+            )
+            return
+
+        # Special Trigger روی ادمین هیچ کاری نمی‌کند.
+        if target_is_admin:
+            return
+
+        # -----------------------------------------
+        # SPECIAL MUTE
+        # -----------------------------------------
+
+        try:
+            await moderation.mute_user(
+                self.client,
+                chat,
+                reply,
+                seconds=None,
+            )
+
+        except moderation.ModerationError as exc:
+
+            # عمداً هیچ replyای ارسال نمی‌شود.
+            print(
+                "⚠️ اجرای Special Trigger "
+                f"'{special_trigger}' ناموفق بود: {exc}"
+            )
+            return
+
+        except Exception as exc:
+
+            # عمداً هیچ replyای ارسال نمی‌شود.
+            print(
+                "❌ خطای غیرمنتظره در Special Trigger "
+                f"'{special_trigger}':",
+                exc,
+            )
+            return
+
+        # -----------------------------------------
+        # SUCCESS
+        # -----------------------------------------
+
+        await _safe_reply(
+            event,
+            "دکمه‌ی سیکش زده شد🤭\n(میوت دائمی)",
+        )
+
+        return
+
     mute_seconds = None
 
     if mute_trigger is not None:
