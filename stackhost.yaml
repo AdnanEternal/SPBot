@@ -1,4 +1,4 @@
-# StackHost configuration
+# Temporary StackHost configuration for direct GitHub connectivity test
 
 user:
   name: "AdnanEternal"
@@ -9,9 +9,8 @@ runtime:
 
 commands:
   package: ""
-  build:
-    - "python -m pip install --user --no-cache-dir --no-compile -r requirements.txt"
-  start: "python main.py"
+  build: []
+  start: "python test_github.py"
 
 repository:
   branch: "main"
