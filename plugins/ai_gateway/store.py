@@ -1312,6 +1312,17 @@ class AIGroupSettingsStore:
             ttl_seconds=1800,
         )
 
+        self._model_override_cache = TTLCache[
+            int,
+            str,
+        ](
+            max_entries=512,
+            ttl_seconds=900,
+        )
+
+        self._model_override_schema_ready = False
+        self._model_override_schema_lock = asyncio.Lock()
+
     async def create_table(self) -> None:
         await self.db.create_table(
             self.TABLE,
@@ -1343,6 +1354,192 @@ class AIGroupSettingsStore:
 
         return dict(row)
 
+
+    async def _ensure_model_override_column(
+        self,
+    ) -> None:
+
+        if self._model_override_schema_ready:
+            return
+
+        async with self._model_override_schema_lock:
+
+            if self._model_override_schema_ready:
+                return
+
+            rows = await self.db.fetchall(
+                f"PRAGMA table_info({self.TABLE})"
+            )
+
+            has_column = any(
+                row["name"] == "model_override"
+                for row in rows
+            )
+
+            if not has_column:
+                await self.db.execute(
+                    f"""
+                    ALTER TABLE {self.TABLE}
+                    ADD COLUMN model_override TEXT
+                    """
+                )
+
+            self._model_override_schema_ready = True
+
+    async def get_model_override(
+        self,
+        group_id: int,
+    ) -> str | None:
+
+        cached = self._model_override_cache.get(
+            group_id
+        )
+
+        if cached is not None:
+            return cached or None
+
+        # اگر ستون هنوز ساخته نشده،
+        # یعنی هیچ Group Overrideای وجود ندارد.
+        if not self._model_override_schema_ready:
+            rows = await self.db.fetchall(
+                f"PRAGMA table_info({self.TABLE})"
+            )
+
+            self._model_override_schema_ready = any(
+                row["name"] == "model_override"
+                for row in rows
+            )
+
+        if not self._model_override_schema_ready:
+            self._model_override_cache.set(
+                group_id,
+                "",
+            )
+            return None
+
+        row = await self.db.fetchone(
+            f"""
+            SELECT model_override
+            FROM {self.TABLE}
+            WHERE group_id = ?
+            LIMIT 1
+            """,
+            (group_id,),
+        )
+
+        if row is None:
+            self._model_override_cache.set(
+                group_id,
+                "",
+            )
+            return None
+
+        override = (
+            (row["model_override"] or "")
+            .strip()
+            .lower()
+        )
+
+        self._model_override_cache.set(
+            group_id,
+            override,
+        )
+
+        return override or None
+
+    async def set_model_override(
+        self,
+        group_id: int,
+        model_name: str,
+    ) -> None:
+
+        normalized = (
+            model_name.strip().lower()
+        )
+
+        if not normalized:
+            raise ValueError(
+                "نام مدل نمی‌تواند خالی باشد."
+            )
+
+        await self._ensure_model_override_column()
+
+        await self._ensure(
+            group_id
+        )
+
+        await self.db.execute(
+            f"""
+            UPDATE {self.TABLE}
+            SET
+                model_override = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE group_id = ?
+            """,
+            (
+                normalized,
+                group_id,
+            ),
+        )
+
+        self._model_override_cache.set(
+            group_id,
+            normalized,
+        )
+
+    async def clear_model_override(
+        self,
+        group_id: int,
+    ) -> bool:
+
+        if not self._model_override_schema_ready:
+
+            rows = await self.db.fetchall(
+                f"PRAGMA table_info({self.TABLE})"
+            )
+
+            self._model_override_schema_ready = any(
+                row["name"] == "model_override"
+                for row in rows
+            )
+
+        if not self._model_override_schema_ready:
+            return False
+
+        row = await self.db.fetchone(
+            f"""
+            SELECT model_override
+            FROM {self.TABLE}
+            WHERE group_id = ?
+            LIMIT 1
+            """,
+            (group_id,),
+        )
+
+        if row is None:
+            return False
+
+        had_override = bool(
+            (row["model_override"] or "").strip()
+        )
+
+        await self.db.execute(
+            f"""
+            UPDATE {self.TABLE}
+            SET
+                model_override = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE group_id = ?
+            """,
+            (group_id,),
+        )
+
+        self._model_override_cache.delete(
+            group_id
+        )
+
+        return had_override
+    
     async def get_system_prompt(
     self,
     group_id: int,

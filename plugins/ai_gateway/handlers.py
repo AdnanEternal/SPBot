@@ -1548,6 +1548,126 @@ async def activate_model(
         f"✅ مدل «{name}» فعال شد."
     )
 
+@command(
+    name="مدل فعال گروه",
+    permission="owner",
+    chat_type="group",
+    description="مدل ترجیحی این گروه را تنظیم می‌کند.",
+)
+async def activate_group_model(
+    self,
+    event,
+):
+    value = (
+        event.args_text or ""
+    ).strip()
+
+    # ---------------------------------------------
+    # نمایش وضعیت
+    # ---------------------------------------------
+
+    if not value:
+
+        override = (
+            await self.groups.get_model_override(
+                event.chat_id
+            )
+        )
+
+        if override:
+
+            model = await self.models.get(
+                override
+            )
+
+            if model is not None:
+                await event.reply(
+                    f"🎯 مدل این گروه: "
+                    f"{model['name']}\n"
+                    f"🔌 {model['provider']}/"
+                    f"{model['model_id']}"
+                )
+                return
+
+            await event.reply(
+                f"⚠️ این گروه روی مدل «{override}» "
+                f"تنظیم شده، ولی این مدل دیگر وجود ندارد.\n"
+                f"🔄 در عمل از مدل سراسری استفاده می‌شود."
+            )
+            return
+
+        global_model = (
+            await self.models.get_active()
+        )
+
+        if global_model is None:
+            await event.reply(
+                "ℹ️ این گروه مدل اختصاصی ندارد "
+                "و مدل سراسری هم تنظیم نشده است."
+            )
+            return
+
+        await event.reply(
+            "🌐 این گروه مدل اختصاصی ندارد.\n"
+            f"🟢 مدل سراسری: {global_model['name']}"
+        )
+        return
+
+    # ---------------------------------------------
+    # Reset
+    # ---------------------------------------------
+
+    if value.lower() in {
+        "ریست",
+        "reset",
+        "سراسری",
+    }:
+
+        cleared = (
+            await self.groups.clear_model_override(
+                event.chat_id
+            )
+        )
+
+        if not cleared:
+            await event.reply(
+                "ℹ️ این گروه مدل اختصاصی نداشت."
+            )
+            return
+
+        await event.reply(
+            "✅ مدل اختصاصی گروه حذف شد؛ "
+            "از این به بعد مدل سراسری استفاده می‌شود."
+        )
+        return
+
+    # ---------------------------------------------
+    # Validate Model
+    # ---------------------------------------------
+
+    model = await self.models.get(
+        value
+    )
+
+    if model is None:
+        await event.reply(
+            f"❌ مدل «{value}» پیدا نشد."
+        )
+        return
+
+    # ---------------------------------------------
+    # Save Override
+    # ---------------------------------------------
+
+    await self.groups.set_model_override(
+        event.chat_id,
+        model["name"],
+    )
+
+    await event.reply(
+        f"✅ مدل اختصاصی این گروه شد: "
+        f"«{model['name']}»"
+    )
 
 @command(
     name="مدل حذف",
@@ -2651,9 +2771,22 @@ async def on_message(
             else None
         )
 
-        telemetry_request_started = None
-
         telemetry_emitted = False
+
+        group_model_override = None
+
+        try:
+            group_model_override = (
+                await self.groups.get_model_override(
+                    event.chat_id
+                )
+            )
+
+        except Exception as exc:
+            print(
+                f"⚠️ خطا در خواندن Group Model Override؛ "
+                f"استفاده از مدل سراسری: {exc}"
+            )
 
         active_model = None
 
@@ -2666,16 +2799,32 @@ async def on_message(
 
         telemetry_model_name = None
 
-        if active_model is not None:
+        telemetry_model = active_model
+
+        if group_model_override:
+            try:
+                override_model = (
+                    await self.models.get(
+                        group_model_override
+                    )
+                )
+
+                if override_model is not None:
+                    telemetry_model = override_model
+
+            except Exception:
+                pass
+
+        if telemetry_model is not None:
             try:
                 telemetry_model_name = (
                     self.gateway._litellm_model(
-                        active_model
+                        telemetry_model
                     )
                 )
             except Exception:
                 telemetry_model_name = (
-                    active_model.get(
+                    telemetry_model.get(
                         "model_id"
                     )
                 )
@@ -2815,6 +2964,9 @@ async def on_message(
             answer, model_info = (
                 await self.gateway.chat(
                     context,
+                    preferred_model_name=(
+                        group_model_override
+                    ),
                     return_metadata=True,
                     timeout=request_timeout
                 )
@@ -2823,6 +2975,9 @@ async def on_message(
         else:
             answer = await self.gateway.chat(
                 context,
+                preferred_model_name=(
+                    group_model_override
+                ),
                 timeout=request_timeout
             )
 

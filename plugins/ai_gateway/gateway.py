@@ -1021,9 +1021,9 @@ class AIGateway:
 
 
 
-
     async def _get_model_candidates(
         self,
+        preferred_model_name: str | None = None,
     ) -> list[dict[str, Any]]:
 
         models = await self.models.get_all()
@@ -1031,7 +1031,9 @@ class AIGateway:
         if not models:
             return []
 
-        active_model = await self.models.get_active()
+        active_model = (
+            await self.models.get_active()
+        )
 
         statistics = (
             await self.statistics.get_all()
@@ -1042,19 +1044,55 @@ class AIGateway:
             for stats in statistics
         }
 
-        active_name = (
-            active_model["name"]
-            if active_model is not None
-            else None
-        )
+        candidates = []
+        used_names = set()
+
+        # ---------------------------------------------
+        # 1. Group Preferred Model
+        # ---------------------------------------------
+
+        if preferred_model_name:
+            preferred_model = (
+                await self.models.get(
+                    preferred_model_name
+                )
+            )
+
+            if preferred_model is not None:
+                candidates.append(
+                    preferred_model
+                )
+
+                used_names.add(
+                    preferred_model["name"]
+                )
+
+        # ---------------------------------------------
+        # 2. Global Active Model
+        # ---------------------------------------------
+
+        if active_model is not None:
+
+            if (
+                active_model["name"]
+                not in used_names
+            ):
+                candidates.append(
+                    active_model
+                )
+
+                used_names.add(
+                    active_model["name"]
+                )
+
+        # ---------------------------------------------
+        # 3. Score-based Fallback
+        # ---------------------------------------------
 
         fallback_models = [
             model
             for model in models
-            if (
-                active_name is None
-                or model["name"] != active_name
-            )
+            if model["name"] not in used_names
         ]
 
         def overall_score(
@@ -1068,8 +1106,10 @@ class AIGateway:
             if stats is None:
                 return 50
 
-            return self.statistics.calculate_overall_score(
-                stats
+            return (
+                self.statistics.calculate_overall_score(
+                    stats
+                )
             )
 
         fallback_models.sort(
@@ -1077,14 +1117,11 @@ class AIGateway:
             reverse=True,
         )
 
-        if active_model is not None:
-            return [
-                active_model,
-                *fallback_models,
-            ]
+        candidates.extend(
+            fallback_models
+        )
 
-        return fallback_models
-
+        return candidates
 
 
     async def _apply_api_key_failure(
@@ -1459,6 +1496,7 @@ class AIGateway:
         messages: list[dict[str, str]],
         *,
         model: Optional[dict[str, Any]] = None,
+        preferred_model_name: str | None = None,
         timeout: float = 60.0,
         temperature: Optional[float] = None,
         return_metadata: bool = False,
@@ -1482,7 +1520,9 @@ class AIGateway:
             # بعد از آن، مدل‌ها بر اساس Overall Score
             # از بیشترین به کمترین مرتب می‌شوند.
             candidates = (
-                await self._get_model_candidates()
+                await self._get_model_candidates(
+                    preferred_model_name
+                )
             )
 
         if not candidates:

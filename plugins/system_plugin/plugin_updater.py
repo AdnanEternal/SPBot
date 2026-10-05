@@ -422,9 +422,10 @@ class PluginUpdateManager:
         return remote_plugin
 
     async def update(
-    self,
-    plugin_id: str,
-) -> RemotePlugin:
+        self,
+        plugin_id: str,
+    ) -> RemotePlugin:
+    
         self._validate_plugin_id(plugin_id)
 
         local_plugin = (
