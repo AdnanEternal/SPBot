@@ -4,6 +4,7 @@ from splusthon import events
 
 from core.decorators import command
 
+
 if TYPE_CHECKING:
     from .plugin import AntiSleepPlugin
 
@@ -13,7 +14,8 @@ if TYPE_CHECKING:
     permission="owner",
     chat_type="group",
     description=(
-        "ربات را هر 25 دقیقه در همین گروه فعال نگه می‌دارد."
+        "ربات را در همین گروه با heartbeat "
+        "تصادفی بین 1 تا 15 دقیقه فعال نگه می‌دارد."
     ),
 )
 async def enable_anti_sleep(
@@ -22,7 +24,7 @@ async def enable_anti_sleep(
 ) -> None:
     await self.store.enable(
         chat_id=event.chat_id,
-        interval_minutes=25,
+        interval_minutes=1,
     )
 
     await self.start_heartbeat()
@@ -30,5 +32,6 @@ async def enable_anti_sleep(
     await event.reply(
         "✅ سیستم مقابله با خاموشی فعال شد.\n"
         "📍 مقصد: همین گروه\n"
-        "⏱ فاصله: 25 دقیقه"
+        "🎲 فاصله: تصادفی بین 1 تا 15 دقیقه\n"
+        "🔗 در هر heartbeat، GitHub بررسی و نتیجه ارسال می‌شود."
     )
