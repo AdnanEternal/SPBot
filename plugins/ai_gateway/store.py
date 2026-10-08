@@ -1719,7 +1719,7 @@ class AIMemorySettingsStore:
     TABLE = "ai_memory_settings"
 
     DEFAULT_TOKEN_LIMIT = 8000
-    DEFAULT_MESSAGE_LIMIT = 500
+    DEFAULT_MESSAGE_LIMIT = 40
 
     def __init__(
         self,
