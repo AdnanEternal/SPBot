@@ -10,4 +10,3 @@ class MessageManagerPlugin(BasePlugin):
     version = "1.3.5"
 
     clear_message = handlers.clear_messages
-    meow_trigger = handlers.meow_trigger
