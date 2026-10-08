@@ -667,16 +667,18 @@ class CommandManager:
                 # EXECUTE
                 # -------------------------------------------------
 
-                handled = True
-
                 try:
-                    await self.execute_command(
+                    handled = await self.execute_command(
                         command,
                         event,
                         args_text,
                     )
 
                 except Exception:
+
+                    # Command was matched, but execution failed.
+                    # Consume the event because the error was handled here.
+                    handled = True
 
                     print(
                         f"\n❌ خطای بحرانی در اجرای دستور "
@@ -692,7 +694,6 @@ class CommandManager:
 
                     except Exception:
                         pass
-
             except StopPropagation:
                 raise
 
