@@ -3249,16 +3249,6 @@ async def on_message(
             f"group={event.chat_id} | "
             f"chars={len(answer)}"
         )
-        try:
-            await self.memory.store.add_message(
-                event.chat_id,
-                "assistant",
-                answer,
-            )
-        except Exception as exc:
-            print(
-                f"⚠️ ذخیره‌ی پیام ربات در حافظه ناموفق بود: {exc}"
-            )
 
         # -------------------------------------------------
         # ارسال پاسخ
@@ -3270,26 +3260,39 @@ async def on_message(
             sent = await event.reply(
                 answer[:4000]
             )
+
         except Exception:
             try:
                 sent = await event.respond(
                     answer[:4000]
                 )
+
             except Exception as exc:
                 print(
                     f"⚠️ ارسال پاسخ بوبی ناموفق بود: {exc}"
                 )
 
-        try:
-            await self.memory.store.add_message(
-                event.chat_id,
-                "assistant",
-                answer,
-            )
-        except Exception as exc:
-            print(
-                f"⚠️ ذخیره‌ی پاسخ بوبی در حافظه ناموفق بود: {exc}"
-            )
+        # -------------------------------------------------
+        # Memory: پاسخ بوبی
+        # -------------------------------------------------
+        # فقط وقتی پیام واقعاً ارسال شده باشد،
+        # پاسخ در حافظه ذخیره می‌شود.
+        #
+        # این بخش عمداً فقط یک بار اجرا می‌شود تا
+        # پاسخ بوبی دوبار وارد ai_memory_messages نشود.
+
+        if sent is not None:
+            try:
+                await self.memory.store.add_message(
+                    event.chat_id,
+                    "assistant",
+                    answer,
+                )
+
+            except Exception as exc:
+                print(
+                    f"⚠️ ذخیره‌ی پاسخ بوبی در حافظه ناموفق بود: {exc}"
+                )
 
         # -------------------------------------------------
         # Timeline: پاسخ بوبی
