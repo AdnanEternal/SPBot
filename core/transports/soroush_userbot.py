@@ -1,6 +1,5 @@
 import asyncio
 from typing import Iterable
-from core.soroush_media import SoroushMediaClient
 
 
 from splusthon import SoroushClient
@@ -59,7 +58,7 @@ class SoroushUserbotTransport(
         if self.client is not None:
             return self.client
 
-        client = SoroushMediaClient(
+        client = SoroushClient(
             StringSession(self.session_string)
         )
 
