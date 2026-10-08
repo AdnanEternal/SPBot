@@ -1,6 +1,8 @@
 import asyncio
 from typing import Iterable
+from core.soroush_media import install_soroush_media_fix
 
+install_soroush_media_fix()
 from splusthon import SoroushClient
 from splusthon.sessions import StringSession
 
