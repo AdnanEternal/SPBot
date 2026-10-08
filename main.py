@@ -3,7 +3,6 @@ import signal
 import time
 import traceback
 
-from config import config
 from core.client import ClientManager
 from core.plugin_manager import PluginManager
 
@@ -19,13 +18,7 @@ async def run_bot(
         False -> اتصال قطع شده و باید reconnect شود
     """
 
-    session_string = config.get_required(
-        "SESSION_STRING"
-    )
-
-    client_manager = ClientManager(
-        session_string=session_string
-    )
+    client_manager = ClientManager()
 
     client = None
     plugin_manager = None
@@ -38,21 +31,33 @@ async def run_bot(
                 "اتصال به Soroush برقرار نشد."
             )
 
+
+        # =====================================================
+        # PLUGINS
+        # =====================================================
+
         plugin_manager = PluginManager(
-            client
+            client,
+            transport=client_manager.get_transport(),
         )
 
         await plugin_manager.load_all_plugins(
             run_startup=run_startup,
         )
+
         await plugin_manager.enable_all_plugins()
 
         print(
             "✅ ربات با موفقیت اجرا شد."
         )
+
         print(
             "⏳ ربات در حال انتظار برای رویدادهاست..."
         )
+
+        # =====================================================
+        # RUNTIME
+        # =====================================================
 
         run_task = asyncio.create_task(
             client.run_until_disconnected()
@@ -63,29 +68,40 @@ async def run_bot(
         )
 
         done, pending = await asyncio.wait(
-    {
-        run_task,
-        shutdown_task,
-    },
-    return_when=asyncio.FIRST_COMPLETED,
-)
+            {
+                run_task,
+                shutdown_task,
+            },
+            return_when=asyncio.FIRST_COMPLETED,
+        )
 
         for task in pending:
             task.cancel()
 
         if pending:
+
             await asyncio.gather(
                 *pending,
                 return_exceptions=True,
             )
 
+        # =====================================================
+        # INTENTIONAL SHUTDOWN
+        # =====================================================
+
         if shutdown_task in done:
+
             print(
                 "🔌 در حال خاموش‌سازی امن ربات..."
             )
 
             try:
-                await client.disconnect()
+
+                result = client.disconnect()
+
+                if asyncio.iscoroutine(result):
+                    await result
+
             except Exception:
                 traceback.print_exc()
 
@@ -94,31 +110,37 @@ async def run_bot(
 
             try:
                 await run_task
+
             except BaseException:
                 pass
 
             return True
 
-        # اتصال خودش قطع شده.
-        await run_task
+        # =====================================================
+        # UNEXPECTED DISCONNECT
+        # =====================================================
 
         return False
 
     finally:
+
         if plugin_manager is not None:
-          
+
             try:
                 await plugin_manager.disable_all_plugins()
+
             except Exception:
                 traceback.print_exc()
 
             try:
                 await plugin_manager.db.close()
+
             except Exception:
                 traceback.print_exc()
 
         try:
             await client_manager.stop()
+
         except Exception:
             traceback.print_exc()
 

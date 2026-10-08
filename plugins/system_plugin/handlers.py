@@ -269,6 +269,7 @@ def _utf16_length(text: str) -> int:
     permission="everyone",
     chat_type="all",
     description="❓لیست کامندهای قابل استفاده را نشان می‌دهد.",
+    native_name="help",
 )
 async def show_help(
     self: "SystemPlugin",
@@ -298,9 +299,6 @@ async def show_help(
     elif is_admin_user:
         allowed_permissions = {"everyone", "admin"}
 
-    elif is_admin_user:
-        allowed_permissions = {"everyone", "admin"}
-
     else:
         allowed_permissions = {"everyone"}
 
@@ -310,7 +308,12 @@ async def show_help(
         if cmd.permission in allowed_permissions
     ]
 
-    commands.sort(key=lambda cmd: cmd.name)
+    commands.sort(
+        key=lambda cmd:
+            self.command_manager.get_display_name(
+                cmd
+            )
+    )
 
     if not commands:
         await event.reply("📖 هیچ کامندی برای نمایش وجود ندارد.")
@@ -338,7 +341,17 @@ async def show_help(
     page_commands = commands[start:end]
 
     lines = [
-        f"`!{cmd.name}`\n{cmd.description or 'بدون توضیح'}"
+        (
+            self.command_usage(
+                cmd,
+                event=event
+            )
+            + "\n"
+            + (
+                cmd.description
+                or "بدون توضیح"
+            )
+        )
         for cmd in page_commands
     ]
 
@@ -347,17 +360,17 @@ async def show_help(
         + "\n\n".join(lines)
     )
 
-    if total_pages > 1:
-        text += (
-            "\n\n"
-            f"📄 برای صفحه بعد: `!راهنما {page + 1}`"
-            if page < total_pages
-            else
-            "\n\n"
-            f"📄 برای صفحه قبل: `!راهنما {page - 1}`"
-        )
+    controls = self.ui.pagination(
+        command_or_name=event.command,
+        current=page,
+        total=total_pages,
+    )
 
-    await event.reply(text)
+    await self.ui.reply(
+        event,
+        text,
+        controls=controls,
+    )
 
 
 
@@ -366,6 +379,7 @@ async def show_help(
     permission="admin",
     chat_type="group",
     description="لیست ادمین‌های گروه را نشان می‌دهد.",
+    native_name="admins",
 )
 async def list_admins(
     self: "SystemPlugin",
@@ -412,6 +426,7 @@ async def list_admins(
     permission="owner",
     chat_type="all",
     description="🔄 وجود پلاگین جدید یا نسخه‌ی جدید پلاگین‌ها را بررسی می‌کند.",
+    native_name="plugin_check",
 )
 async def plugin_update_check(
     self: "SystemPlugin",
@@ -475,6 +490,7 @@ async def plugin_update_check(
     permission="owner",
     chat_type="all",
     description="🔗 اتصال ربات به مخزن GitHub را بررسی می‌کند.",
+    native_name="github_check",
 )
 async def github_check(
     self: "SystemPlugin",
@@ -522,6 +538,7 @@ async def on_startup(
     permission="owner",
     chat_type="all",
     description="💾 یک نسخه از دیتابیس را در GitHub ذخیره می‌کند.",
+    native_name="database_backup",
 )
 async def database_backup(
     self: "SystemPlugin",
@@ -549,6 +566,7 @@ async def database_backup(
     permission="owner",
     chat_type="all",
     description="♻️ دیتابیس را از آخرین بکاپ GitHub بازیابی می‌کند.",
+    native_name="database_restore",
 )
 async def database_restore(
     self: "SystemPlugin",
@@ -595,6 +613,7 @@ async def database_restore(
     permission="owner",
     chat_type="all",
     description="📦 لیست پلاگین‌های نصب‌شده و نسخه‌ی آن‌ها را نشان می‌دهد.",
+    native_name="plugins",
 )
 async def list_plugins(
     self: "SystemPlugin",
@@ -623,17 +642,24 @@ async def list_plugins(
     permission="owner",
     chat_type="all",
     description="📥 یک پلاگین را از GitHub دریافت و در runtime فعال می‌کند.",
+    native_name="plugin_install",
 )
 async def plugin_install(
     self: "SystemPlugin",
     event: events.NewMessage.Event,
 ) -> None:
     if not event.args:
+
         await event.reply(
             "❌ شناسه‌ی پلاگین را وارد کن.\n"
             "مثال:\n"
-            "`!پلاگین دریافت message_manager`"
+            + self.command_usage(
+                event.command,
+                "message_manager",
+                event=event,
+            )
         )
+        
         return
 
     plugin_id = event.args[0]
@@ -669,6 +695,7 @@ async def plugin_install(
     permission="owner",
     chat_type="all",
     description="🔄 یک پلاگین را در runtime به‌روزرسانی می‌کند.",
+    native_name="plugin_update",
 )
 async def plugin_update(
     self: "SystemPlugin",
@@ -678,7 +705,11 @@ async def plugin_update(
         await event.reply(
             "❌ شناسه‌ی پلاگین را وارد کن.\n"
             "مثال:\n"
-            "`!پلاگین آپدیت violation_manager`"
+            + self.command_usage(
+                event.command,
+                "violation_manager",
+                event=event,
+            )
         )
         return
 

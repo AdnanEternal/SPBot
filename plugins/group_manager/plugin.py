@@ -5,7 +5,7 @@ from core.base_plugin import BasePlugin
 
 class GroupManagerPlugin(BasePlugin):
     name = "Group Manager"
-    version = "1.0.0"
+    version = "1.1.0"
 
     def __init__(
         self,
@@ -23,4 +23,6 @@ class GroupManagerPlugin(BasePlugin):
         )
 
     group_stats = handlers.group_stats
+    join_group = handlers.join_group
     on_message = handlers.on_message
+    

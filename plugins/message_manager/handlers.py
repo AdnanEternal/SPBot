@@ -27,13 +27,21 @@ MEOW_RESPONSES = [
     permission="admin",
     chat_type="group",
     description="🧹 پاکسازی دسته‌جمعی پیام‌های اخیر",
+    native_name="clear",
 )
 async def clear_messages(
     self: "MessageManagerPlugin",
     event: events.NewMessage.Event,
 ) -> None:
     if not event.args:
-        await event.reply("مثال: !پاکسازی 20")
+        await event.reply(
+            "مثال: "
+            + self.command_usage(
+                event.command,
+                "20",
+                event=event,
+            )
+        )
         return
 
     count_text = event.args[0]

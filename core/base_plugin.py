@@ -29,12 +29,28 @@ class BasePlugin:
         self.command_manager = command_manager
         self.db = db
         self.event_bus = event_bus
+        self.ui = None
         self.enabled = False
         self.config = config
 
         self._event_handlers: list[tuple[Callable, Any]] = []
         self._bus_listeners: list[tuple[str, Callable]] = []
 
+    
+    def command_usage(
+        self,
+        command_or_name,
+        args_text: str = "",
+        *,
+        event=None,
+    ) -> str:
+
+        return self.command_manager.format_command(
+            command_or_name,
+            args_text,
+            event=event,
+        )
+    
     def _wrap_event_handler(
         self,
         handler: Callable,
@@ -106,6 +122,9 @@ class BasePlugin:
                     description=command_info.get(
                         "description",
                         "",
+                    ),
+                    native_name=command_info.get(
+                        "native_name"
                     ),
                     plugin=self,
                 )

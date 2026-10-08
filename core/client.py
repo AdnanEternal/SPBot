@@ -1,97 +1,95 @@
-import asyncio
-
-from splusthon import SoroushClient
-from splusthon.sessions import StringSession
+from config import config
+from core.transport import BaseTransport
+from core.transports.soroush_bot import SoroushBotTransport
+from core.transports.soroush_userbot import SoroushUserbotTransport
 
 
 class ClientManager:
-    START_TIMEOUT = 60
-    STOP_TIMEOUT = 20
+    """
+    Runtime boundary for Soroush authentication.
 
-    def __init__(self, session_string: str | None = None):
-        self.session_string = session_string
+    The distinction between UserBot and Standard Bot is resolved here.
+    main.py, Core services and plugins only receive the same SoroushClient.
+    """
 
-        if not self.session_string:
+    def __init__(self):
+        mode = (
+            config.get("SPBOT_MODE", "")
+            or ""
+        ).strip().lower()
+
+        session_string = (
+            config.get("SESSION_STRING", "")
+            or ""
+        ).strip()
+
+        bot_token = (
+            config.get("BOT_TOKEN", "")
+            or ""
+        ).strip()
+
+        # Explicit mode always wins.
+        if mode in {"user", "userbot"}:
+            self.transport: BaseTransport = (
+                SoroushUserbotTransport(
+                    session_string
+                )
+            )
+
+        elif mode in {
+            "bot",
+            "standard",
+            "standardbot",
+        }:
+            self.transport = (
+                SoroushBotTransport(
+                    bot_token
+                )
+            )
+
+        elif mode in {"", "auto"}:
+            # Auto mode is intentionally conservative:
+            # if only one credential is present, use it.
+            if session_string and not bot_token:
+                self.transport = (
+                    SoroushUserbotTransport(
+                        session_string
+                    )
+                )
+
+            elif bot_token and not session_string:
+                self.transport = (
+                    SoroushBotTransport(
+                        bot_token
+                    )
+                )
+
+            elif session_string and bot_token:
+                raise ValueError(
+                    "❌ هم SESSION_STRING و هم BOT_TOKEN تنظیم شده‌اند. "
+                    "SPBOT_MODE را صریحاً روی userbot یا bot قرار دهید."
+                )
+
+            else:
+                raise ValueError(
+                    "❌ هیچ اعتبارنامه‌ای برای سروش تنظیم نشده است. "
+                    "SESSION_STRING یا BOT_TOKEN را تنظیم کنید."
+                )
+
+        else:
             raise ValueError(
-                "❌ SESSION_STRING یافت نشد! "
-                "لطفاً آن را در محیط سرور تنظیم کنید."
+                "❌ SPBOT_MODE نامعتبر است. "
+                "مقادیر مجاز: auto، userbot یا bot"
             )
-
-        self.client: SoroushClient | None = None
-
-    async def _disconnect_quietly(
-        self,
-        client: SoroushClient,
-    ) -> None:
-        try:
-            await asyncio.wait_for(
-                client.disconnect(),
-                timeout=self.STOP_TIMEOUT,
-            )
-        except Exception:
-            pass
 
     async def start(self):
-        if self.client is not None:
-            return self.client
-
-        client = SoroushClient(
-            StringSession(self.session_string)
-        )
-
-        self.client = client
-
-        try:
-            await asyncio.wait_for(
-                client.start(),
-                timeout=self.START_TIMEOUT,
-            )
-
-            print("✅ ربات به سروش متصل شد.")
-            return client
-
-        except asyncio.CancelledError:
-            await self._disconnect_quietly(client)
-            self.client = None
-            raise
-
-        except Exception as exc:
-            print(
-                f"❌ خطا در اتصال به سروش: {exc}"
-            )
-
-            await self._disconnect_quietly(client)
-            self.client = None
-
-            return None
+        return await self.transport.start()
 
     async def stop(self):
-        """
-        اتصال را به‌صورت امن و با timeout می‌بندد.
-        """
-        client = self.client
-        self.client = None
-
-        if client is None:
-            return
-
-        try:
-            await asyncio.wait_for(
-                client.disconnect(),
-                timeout=self.STOP_TIMEOUT,
-            )
-
-            print("🔌 اتصال به سروش قطع شد.")
-
-        except asyncio.TimeoutError:
-            print(
-                "⚠️ قطع اتصال سروش بیش از حد طول کشید."
-            )
-
-        except Exception as exc:
-            print(
-                f"⚠️ خطا هنگام قطع اتصال سروش: {exc}"
-            )
+        await self.transport.stop()
 
     def get_client(self):
-        return self.client
+        return self.transport.get_client()
+
+    def get_transport(self) -> BaseTransport:
+        return self.transport

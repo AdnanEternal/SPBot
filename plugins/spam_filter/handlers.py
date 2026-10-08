@@ -119,6 +119,7 @@ async def _resolve_spam_group_target(
     permission="admin",
     chat_type="all",
     description="معافیت کاربر را حذف می‌کند.",
+    native_name="spam_unexempt",
 )
 async def remove_whitelist(
     self: "SpamFilterPlugin",
@@ -163,6 +164,7 @@ async def remove_whitelist(
     permission="admin",
     chat_type="all",
     description="یک کاربر را از Spam Filter معاف می‌کند.",
+    native_name="spam_exempt",
 )
 async def add_whitelist(
     self: "SpamFilterPlugin",
@@ -211,6 +213,7 @@ async def add_whitelist(
     permission="admin",
     chat_type="all",
     description="لیست کاربران معاف را نشان می‌دهد.",
+    native_name="spam_exemptions",
 )
 async def list_whitelist(
     self: "SpamFilterPlugin",
@@ -259,6 +262,7 @@ async def list_whitelist(
     permission="admin",
     chat_type="group",
     description="تنظیم فلاد.",
+    native_name="spam_flood",
 )
 async def set_flood(
     self: "SpamFilterPlugin",
@@ -274,7 +278,12 @@ async def set_flood(
         )
     ):
         await event.reply(
-            "مثال: !اسپم فلاد 5 10"
+            "مثال: "
+            + self.command_usage(
+                event.command,
+                "5 10",
+                event=event,
+            )
         )
         return
 
@@ -298,6 +307,7 @@ async def set_flood(
     permission="admin",
     chat_type="group",
     description="تنظیم تکرار.",
+    native_name="spam_repeat",
 )
 async def set_max_repeat(
     self: "SpamFilterPlugin",
@@ -307,7 +317,12 @@ async def set_max_repeat(
 
     if not value.isdigit():
         await event.reply(
-            "مثال: !اسپم تکرار 3"
+            "مثال: "
+            + self.command_usage(
+                event.command,
+                "3",
+                event=event,
+            )
         )
         return
 
@@ -326,6 +341,7 @@ async def set_max_repeat(
     permission="admin",
     chat_type="group",
     description="تنظیمات Spam Filter.",
+    native_name="spam_settings",
 )
 async def show_settings(
     self: "SpamFilterPlugin",
@@ -350,6 +366,7 @@ async def show_settings(
     permission="owner",
     chat_type="all",
     description="یک عبارت ممنوع به Rule Engine اضافه می‌کند.",
+    native_name="spam_forbidden_add",
 )
 async def add_forbidden_rule(
     self: "SpamFilterPlugin",
@@ -396,6 +413,7 @@ async def add_forbidden_rule(
     permission="owner",
     chat_type="all",
     description="یک عبارت را از قوانین ممنوع مستثنی می‌کند.",
+    native_name="spam_allowed_add",
 )
 async def add_allowed_rule(
     self: "SpamFilterPlugin",
@@ -441,6 +459,7 @@ async def add_allowed_rule(
     permission="owner",
     chat_type="all",
     description="یک قانون ممنوع را حذف می‌کند.",
+    native_name="spam_forbidden_remove",
 )
 async def remove_forbidden_rule(
     self: "SpamFilterPlugin",
@@ -484,6 +503,7 @@ async def remove_forbidden_rule(
     permission="owner",
     chat_type="all",
     description="یک استثنا را حذف می‌کند.",
+    native_name="spam_allowed_remove",
 )
 async def remove_allowed_rule(
     self: "SpamFilterPlugin",
@@ -527,6 +547,7 @@ async def remove_allowed_rule(
     permission="owner",
     chat_type="all",
     description="تمام قوانین متنی را نشان می‌دهد.",
+    native_name="spam_rules",
 )
 async def list_text_rules(
     self: "SpamFilterPlugin",

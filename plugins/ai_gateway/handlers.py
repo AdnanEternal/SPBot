@@ -159,6 +159,7 @@ def mask_secret(secret):
     permission="owner",
     chat_type="all",
     description="گروه فعلی را به مقصد Live Telemetry هوش مصنوعی متصل می‌کند.",
+    native_name="ai_telemetry",
 )
 async def ai_telemetry_streamer(
     self,
@@ -219,14 +220,25 @@ async def ai_telemetry_streamer(
     # -------------------------------------------------
 
     if action:
-
         await event.reply(
             "❌ استفاده نادرست.\n\n"
-            "!استریمر هوش مصنوعی\n"
-            "!استریمر هوش مصنوعی وضعیت\n"
-            "!استریمر هوش مصنوعی خاموش"
+            + self.command_usage(
+                event.command,
+                event=event,
+            )
+            + "\n"
+            + self.command_usage(
+                event.command,
+                "وضعیت",
+                event=event,
+            )
+            + "\n"
+            + self.command_usage(
+                event.command,
+                "خاموش",
+                event=event,
+            )
         )
-
         return
 
     # -------------------------------------------------
@@ -272,6 +284,7 @@ async def ai_telemetry_streamer(
     permission="owner",
     chat_type="all",
     description="یک AI Provider جدید اضافه می‌کند.",
+    native_name="provider_add",
 )
 async def add_provider(
     self,
@@ -285,11 +298,18 @@ async def add_provider(
         await event.reply(
             "❌ استفاده نادرست.\n\n"
             "فرمت:\n"
-            "!ارائه دهنده افزودن "
-            "<نام> <provider> <base_url> [models_url]\n\n"
+            + self.command_usage(
+                "ارائه دهنده افزودن",
+                "<نام> <provider> <base_url> [models_url]",
+                event=event,
+            )
+            + "\n\n"
             "مثال:\n"
-            "!ارائه دهنده افزودن gemini "
-            "openai https://example.com/v1"
+            + self.command_usage(
+                "ارائه دهنده افزودن",
+                "gemini openai https://example.com/v1",
+                event=event,
+            )
         )
         return
 
@@ -337,6 +357,7 @@ async def add_provider(
     permission="owner",
     chat_type="all",
     description="لیست AI Providerها را نشان می‌دهد.",
+    native_name="providers",
 )
 async def list_providers(
     self,
@@ -396,6 +417,7 @@ async def list_providers(
     permission="owner",
     chat_type="all",
     description="اطلاعات کامل یک Provider را نشان می‌دهد.",
+    native_name="provider_info",
 )
 async def provider_info(
     self,
@@ -407,7 +429,12 @@ async def provider_info(
 
     if not name:
         await event.reply(
-            "مثال: !ارائه دهنده اطلاعات gemini"
+            "مثال: "
+            + self.command_usage(
+                event.command,
+                "gemini",
+                event=event,
+            )
         )
         return
 
@@ -491,6 +518,7 @@ async def provider_info(
     permission="owner",
     chat_type="all",
     description="تنظیمات اتصال یک Provider را تغییر می‌دهد.",
+    native_name="provider_set",
 )
 async def update_provider(
     self,
@@ -504,8 +532,11 @@ async def update_provider(
         await event.reply(
             "❌ استفاده نادرست.\n\n"
             "فرمت:\n"
-            "!ارائه دهنده تنظیم "
-            "<نام> <provider> <base_url> [models_url]"
+            + self.command_usage(
+                "ارائه دهنده تنظیم",
+                "<نام> <provider> <base_url> [models_url]",
+                event=event,
+            )
         )
         return
 
@@ -549,6 +580,7 @@ async def update_provider(
     permission="owner",
     chat_type="all",
     description="یک AI Provider را حذف می‌کند.",
+    native_name="provider_delete",
 )
 async def delete_provider(
     self,
@@ -560,7 +592,12 @@ async def delete_provider(
 
     if not name:
         await event.reply(
-            "مثال: !ارائه دهنده حذف gemini"
+            "مثال: "
+            + self.command_usage(
+                event.command,
+                "gemini",
+                event=event,
+            )
         )
         return
 
@@ -596,6 +633,7 @@ async def delete_provider(
     permission="owner",
     chat_type="all",
     description="یک API Key به Pool یک Provider اضافه می‌کند.",
+    native_name="provider_key_add",
 )
 async def add_provider_api_key(
     self,
@@ -608,7 +646,11 @@ async def add_provider_api_key(
     if len(args) != 2:
         await event.reply(
             "مثال:\n"
-            "!ارائه دهنده کلید افزودن gemini API_KEY"
+            + self.command_usage(
+                "ارائه دهنده کلید افزودن",
+                "gemini API_KEY",
+                event=event,
+            )
         )
         return
 
@@ -661,6 +703,7 @@ async def add_provider_api_key(
     permission="owner",
     chat_type="all",
     description="Pool کلیدهای یک Provider را نشان می‌دهد.",
+    native_name="provider_keys",
 )
 async def list_provider_api_keys(
     self,
@@ -672,7 +715,12 @@ async def list_provider_api_keys(
 
     if not provider_name:
         await event.reply(
-            "مثال: !ارائه دهنده کلید ها gemini"
+            "مثال: "
+            + self.command_usage(
+                event.command,
+                "gemini",
+                event=event,
+            )
         )
         return
 
@@ -726,6 +774,7 @@ async def list_provider_api_keys(
     permission="owner",
     chat_type="all",
     description="کلید فعال Pool یک Provider را مشخص می‌کند.",
+    native_name="provider_key_activate",
 )
 async def activate_provider_api_key(
     self,
@@ -738,7 +787,11 @@ async def activate_provider_api_key(
     if len(args) != 2:
         await event.reply(
             "مثال:\n"
-            "!ارائه دهنده کلید فعال gemini 2"
+            + self.command_usage(
+                "ارائه دهنده کلید فعال",
+                "gemini 2",
+                event=event,
+            )
         )
         return
 
@@ -794,6 +847,7 @@ async def activate_provider_api_key(
     permission="owner",
     chat_type="all",
     description="یک API Key از Pool Provider را تغییر می‌دهد.",
+    native_name="provider_key_set",
 )
 async def update_provider_api_key(
     self,
@@ -806,7 +860,11 @@ async def update_provider_api_key(
     if len(args) != 3:
         await event.reply(
             "مثال:\n"
-            "!ارائه دهنده کلید gemini 2 API_KEY"
+            + self.command_usage(
+                "ارائه دهنده کلید",
+                "gemini 2 API_KEY",
+                event=event,
+            )
         )
         return
 
@@ -868,6 +926,7 @@ async def update_provider_api_key(
     permission="owner",
     chat_type="all",
     description="یک API Key را از Pool Provider حذف می‌کند.",
+    native_name="provider_key_delete",
 )
 async def delete_provider_api_key(
     self,
@@ -880,7 +939,11 @@ async def delete_provider_api_key(
     if len(args) != 2:
         await event.reply(
             "مثال:\n"
-            "!ارائه دهنده کلید حذف gemini 2"
+            + self.command_usage(
+                "ارائه دهنده کلید حذف",
+                "gemini 2",
+                event=event,
+            )
         )
         return
 
@@ -935,6 +998,7 @@ async def delete_provider_api_key(
     permission="owner",
     chat_type="all",
     description="مدل‌های موجود روی API یک Provider را می‌گیرد.",
+    native_name="provider_models",
 )
 async def provider_remote_models(
     self,
@@ -946,7 +1010,12 @@ async def provider_remote_models(
 
     if not provider_name:
         await event.reply(
-            "مثال: !ارائه دهنده مدل ها gemini"
+            "مثال: "
+            + self.command_usage(
+                event.command,
+                "gemini",
+                event=event,
+            )
         )
         return
 
@@ -1012,6 +1081,7 @@ async def provider_remote_models(
     permission="owner",
     chat_type="all",
     description="آمار و امتیازهای یک مدل را نشان می‌دهد.",
+    native_name="model_stats",
 )
 async def model_statistics(
     self,
@@ -1025,7 +1095,11 @@ async def model_statistics(
         await event.reply(
             "❌ نام مدل را وارد کن.\n"
             "مثال:\n"
-            "!مدل آمار <model_name>"
+            + self.command_usage(
+                "مدل آمار",
+                "<model_name>",
+                event=event,
+            )
         )
         return
 
@@ -1130,6 +1204,7 @@ async def model_statistics(
     permission="owner",
     chat_type="all",
     description="امتیاز رضایت Owner از یک مدل را تنظیم می‌کند.",
+    native_name="model_score",
 )
 async def set_model_owner_score(
     self,
@@ -1143,7 +1218,11 @@ async def set_model_owner_score(
         await event.reply(
             "❌ استفاده نادرست.\n"
             "مثال:\n"
-            "!امتیاز مدل gemini38flash 95"
+            + self.command_usage(
+                "امتیاز مدل",
+                "gemini38flash 95",
+                event=event,
+            )
         )
         return
 
@@ -1209,6 +1288,7 @@ async def set_model_owner_score(
     permission="owner",
     chat_type="all",
     description="تمام حافظه و خلاصه‌ی بوبی در این گروه را پاک می‌کند.",
+    native_name="memory_clear",
 )
 async def clear_memory(
     self,
@@ -1223,22 +1303,27 @@ async def clear_memory(
         event
     )
 
-    if target_group is None:
-        await event.reply(
-            "❌ گروه هدف مشخص نشده.\n"
-            "مثال:\n"
-            "!حافظه پاک -10024473944"
+    await event.reply(
+        "❌ گروه هدف مشخص نشده.\n"
+        "مثال:\n"
+        + self.command_usage(
+            "حافظه پاک",
+            "-10024473944",
+            event=event,
         )
-        return
+    )
 
     # برای این کامند نباید آرگومان دیگری وجود داشته باشد.
     if value:
         await event.reply(
             "❌ استفاده نادرست.\n"
             "مثال:\n"
-            "!حافظه پاک -10024473944"
+            + self.command_usage(
+                "حافظه پاک",
+                "-10024473944",
+                event=event,
+            )
         )
-        return
 
     try:
         await self.memory.store.clear_group(
@@ -1267,6 +1352,7 @@ async def clear_memory(
     permission="owner",
     chat_type="all",
     description="حداکثر تعداد توکن حافظه مکالمه این گروه را تنظیم می‌کند.",
+    native_name="memory_limit",
 )
 async def memory_limit(
     self,
@@ -1281,13 +1367,15 @@ async def memory_limit(
         event
     )
 
-    if target_group is None:
-        await event.reply(
-            "❌ گروه هدف مشخص نشده.\n"
-            "مثال:\n"
-            "!حافظه 8000 -10024473944"
+    await event.reply(
+        "❌ استفاده نادرست.\n"
+        "مثال:\n"
+        + self.command_usage(
+            "حافظه پاک",
+            "-10024473944",
+            event=event,
         )
-        return
+    )
 
     if not value:
         limit = (
@@ -1306,9 +1394,17 @@ async def memory_limit(
     if not value.isdigit():
         await event.reply(
             "مثال:\n"
-            "!حافظه 8000\n"
-            "یا:\n"
-            "!حافظه 8000 -10024473944"
+            + self.command_usage(
+                "حافظه",
+                "8000",
+                event=event,
+            )
+            + "\nیا:\n"
+            + self.command_usage(
+                "حافظه",
+                "8000 -10024473944",
+                event=event,
+            )
         )
         return
 
@@ -1337,6 +1433,7 @@ async def memory_limit(
     permission="owner",
     chat_type="all",
     description="حداکثر تعداد پیام ذخیره‌شده حافظه این گروه را تنظیم می‌کند.",
+    native_name="memory_messages",
 )
 async def memory_message_limit(
     self,
@@ -1355,7 +1452,11 @@ async def memory_message_limit(
         await event.reply(
             "❌ گروه هدف مشخص نشده.\n"
             "مثال:\n"
-            "!حافظه پیام 500 -10024473944"
+            + self.command_usage(
+                "حافظه پیام",
+                "500 -10024473944",
+                event=event,
+            )
         )
         return
 
@@ -1376,9 +1477,17 @@ async def memory_message_limit(
     if not value.isdigit():
         await event.reply(
             "مثال:\n"
-            "!حافظه پیام 500\n"
-            "یا:\n"
-            "!حافظه پیام 500 -10024473944"
+            + self.command_usage(
+                event.command,
+                "500",
+                event=event,
+            )
+            + "\nیا:\n"
+            + self.command_usage(
+                event.command,
+                "500 -10024473944",
+                event=event,
+            )
         )
         return
 
@@ -1415,6 +1524,7 @@ async def memory_message_limit(
     permission="owner",
     chat_type="all",
     description="یک Model را به Provider متصل می‌کند.",
+    native_name="model_add",
 )
 async def add_model(
     self,
@@ -1428,10 +1538,18 @@ async def add_model(
         await event.reply(
             "❌ استفاده نادرست.\n\n"
             "فرمت:\n"
-            "!مدل افزودن <نام_مدل> <Provider> <Model_ID>\n\n"
+            + self.command_usage(
+                "مدل افزودن",
+                "<نام_مدل> <Provider> <Model_ID>",
+                event=event,
+            )
+            + "\n\n"
             "مثال:\n"
-            "!مدل افزودن gemini38flash "
-            "gemini gemini-3.8-flash"
+            + self.command_usage(
+                "مدل افزودن",
+                "gemini38flash gemini gemini-3.8-flash",
+                event=event,
+            )
         )
         return
 
@@ -1481,6 +1599,7 @@ async def add_model(
     permission="owner",
     chat_type="all",
     description="لیست مدل ها",
+    native_name="models",
 )
 async def list_models(
     self,
@@ -1512,6 +1631,7 @@ async def list_models(
     permission="owner",
     chat_type="all",
     description="فعال کردن یا دیدن مدل فعال",
+    native_name="model_activate",
 )
 async def activate_model(
     self,
@@ -1553,6 +1673,7 @@ async def activate_model(
     permission="owner",
     chat_type="group",
     description="مدل ترجیحی این گروه را تنظیم می‌کند.",
+    native_name="group_model",
 )
 async def activate_group_model(
     self,
@@ -1674,6 +1795,7 @@ async def activate_group_model(
     permission="owner",
     chat_type="all",
     description="حذف مدل",
+    native_name="model_delete",
 )
 async def delete_model(
     self,
@@ -1685,7 +1807,12 @@ async def delete_model(
 
     if not name:
         await event.reply(
-            "مثال: !مدل حذف gpt"
+            "مثال:\n"
+            + self.command_usage(
+                "مدل حذف",
+                "gpt",
+                event=event,
+            )
         )
         return
 
@@ -1706,6 +1833,7 @@ async def delete_model(
     permission="owner",
     chat_type="all",
     description="جزئیات Model و Provider مربوط به آن",
+    native_name="model_info",
 )
 async def model_info(
     self,
@@ -1793,6 +1921,7 @@ async def model_info(
     permission="owner",
     chat_type="all",
     description="تست مدل ها",
+    native_name="model_ping",
 )
 async def ping_models(
     self,
@@ -1869,6 +1998,7 @@ async def ping_models(
     permission="owner",
     chat_type="all",
     description="دیدن System Prompt",
+    native_name="prompt",
 )
 async def show_prompt(
     self,
@@ -1887,6 +2017,7 @@ async def show_prompt(
     permission="owner",
     chat_type="all",
     description="تغییر System Prompt",
+    native_name="prompt_set",
 )
 async def set_prompt(
     self,
@@ -1898,7 +2029,12 @@ async def set_prompt(
 
     if not prompt:
         await event.reply(
-            "مثال: !پرامپت تنظیم تو بوبی هستی"
+            "مثال: "
+            + self.command_usage(
+                event.command,
+                "تو بوبی هستی",
+                event=event,
+            )
         )
         return
 
@@ -1917,6 +2053,7 @@ async def set_prompt(
     permission="owner",
     chat_type="all",
     description="بازگردانی System Prompt",
+    native_name="prompt_reset",
 )
 async def reset_prompt(
     self,
@@ -1936,6 +2073,7 @@ async def reset_prompt(
     permission="owner",
     chat_type="all",
     description="دیدن یا تغییر Trigger",
+    native_name="bot_name",
 )
 async def bot_name(
     self,
@@ -1975,6 +2113,7 @@ async def bot_name(
     permission="owner",
     chat_type="all",
     description="تنظیم سراسری Timeline هوش مصنوعی",
+    native_name="timeline",
 )
 async def timeline_toggle(
     self,
@@ -1996,9 +2135,18 @@ async def timeline_toggle(
             f"📦 سقف هر گروه: "
             f"{self.timeline_limit} پیام\n\n"
             "روشن کردن:\n"
-            "!تایم لاین روشن 200\n\n"
+            + self.command_usage(
+                event.command,
+                "روشن 200",
+                event=event,
+            )
+            + "\n\n"
             "خاموش کردن:\n"
-            "!تایم لاین خاموش"
+            + self.command_usage(
+                event.command,
+                "خاموش",
+                event=event,
+            )
         )
         return
 
@@ -2021,7 +2169,11 @@ async def timeline_toggle(
                 await event.reply(
                     "❌ مقدار تعداد پیام نامعتبر است.\n"
                     "مثال:\n"
-                    "!تایم لاین روشن 200"
+                    + self.command_usage(
+                        event.command,
+                        "روشن 200",
+                        event=event,
+                    )
                 )
                 return
 
@@ -2083,9 +2235,18 @@ async def timeline_toggle(
     await event.reply(
         "❌ استفاده نادرست.\n\n"
         "برای روشن کردن:\n"
-        "!تایم لاین روشن 200\n\n"
+        + self.command_usage(
+            event.command,
+            "روشن 200",
+            event=event,
+        )
+        + "\n\n"
         "برای خاموش کردن:\n"
-        "!تایم لاین خاموش"
+        + self.command_usage(
+            event.command,
+            "خاموش",
+            event=event,
+        )
     )
 
 
@@ -2094,6 +2255,7 @@ async def timeline_toggle(
     permission="owner",
     chat_type="all",
     description="حداکثر تعداد کاراکتر Timeline را تنظیم می‌کند.",
+    native_name="timeline_limit",
 )
 async def maximum_timeline_chars(
     self,
@@ -2120,7 +2282,11 @@ async def maximum_timeline_chars(
         await event.reply(
             "❌ مقدار نامعتبر است.\n\n"
             "مثال:\n"
-            "!حداکثر کراکتر تایم لاین 26000"
+            + self.command_usage(
+                event.command,
+                "26000",
+                event=event,
+            )
         )
         return
 
@@ -2161,6 +2327,7 @@ async def maximum_timeline_chars(
     permission="owner",
     chat_type="all",
     description="Timeline گروه را نمایش می‌دهد.",
+    native_name="timeline_show",
 )
 async def show_timeline(
     self,
@@ -2183,9 +2350,17 @@ async def show_timeline(
         await event.reply(
             "❌ استفاده نادرست.\n"
             "داخل گروه:\n"
-            "!نمایش تایم لاین\n\n"
+            + self.command_usage(
+                event.command,
+                event=event,
+            )
+            + "\n\n"
             "برای گروه دیگر:\n"
-            "!نمایش تایم لاین -10024473944"
+            + self.command_usage(
+                event.command,
+                "-10024473944",
+                event=event,
+            )
         )
         return
 
@@ -2221,7 +2396,11 @@ async def show_timeline(
             await event.reply(
                 "❌ در PV باید شناسه گروه را وارد کنید.\n"
                 "مثال:\n"
-                "!نمایش تایم لاین -10024473944"
+                + self.command_usage(
+                    event.command,
+                    "-10024473944",
+                    event=event,
+                )
             )
             return
 
@@ -2300,6 +2479,7 @@ async def show_timeline(
     permission="owner",
     chat_type="all",
     description="Timeline گروه را از RAM پاک می‌کند.",
+    native_name="timeline_clear",
 )
 async def clear_timeline_command(
     self,
@@ -2320,9 +2500,17 @@ async def clear_timeline_command(
         await event.reply(
             "❌ استفاده نادرست.\n"
             "داخل گروه:\n"
-            "!پاک تایم لاین\n\n"
+            + self.command_usage(
+                event.command,
+                event=event,
+            )
+            + "\n\n"
             "برای گروه دیگر:\n"
-            "!پاک تایم لاین -10024473944"
+            + self.command_usage(
+                event.command,
+                "-10024473944",
+                event=event,
+            )
         )
         return
 
@@ -2357,7 +2545,11 @@ async def clear_timeline_command(
         await event.reply(
             "❌ در PV باید شناسه گروه را وارد کنید.\n"
             "مثال:\n"
-            "!پاک تایم لاین -10024473944"
+            + self.command_usage(
+                event.command,
+                "-10024473944",
+                event=event,
+            )
         )
         return
 
@@ -2383,6 +2575,7 @@ async def clear_timeline_command(
     permission="owner",
     chat_type="all",
     description="Timelineهای موجود در RAM را نشان می‌دهد.",
+    native_name="timeline_cache",
 )
 async def show_cached_timelines(
     self,
@@ -2448,6 +2641,7 @@ async def show_cached_timelines(
     permission="owner",
     chat_type="all",
     description="تعداد مشخصی از پیام‌های اخیر را در Timeline آماده می‌کند.",
+    native_name="history",
 )
 async def load_timeline(
     self,
@@ -2478,7 +2672,11 @@ async def load_timeline(
             await event.reply(
                 "❌ در PV باید شناسه گروه را وارد کنید.\n"
                 "مثال:\n"
-                "!تاریخچه 200 -10024473944"
+                + self.command_usage(
+                    event.command,
+                    "200 -10024473944",
+                    event=event,
+                )
             )
             return
 
@@ -2499,9 +2697,18 @@ async def load_timeline(
     if not args_text.isdigit():
         await event.reply(
             "مثال:\n"
-            "!تاریخچه 200\n"
+            + self.command_usage(
+                event.command,
+                "200",
+                event=event,
+            )
+            + "\n"
             "یا:\n"
-            "!تاریخچه 200 -10024473944"
+            + self.command_usage(
+                event.command,
+                "200 -10024473944",
+                event=event,
+            )
         )
         return
 
@@ -2640,7 +2847,10 @@ async def on_message(
             event.raw_text or ""
         ).strip()
 
-        is_command = text.startswith("!")
+        is_command = (
+            self.command_manager
+            .is_command_message(text)
+        )
 
         # -------------------------------------------------
         # Trigger detection

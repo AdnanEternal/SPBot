@@ -499,6 +499,7 @@ async def _safe_reply(
     permission="admin",
     chat_type="group",
     description="سابقه تخلفات یک کاربر را پاک می‌کند.",
+    native_name="clear_record",
 )
 async def clear_record(
     self: "ViolationManagerPlugin",
@@ -560,6 +561,7 @@ async def clear_record(
     permission="admin",
     chat_type="group",
     description="لیست کاربران متخلف این گروه رو نشون می‌ده.",
+    native_name="violators",
 )
 async def list_violators(self: "ViolationManagerPlugin", event: events.NewMessage.Event) -> None:
     users = await self.violations.get_users(event.chat_id)
@@ -581,11 +583,19 @@ async def list_violators(self: "ViolationManagerPlugin", event: events.NewMessag
     permission="admin",
     chat_type="group",
     description="حداکثر تعداد تخلف مجاز قبل از مجازات خودکار رو تنظیم می‌کنه.",
+    native_name="max_violations",
 )
 async def set_max_violations(self: "ViolationManagerPlugin", event: events.NewMessage.Event) -> None:
     value = event.args_text.strip()
     if not value.isdigit() or int(value) <= 0:
-        await event.reply("مثال: !سقف تخلف 3")
+        await event.reply(
+            "مثال: "
+            + self.command_usage(
+                event.command,
+                "3",
+                event=event,
+            )
+        )
         return
 
     await self.settings.set_max_violations(event.chat_id, int(value))
@@ -597,6 +607,7 @@ async def set_max_violations(self: "ViolationManagerPlugin", event: events.NewMe
     permission="admin",
     chat_type="group",
     description="مجازات خودکار را روی میوت تنظیم می‌کند؛ بدون ساعت یعنی دائمی.",
+    native_name="punishment_mute",
 )
 async def set_punishment_mute(
     self,
@@ -648,6 +659,7 @@ async def set_punishment_mute(
     permission="admin",
     chat_type="group",
     description="مجازات خودکارِ این گروه رو بن می‌ذاره.",
+    native_name="punishment_ban",
 )
 async def set_punishment_ban(self: "ViolationManagerPlugin", event: events.NewMessage.Event) -> None:
     await self.settings.set_punishment_ban(event.chat_id)
@@ -659,6 +671,7 @@ async def set_punishment_ban(self: "ViolationManagerPlugin", event: events.NewMe
     permission="everyone",
     chat_type="group",
     description="تعداد تخلف‌های خودت تو این گروه رو نشون می‌ده.",
+    native_name="my_record",
 )
 async def my_record(self: "ViolationManagerPlugin", event: events.NewMessage.Event) -> None:
     count = await self.violations.get_count(event.chat_id, event.sender_id)
@@ -670,6 +683,7 @@ async def my_record(self: "ViolationManagerPlugin", event: events.NewMessage.Eve
     permission="everyone",
     chat_type="all",
     description="یه کاربر رو میوت می‌کنه؛ محلی برای ادمین و ریموت برای Owner.",
+    native_name="mute",
 )
 async def mute_command(
     self: "ViolationManagerPlugin",
@@ -688,10 +702,17 @@ async def mute_command(
             event,
             "مثال:\n"
             "داخل گروه:\n"
-            "!میوت @username\n"
-            "یا روی پیام کاربر ریپلای کن.\n\n"
-            "ریموت توسط Owner:\n"
-            "!میوت @username -100123456",
+            + self.command_usage(
+                event.command,
+                "@username",
+                event=event,
+            )
+            + "\nیا روی پیام کاربر ریپلای کن.\n\nریموت توسط Owner:\n"
+            + self.command_usage(
+                event.command,
+                "@username -100123456",
+                event=event,
+            )
         )
         return
 
@@ -709,9 +730,17 @@ async def mute_command(
                 event,
                 "❌ برای اجرای ریموت باید کاربر را مشخص کنی.\n"
                 "مثال:\n"
-                "!میوت 49245702 -100123456\n"
-                "یا:\n"
-                "!میوت @username -100123456",
+                + self.command_usage(
+                    event.command,
+                    "49245702 -100123456",
+                    event=event,
+                )
+                + "\nیا:\n"
+                + self.command_usage(
+                    event.command,
+                    "@username -100123456",
+                    event=event,
+                )
             )
             return
 
@@ -766,8 +795,13 @@ async def mute_command(
         if target is None:
             await _safe_reply(
                 event,
-                "مثال: !میوت @username\n"
-                "یا روی پیام شخص ریپلای کن.",
+                "مثال: "
+                + self.command_usage(
+                    event.command,
+                    "@username",
+                    event=event,
+                )
+                + "\nیا روی پیام شخص ریپلای کن."
             )
             return
 
@@ -844,7 +878,7 @@ async def mute_command(
     except Exception as exc:
 
         print(
-            "❌ خطای غیرمنتظره در !میوت:",
+            f"❌ خطای غیرمنتظره در {self.command_usage(event.command, event=event)}:",
             exc,
         )
 
@@ -867,6 +901,7 @@ async def mute_command(
     permission="everyone",
     chat_type="all",
     description="میوت یه کاربر رو برمی‌داره؛ محلی برای ادمین و ریموت برای Owner.",
+    native_name="unmute",
 )
 async def unmute_command(
     self: "ViolationManagerPlugin",
@@ -885,10 +920,17 @@ async def unmute_command(
             event,
             "مثال:\n"
             "داخل گروه:\n"
-            "!آنمیوت @username\n"
-            "یا روی پیام کاربر ریپلای کن.\n\n"
-            "ریموت توسط Owner:\n"
-            "!آنمیوت @username -100123456",
+            + self.command_usage(
+                event.command,
+                "@username",
+                event=event,
+            )
+            + "\nیا روی پیام کاربر ریپلای کن.\n\nریموت توسط Owner:\n"
+            + self.command_usage(
+                event.command,
+                "@username -100123456",
+                event=event,
+            )
         )
         return
 
@@ -959,8 +1001,13 @@ async def unmute_command(
         if target is None:
             await _safe_reply(
                 event,
-                "مثال: !آنمیوت @username\n"
-                "یا روی پیام شخص ریپلای کن.",
+                "مثال: "
+                + self.command_usage(
+                    event.command,
+                    "@username",
+                    event=event,
+                )
+                + "\nیا روی پیام شخص ریپلای کن."
             )
             return
 
@@ -1015,7 +1062,7 @@ async def unmute_command(
     except Exception as exc:
 
         print(
-            "❌ خطای غیرمنتظره در !آنمیوت:",
+            f"❌ خطای غیرمنتظره در {self.command_usage(event.command, event=event)}:",
             exc,
         )
 
@@ -1037,6 +1084,7 @@ async def unmute_command(
     permission="everyone",
     chat_type="all",
     description="یه کاربر رو بن می‌کنه؛ محلی برای ادمین و ریموت برای Owner.",
+    native_name="ban",
 )
 async def ban_command(
     self: "ViolationManagerPlugin",
@@ -1055,10 +1103,17 @@ async def ban_command(
             event,
             "مثال:\n"
             "داخل گروه:\n"
-            "!بن @username\n"
-            "یا روی پیام کاربر ریپلای کن.\n\n"
-            "ریموت توسط Owner:\n"
-            "!بن @username -100123456",
+            + self.command_usage(
+                event.command,
+                "@username",
+                event=event,
+            )
+            + "\nیا روی پیام کاربر ریپلای کن.\n\nریموت توسط Owner:\n"
+            + self.command_usage(
+                event.command,
+                "@username -100123456",
+                event=event,
+            )
         )
         return
 
@@ -1076,9 +1131,17 @@ async def ban_command(
                 event,
                 "❌ برای اجرای ریموت باید کاربر را مشخص کنی.\n"
                 "مثال:\n"
-                "!بن 49245702 -100123456\n"
-                "یا:\n"
-                "!بن @username -100123456",
+                + self.command_usage(
+                    event.command,
+                    "49245702 -100123456",
+                    event=event,
+                )
+                + "\nیا:\n"
+                + self.command_usage(
+                    event.command,
+                    "@username -100123456",
+                    event=event,
+                )
             )
             return
 
@@ -1133,8 +1196,13 @@ async def ban_command(
         if target is None:
             await _safe_reply(
                 event,
-                "مثال: !بن @username\n"
-                "یا روی پیام شخص ریپلای کن.",
+                "مثال: "
+                + self.command_usage(
+                    event.command,
+                    "@username",
+                    event=event,
+                )
+                + "\nیا روی پیام شخص ریپلای کن."
             )
             return
 
@@ -1201,7 +1269,7 @@ async def ban_command(
     except Exception as exc:
 
         print(
-            "❌ خطای غیرمنتظره در !بن:",
+            f"❌ خطای غیرمنتظره در {self.command_usage(event.command, event=event)}:",
             exc,
         )
 
@@ -1678,13 +1746,17 @@ async def on_punishment_request(
             if hours is None:
                 punishment_text = (
                     "🔇 مجازات: کاربر "
-                    f"به‌صورت دائمی میوت شد.\nبرای لغو این عمل از این دستور استفاده کنید:\n`آنمیوت {user_id}!`\n(توجه:علامت تعجب '!' باید اول دستور باشد)"
+                    "به‌صورت دائمی میوت شد.\n"
+                    "برای لغو این عمل از این دستور استفاده کنید: "
+                    f"{self.command_usage('آنمیوت', str(user_id), event=event)}"
                 )
 
             else:
                 punishment_text = (
                     "🔇 مجازات: کاربر میوت شد "
-                    f"({hours} ساعت).\nبرای لغو این عمل از این دستور استفاده کنید:\n`آنمیوت {user_id}!`\n(توجه:علامت تعجب '!' باید اول دستور باشد)"
+                    f"({hours} ساعت).\n"
+                    "برای لغو این عمل از این دستور استفاده کنید: "
+                    f"{self.command_usage('آنمیوت', str(user_id), event=event)}"
                     
                 )
 
@@ -1884,14 +1956,16 @@ async def on_violation(
                 punishment_text = (
                     "🔇 مجازات: کاربر "
                     "به‌صورت دائمی میوت شد.\n"
-                    f"برای لغو این دستور را بزنید: `!آنمیوت {user_id}`"
+                    "برای لغو این دستور را بزنید: "
+                    f"{self.command_usage('آنمیوت', str(user_id), event=event)}"
                 )
 
             else:
                 punishment_text = (
                     "🔇 مجازات: کاربر میوت شد "
                     f"({hours} ساعت).\n"
-                    f"برای لغو این دستور را بزنید: `!آنمیوت {user_id}`"
+                    "برای لغو این دستور را بزنید: "
+                    f"{self.command_usage('آنمیوت', str(user_id), event=event)}"
 
                 )
 

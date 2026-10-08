@@ -1,4 +1,6 @@
+import re
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 
 from splusthon import events
 from splusthon.tl import functions, types
@@ -20,11 +22,357 @@ if TYPE_CHECKING:
 
 
 
+def _build_message_link(
+    chat,
+    message_id: int,
+) -> str:
+    """
+    ساخت لینک وب پیام سروش‌پلاس بر اساس شناسه پیام.
+
+    Public:
+        https://splus.ir/<username>/<message_id>
+
+    Private:
+        https://splus.ir/c/<chat_id>/<message_id>
+    """
+
+    message_id = int(message_id)
+
+    username = (
+        getattr(
+            chat,
+            "username",
+            None,
+        )
+        or ""
+    ).strip()
+
+    if username:
+        return (
+            f"https://splus.ir/"
+            f"{username}/"
+            f"{message_id}"
+        )
+
+    chat_id = int(
+        getattr(
+            chat,
+            "id",
+        )
+    )
+
+    return (
+        f"https://splus.ir/c/"
+        f"{chat_id}/"
+        f"{message_id}"
+    )
 
 
 
+_SPLUS_PRIVATE_INVITE_PATTERN = re.compile(
+    r"^/joingroup/([A-Za-z0-9_-]+?)/?$",
+    re.IGNORECASE,
+)
+
+_SPLUS_PUBLIC_USERNAME_PATTERN = re.compile(
+    r"^/([A-Za-z0-9_]+?)/?$",
+    re.IGNORECASE,
+)
 
 
+def _parse_group_link(
+    link: str,
+) -> tuple[str, str | None]:
+    """
+    Returns:
+        ("private", invite_hash)
+        ("public", username)
+        ("invalid", None)
+    """
+
+    link = (
+        link or ""
+    ).strip()
+
+    if not link:
+        return "invalid", None
+
+    parsed = urlparse(
+        link
+    )
+
+    if parsed.scheme.lower() != "https":
+        return "invalid", None
+
+    hostname = (
+        parsed.hostname or ""
+    ).lower()
+
+    if hostname not in {
+        "splus.ir",
+        "www.splus.ir",
+    }:
+        return "invalid", None
+
+    if parsed.query or parsed.fragment:
+        return "invalid", None
+
+    path = (
+        parsed.path or ""
+    ).strip()
+
+    private_match = (
+        _SPLUS_PRIVATE_INVITE_PATTERN.fullmatch(
+            path
+        )
+    )
+
+    if private_match is not None:
+        return (
+            "private",
+            private_match.group(1),
+        )
+
+    public_match = (
+        _SPLUS_PUBLIC_USERNAME_PATTERN.fullmatch(
+            path
+        )
+    )
+
+    if public_match is not None:
+        username = (
+            public_match.group(1)
+        )
+
+        if username.lower() == "joingroup":
+            return "invalid", None
+
+        return (
+            "public",
+            username,
+        )
+
+    return "invalid", None
+
+@command(
+    name="جوین گروه",
+    permission="owner",
+    chat_type="all",
+    description="با لینک دعوت یا لینک عمومی وارد گروه سروش می‌شود.",
+    native_name="join_group",
+)
+async def join_group(
+    self: "GroupManagerPlugin",
+    event: events.NewMessage.Event,
+) -> None:
+
+    # ---------------------------------------------------------
+    # ARGUMENT
+    # ---------------------------------------------------------
+
+    if not event.args:
+
+        await event.reply(
+            "❌ لینک گروه را وارد کن.\n"
+            "مثال:\n"
+            + self.command_usage(
+                event.command,
+                "https://splus.ir/example",
+                event=event,
+            )
+        )
+
+        return
+
+    group_link = (
+        event.args[0]
+        .strip()
+    )
+
+    link_type, target = _parse_group_link(
+        group_link
+    )
+
+    if link_type == "invalid" or target is None:
+
+        await event.reply(
+            "❌ لینک گروه سروش معتبر نیست.\n"
+            "فرمت‌های پشتیبانی‌شده:\n"
+            "• https://splus.ir/<username>\n"
+            "• https://splus.ir/joingroup/<hash>"
+        )
+
+        return
+
+    # ---------------------------------------------------------
+    # JOIN
+    # ---------------------------------------------------------
+
+    try:
+
+        # -----------------------------------------------------
+        # PUBLIC GROUP
+        # -----------------------------------------------------
+
+        if link_type == "public":
+
+            entity = await self.client.get_entity(
+                target
+            )
+
+            if not isinstance(
+                entity,
+                types.Channel,
+            ):
+                await event.reply(
+                    "❌ این لینک به یک گروه/کانال عمومی قابل عضویت اشاره نمی‌کند."
+                )
+                return
+
+            await self.client(
+                functions.channels.JoinChannelRequest(
+                    entity
+                )
+            )
+
+        # -----------------------------------------------------
+        # PRIVATE INVITE
+        # -----------------------------------------------------
+
+        else:
+
+            await self.client(
+                functions.messages.ImportChatInviteRequest(
+                    target
+                )
+            )
+
+    except Exception as exc:
+
+        error_name = type(
+            exc
+        ).__name__
+
+        error_text = str(
+            exc
+        )
+
+        if (
+            error_name
+            == "UserAlreadyParticipantError"
+        ):
+
+            await event.reply(
+                "ℹ️ این حساب از قبل عضو این گروه است."
+            )
+
+            return
+
+        if (
+            error_name
+            == "InviteHashExpiredError"
+        ):
+
+            await event.reply(
+                "❌ لینک دعوت منقضی شده است."
+            )
+
+            return
+
+        if (
+            error_name
+            == "InviteHashInvalidError"
+        ):
+
+            await event.reply(
+                "❌ لینک دعوت نامعتبر است."
+            )
+
+            return
+
+        if (
+            error_name
+            in {
+                "UsernameInvalidError",
+                "UsernameNotOccupiedError",
+            }
+        ):
+
+            await event.reply(
+                "❌ گروه عمومی با این لینک پیدا نشد."
+            )
+
+            return
+
+        if (
+            error_name
+            == "ChannelPrivateError"
+        ):
+
+            await event.reply(
+                "❌ این گروه عمومی نیست یا دسترسی به آن امکان‌پذیر نیست."
+            )
+
+            return
+
+        if (
+            error_name
+            == "InviteRequestSentError"
+        ):
+
+            await event.reply(
+                "✅ درخواست عضویت ارسال شد "
+                "و باید توسط ادمین گروه تأیید شود."
+            )
+
+            return
+
+        if (
+            error_name
+            == "UsersTooMuchError"
+        ):
+
+            await event.reply(
+                "❌ ظرفیت مجاز عضویت برای این حساب پر شده است."
+            )
+
+            return
+
+        print(
+            "❌ خطا در ورود به گروه:"
+        )
+
+        import traceback
+
+        traceback.print_exc()
+
+        await event.reply(
+            "❌ ورود به گروه ناموفق بود.\n"
+            f"نوع خطا: {error_name}"
+            + (
+                f"\nجزئیات: {error_text}"
+                if error_text
+                else ""
+            )
+        )
+
+        return
+
+    # ---------------------------------------------------------
+    # SUCCESS
+    # ---------------------------------------------------------
+
+    if link_type == "public":
+
+        await event.reply(
+            "✅ با موفقیت وارد گروه عمومی شدم."
+        )
+
+    else:
+
+        await event.reply(
+            "✅ با موفقیت وارد گروه شدم."
+        )
 
 
 
@@ -186,10 +534,10 @@ def _get_reaction_count(
     return len(reactions)
 
 
-async def _get_message_count(
+async def _get_message_statistics(
     client,
     chat,
-) -> int | None:
+) -> tuple[int | None, int | None, int | None]:
 
     try:
         result = await client(
@@ -206,12 +554,50 @@ async def _get_message_count(
         )
 
     except Exception:
-        return None
+        return None, None, None
 
-    return getattr(
+    existing_count = getattr(
         result,
         "count",
         None,
+    )
+
+    messages = getattr(
+        result,
+        "messages",
+        None,
+    ) or []
+
+    if not messages:
+        return existing_count, None, None
+
+    latest_message_id = max(
+        int(
+            getattr(
+                message,
+                "id",
+                0,
+            )
+        )
+        for message in messages
+    )
+
+    sent_count = latest_message_id
+
+    deleted_count = (
+        max(
+            0,
+            sent_count
+            - existing_count,
+        )
+        if existing_count is not None
+        else None
+    )
+
+    return (
+        existing_count,
+        sent_count,
+        deleted_count,
     )
 
 
@@ -236,6 +622,7 @@ def _is_group_stats_shortcut(
     permission="admin",
     chat_type="group",
     description="آمار و اطلاعات گروه را نشان می‌دهد.",
+    native_name="group_stats",
 )
 async def group_stats(
     self: "GroupManagerPlugin",
@@ -331,10 +718,14 @@ async def group_stats(
             )
 
         # -------------------------------------------------
-        # MESSAGE COUNT
+        # MESSAGE STATISTICS
         # -------------------------------------------------
 
-        message_count = await _get_message_count(
+        (
+            message_count,
+            sent_message_count,
+            deleted_message_count,
+        ) = await _get_message_statistics(
             self.client,
             chat,
         )
@@ -425,11 +816,25 @@ async def group_stats(
             ),
 
             (
-                "💬 تعداد پیام‌ها: "
+                "💬 تعداد پیام‌های موجود در این لحظه: "
                 f"{message_count:,}"
                 if message_count is not None
                 else
-                "💬 تعداد پیام‌ها: نامشخص"
+                "💬 تعداد پیام‌های موجود در این لحظه: نامشخص"
+            ),
+            (
+                "📨 تعداد پیام‌های ارسال‌شده: "
+                f"{sent_message_count:,}"
+                if sent_message_count is not None
+                else
+                "📨 تعداد پیام‌های ارسال‌شده: نامشخص"
+            ),
+            (
+                "🗑️ تعداد پیام‌های حذف‌شده: "
+                f"{deleted_message_count:,}"
+                if deleted_message_count is not None
+                else
+                "🗑️ تعداد پیام‌های حذف‌شده: نامشخص"
             ),
             (
                 "👍 واکنش‌های مجاز: "

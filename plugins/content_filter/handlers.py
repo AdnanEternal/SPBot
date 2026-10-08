@@ -206,6 +206,7 @@ async def _resolve_group_target(
     permission="everyone",
     chat_type="all",
     description="یک کلمه رو به لیست فیلتر این گروه اضافه می‌کنه.",
+    native_name="filter_add",
 )
 async def add_word(
     self: "ContentFilterPlugin",
@@ -227,17 +228,28 @@ async def add_word(
         await event.reply(
             "❌ گروه هدف مشخص نشده.\n"
             "داخل گروه:\n"
-            "!فیلتر کلمه\n\n"
+            + self.command_usage(
+                "فیلتر",
+                "کلمه",
+                event=event,
+            )+ "\n\n"
             "ریموت توسط Owner:\n"
-            "!فیلتر کلمه -100123456"
+            + self.command_usage(
+                "فیلتر",
+                "کلمه -100123456",
+                event=event,
+            )
         )
         return
 
     if not word:
         await event.reply(
             "مثال:\n"
-            "!فیلتر کلمه\n"
-            "!فیلتر کلمه -100123456"
+            + self.command_usage(
+                "فیلتر",
+                "کلمه",
+                event=event,
+            )
         )
         return
 
@@ -262,6 +274,7 @@ async def add_word(
     permission="everyone",
     chat_type="all",
     description="یک کلمه رو از لیست فیلتر این گروه حذف می‌کنه.",
+    native_name="filter_remove",
 )
 async def remove_word(
     self: "ContentFilterPlugin",
@@ -283,17 +296,32 @@ async def remove_word(
         await event.reply(
             "❌ گروه هدف مشخص نشده.\n"
             "داخل گروه:\n"
-            "!حذف فیلتر کلمه\n\n"
-            "ریموت توسط Owner:\n"
-            "!حذف فیلتر کلمه -100123456"
-        )
-        return
+            "داخل گروه:\n"
+            + self.command_usage(
+                event.command,
+                event=event,
+            )
+            + "\n\nریموت توسط Owner:\n"
+            + self.command_usage(
+                event.command,
+                "-100123456",
+                event=event,
+            )
+            )
 
     if not word:
         await event.reply(
             "مثال:\n"
-            "!حذف فیلتر کلمه\n"
-            "!حذف فیلتر کلمه -100123456"
+            + self.command_usage(
+                event.command,
+                event=event,
+            )
+            + "\n"
+            + self.command_usage(
+                event.command,
+                "-100123456",
+                event=event,
+            )
         )
         return
 
@@ -325,6 +353,7 @@ async def remove_word(
     permission="everyone",
     chat_type="all",
     description="لیست کلمات فیلترشده‌ی این گروه رو نشون می‌ده.",
+    native_name="filters",
 )
 async def list_words(
     self: "ContentFilterPlugin",
@@ -346,17 +375,29 @@ async def list_words(
         await event.reply(
             "❌ در PV باید شناسه گروه را وارد کنی.\n"
             "ریموت توسط Owner:\n"
-            "!لیست فیلتر -100123456"
+            + self.command_usage(
+                event.command,
+                "-100123456",
+                event=event,
+            )
         )
         return
-
+ 
     if remaining:
         await event.reply(
             "❌ استفاده نادرست.\n"
             "مثال:\n"
-            "!لیست فیلتر\n"
-            "!لیست فیلتر -100123456"
-        )
+            + self.command_usage(
+                event.command,
+                event=event,)
+            + "\n"
+            + self.command_usage(
+                event.command,
+                "-100123456",
+                event=event,
+            )
+            )
+            
         return
 
     words = await self.words.get_all(
@@ -391,6 +432,7 @@ async def list_words(
         "تعیین می‌کنه ادمین‌های گروه اجازه استفاده "
         "از کلمات فیلترشده رو داشته باشن یا نه."
     ),
+    native_name="filter_admin",
 )
 async def set_admin_filter_permission(
     self: "ContentFilterPlugin",
@@ -411,7 +453,11 @@ async def set_admin_filter_permission(
         await event.reply(
             "❌ گروه هدف مشخص نشده.\n"
             "مثال:\n"
-            "!فیلتر ادمین مجاز -100123456"
+            +self.command_usage(
+                event.command,
+                "مجاز -100123456",
+                event=event,
+            )
         )
         return
 
@@ -442,8 +488,17 @@ async def set_admin_filter_permission(
             f"`{target_group}` از کلمات فیلترشده: "
             f"{status}\n\n"
             "تغییر:\n"
-            f"`!فیلتر ادمین مجاز {target_group}`\n"
-            f"`!فیلتر ادمین ممنوع {target_group}`"
+            +self.command_usage(
+                event.command,
+                f"مجاز {target_group}",
+                event=event,
+            )
+            + "\n"
+            + self.command_usage(
+                event.command,
+                f"ممنوع {target_group}",
+                event=event,
+            )
         )
 
         return
@@ -462,8 +517,17 @@ async def set_admin_filter_permission(
         await event.reply(
             "❌ استفاده نادرست.\n\n"
             "مثال:\n"
-            f"`!فیلتر ادمین مجاز {target_group}`\n"
-            f"`!فیلتر ادمین ممنوع {target_group}`"
+            + self.command_usage(
+                event.command,
+                f"مجاز {target_group}",
+                event=event,
+            )
+            + "\n"
+            + self.command_usage(
+                event.command,
+                f"ممنوع {target_group}",
+                event=event,
+            )
         )
 
         return
