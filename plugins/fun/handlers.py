@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import asyncio
 import io
 import time
@@ -333,14 +334,6 @@ CAT_TRIGGER_WORDS = (
     "پیشی",
 )
 
-CAT_TRIGGER_RE = re.compile(
-    r"(?<!\w)("
-    + "|".join(map(re.escape, CAT_TRIGGER_WORDS))
-    + r")(?!\w)",
-    re.UNICODE | re.IGNORECASE,
-)
-
-
 async def _run_cat(self, event) -> None:
     """منطق مشترک کامند و تریگر."""
     debug = self.debug
@@ -548,17 +541,146 @@ async def cat(self, event) -> None:
     await _run_cat(self, event)
 
 
+async def _should_skip_cat_trigger(
+    self,
+    event,
+) -> bool:
+    """
+    اگر پیام ریپلای به پیام خود بوبی باشد،
+    تریگر عکس گربه را متوقف می‌کند.
+
+    اگر اطلاعات ریپلای یا شناسه بوبی قابل تشخیص نباشد،
+    برای جلوگیری از پاسخ دوگانه، تریگر را متوقف می‌کند.
+    """
+
+    if not getattr(event, "is_reply", False):
+        return False
+
+    # -------------------------------------------------
+    # REPLY MESSAGE
+    # -------------------------------------------------
+
+    try:
+        replied = await event.get_reply_message()
+
+    except Exception as exc:
+        self.debug(
+            "TRIGGER",
+            (
+                "SKIP reason=reply_lookup_failed "
+                f"error={type(exc).__name__}"
+            ),
+        )
+        return True
+
+    if replied is None:
+        self.debug(
+            "TRIGGER",
+            "SKIP reason=reply_message_unavailable",
+        )
+        return True
+
+    replied_sender_id = getattr(
+        replied,
+        "sender_id",
+        None,
+    )
+
+    if replied_sender_id is None:
+        self.debug(
+            "TRIGGER",
+            "SKIP reason=reply_sender_unavailable",
+        )
+        return True
+
+    # -------------------------------------------------
+    # BOT USER ID
+    # -------------------------------------------------
+
+    bot_user_id = getattr(
+        self,
+        "bot_user_id",
+        None,
+    )
+
+    # شناسه را فقط در صورت نیاز می‌گیریم و نگه می‌داریم.
+    if bot_user_id is None:
+        try:
+            result = self.client.get_me()
+
+            if inspect.isawaitable(result):
+                result = await result
+
+            bot_user_id = getattr(
+                result,
+                "id",
+                None,
+            )
+
+            self.bot_user_id = bot_user_id
+
+        except Exception as exc:
+            self.debug(
+                "TRIGGER",
+                (
+                    "SKIP reason=bot_id_unavailable "
+                    f"error={type(exc).__name__}"
+                ),
+            )
+            return True
+
+    if bot_user_id is None:
+        self.debug(
+            "TRIGGER",
+            "SKIP reason=bot_id_unavailable",
+        )
+        return True
+
+    # -------------------------------------------------
+    # COMPARE REPLY SENDER
+    # -------------------------------------------------
+
+    try:
+        is_bot_reply = (
+            int(replied_sender_id)
+            == int(bot_user_id)
+        )
+
+    except (TypeError, ValueError):
+        self.debug(
+            "TRIGGER",
+            "SKIP reason=invalid_sender_id",
+        )
+        return True
+
+    if is_bot_reply:
+        self.debug(
+            "TRIGGER",
+            "SKIP reason=reply_to_booby",
+        )
+
+    return is_bot_reply
+
+
 @on_event(events.NewMessage(incoming=True))
 async def on_cat_trigger(self, event) -> None:
-    text = (event.raw_text or "").strip()
+    text = (
+        event.raw_text or ""
+    ).strip()
 
     if not text:
         return
 
+    # کامندها همچنان از مسیر کامند منیجر عبور می‌کنند.
     if self.command_manager.is_command_message(text):
         return
 
-    if CAT_TRIGGER_RE.search(text) is None:
+    # فقط تطبیق کل پیام، نه پیدا کردن کلمه درون متن.
+    if text not in CAT_TRIGGER_WORDS:
+        return
+
+    # ریپلای به پیام خود بوبی نباید عکس گربه تولید کند.
+    if await _should_skip_cat_trigger(self, event):
         return
 
     await _run_cat(self, event)
