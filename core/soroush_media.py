@@ -172,11 +172,9 @@ async def upload_file(
         await self._return_exported_sender(upload_sender)
 
 
-def install_soroush_media_fix() -> None:
-    global _INSTALLED
-    if _INSTALLED:
-        return
-    SoroushClient._get_dc = _get_dc
-    SoroushClient._create_exported_sender = _create_exported_sender
-    SoroushClient.upload_file = upload_file
-    _INSTALLED = True
+class SoroushMediaClient(SoroushClient):
+    """همان SoroushClient، فقط آپلود مدیا روی اتصال فایل سروش."""
+
+    _get_dc = _get_dc
+    _create_exported_sender = _create_exported_sender
+    upload_file = upload_file
