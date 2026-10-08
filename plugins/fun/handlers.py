@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import asyncio
@@ -9,7 +8,11 @@ from pathlib import Path
 
 import aiohttp
 
-from core.decorators import command
+import re
+
+from splusthon import events
+
+from core.decorators import command, on_event
 from core.soroush_media import send_media
 from plugins.fun.cat_cache import CatCache
 
@@ -282,7 +285,7 @@ async def _send_bytes(
             data,
             filename,
         ),
-        caption="🐈",
+        caption="",
         reply_to=reply_to,
     )
 
@@ -324,17 +327,22 @@ def _load_fallback(
     return data, FALLBACK_IMAGE.name
 
 
-@command(
-    name="گربه",
-    permission="everyone",
-    chat_type="all",
-    description="یک عکس تصادفی از گربه می‌فرستد.",
-    native_name="cat",
+CAT_TRIGGER_WORDS = (
+    "میو",
+    "گربه",
+    "پیشی",
 )
-async def cat(
-    self,
-    event,
-) -> None:
+
+CAT_TRIGGER_RE = re.compile(
+    r"(?<!\w)("
+    + "|".join(map(re.escape, CAT_TRIGGER_WORDS))
+    + r")(?!\w)",
+    re.UNICODE | re.IGNORECASE,
+)
+
+
+async def _run_cat(self, event) -> None:
+    """منطق مشترک کامند و تریگر."""
     debug = self.debug
 
     debug(
@@ -358,9 +366,9 @@ async def cat(
         debug(
             "CACHE",
             (
-                f"BEFORE_ADD "
-                f"count={cat_cache.count} "
-                f"bytes={cat_cache.total_bytes}"
+                f"ADD_CANDIDATE "
+                f"file={filename} "
+                f"bytes={len(data)}"
             ),
         )
 
@@ -370,19 +378,6 @@ async def cat(
             debug=debug,
         )
 
-        debug(
-            "CACHE",
-            (
-                f"AFTER_ADD "
-                f"count={cat_cache.count} "
-                f"bytes={cat_cache.total_bytes} "
-                f"limit=4194304"
-            ),
-        )
-
-        # -----------------------------------------------------
-        # اول خودِ عکس تازه را ارسال کن.
-        # -----------------------------------------------------
         try:
             await _send_bytes(
                 self.client,
@@ -390,13 +385,13 @@ async def cat(
                 data,
                 filename,
                 event.id,
-                source="fresh",
+                source="api",
                 debug=debug,
             )
 
             debug(
                 "REQUEST",
-                "SUCCESS source=fresh",
+                "SUCCESS source=api",
             )
             return
 
@@ -405,17 +400,11 @@ async def cat(
                 "SEND",
                 (
                     f"FAILED "
-                    f"source=fresh "
+                    f"source=api "
                     f"type={type(exc).__name__} "
                     f"message={exc}"
                 ),
             )
-
-    else:
-        debug(
-            "API",
-            "UNAVAILABLE switching_to_fallback_chain",
-        )
 
     # ---------------------------------------------------------
     # 2. CACHE
@@ -547,3 +536,29 @@ async def cat(
         "متأسفانه خطایی رخ داد!",
         reply_to=event.id,
     )
+
+@command(
+    name="گربه",
+    permission="everyone",
+    chat_type="all",
+    description="یک عکس تصادفی از گربه می‌فرستد.",
+    native_name="cat",
+)
+async def cat(self, event) -> None:
+    await _run_cat(self, event)
+
+
+@on_event(events.NewMessage(incoming=True))
+async def on_cat_trigger(self, event) -> None:
+    text = (event.raw_text or "").strip()
+
+    if not text:
+        return
+
+    if self.command_manager.is_command_message(text):
+        return
+
+    if CAT_TRIGGER_RE.search(text) is None:
+        return
+
+    await _run_cat(self, event)

@@ -1,4 +1,3 @@
-
 from core.base_plugin import BasePlugin
 
 from . import handlers
@@ -6,7 +5,7 @@ from . import handlers
 
 class FunPlugin(BasePlugin):
     name = "Fun"
-    version = "1.0.0"
+    version = "1.0.1"
 
     DEBUG_LOGGING = 0
 
@@ -24,3 +23,4 @@ class FunPlugin(BasePlugin):
         )
 
     cat = handlers.cat
+    on_cat_trigger = handlers.on_cat_trigger
