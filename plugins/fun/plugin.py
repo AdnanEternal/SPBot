@@ -8,7 +8,7 @@ class FunPlugin(BasePlugin):
     name = "Fun"
     version = "1.0.0"
 
-    DEBUG_LOGGING = 1
+    DEBUG_LOGGING = 0
 
     def debug(
         self,
