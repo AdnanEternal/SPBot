@@ -259,16 +259,20 @@ def guess_file_extension(
         strict=False,
     )
 
-    if extension:
+    # اگر نوع محتوا عمومی بود، پسوند URL را بررسی کن.
+    if extension and extension != ".bin":
         return extension
 
     if url:
-        extension = Path(
+        url_extension = Path(
             urlparse(url).path
         ).suffix.lower()
 
-        if extension and len(extension) <= 10:
-            return extension
+        if url_extension and len(url_extension) <= 10:
+            return url_extension
+
+    if extension:
+        return extension
 
     return ".bin"
 
