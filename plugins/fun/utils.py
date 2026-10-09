@@ -1,6 +1,6 @@
+
 from __future__ import annotations
 
-import inspect
 import io
 import mimetypes
 import re
@@ -51,10 +51,11 @@ def matches_trigger_words(
     max_words: int | None = 5,
 ) -> bool:
     """
-    تشخیص یک یا چند کلمه تریگر مستقل.
+    ابزار عمومی تشخیص کلمه‌های مستقل با امکان
+    کشیدگی حروف و محدودیت تعداد کلمات.
 
-    کشیدگی حروف مجاز است.
-    تعداد کلمات نیز قابل محدود کردن است.
+    سیاست نهایی هر قابلیت باید در خود همان قابلیت
+    تعیین شود؛ این تابع صرفاً ابزار تطبیق است.
     """
 
     text = (text or "").strip()
@@ -86,11 +87,6 @@ def is_image_response(
     content_type: str,
     data: bytes,
 ) -> bool:
-    """
-    تشخیص پاسخ تصویری با استفاده از MIME
-    و امضای باینری فایل.
-    """
-
     content_type = (
         content_type or ""
     ).split(";", 1)[0].strip().lower()
@@ -115,11 +111,6 @@ def guess_file_extension(
     *,
     url: str | None = None,
 ) -> str:
-    """
-    پسوند مناسب فایل را از نوع محتوا،
-    امضای فایل یا آدرس آن حدس می‌زند.
-    """
-
     content_type = (
         content_type or ""
     ).split(";", 1)[0].strip().lower()
@@ -163,15 +154,12 @@ def guess_file_extension(
         return extension
 
     if url:
-        path_extension = Path(
+        extension = Path(
             urlparse(url).path
         ).suffix.lower()
 
-        if (
-            path_extension
-            and len(path_extension) <= 10
-        ):
-            return path_extension
+        if extension and len(extension) <= 10:
+            return extension
 
     return ".bin"
 
@@ -186,8 +174,8 @@ async def send_media_bytes(
     **kwargs,
 ):
     """
-    ارسال بایت‌های فایل به کمک ابزار رسانه SPBot.
-    تصمیم‌گیری درباره نوع پاسخ با فراخواننده است.
+    ارسال فایل با ابزار رسانه‌ی مشترک SPBot.
+    تفسیر پاسخ API وظیفه‌ی این تابع نیست.
     """
 
     if not data:
@@ -215,8 +203,8 @@ async def send_fallback_image(
     caption: str = "",
 ):
     """
-    تصویر ثابت مشترک برای قابلیت‌های تصویری Fun.
-    هر قابلیت خودش تصمیم می‌گیرد چه زمانی از آن استفاده کند.
+    ارسال تصویر مشترک fallback.jpg.
+    تصمیم استفاده از فال‌بک با قابلیت فراخواننده است.
     """
 
     data = FALLBACK_IMAGE.read_bytes()
@@ -228,95 +216,3 @@ async def send_fallback_image(
         FALLBACK_IMAGE.name,
         caption=caption,
     )
-
-
-async def should_skip_trigger_on_bot_reply(
-    plugin,
-    event,
-) -> bool:
-    """
-    برای جلوگیری از پاسخ دوگانه:
-    اگر پیام ریپلای به بوبی باشد، تریگر متوقف می‌شود.
-
-    اگر پیام ریپلای‌شده یا شناسه بوبی قابل بررسی نباشد،
-    برای جلوگیری از پاسخ ناخواسته، تریگر را متوقف می‌کند.
-    """
-
-    if not getattr(event, "is_reply", False):
-        return False
-
-    try:
-        replied = await event.get_reply_message()
-
-    except Exception as exc:
-        plugin.debug(
-            "TRIGGER",
-            (
-                "SKIP reason=reply_lookup_failed "
-                f"error={type(exc).__name__}"
-            ),
-        )
-        return True
-
-    if replied is None:
-        return True
-
-    sender_id = getattr(
-        replied,
-        "sender_id",
-        None,
-    )
-
-    if sender_id is None:
-        return True
-
-    bot_user_id = getattr(
-        plugin,
-        "bot_user_id",
-        None,
-    )
-
-    if bot_user_id is None:
-        try:
-            result = plugin.client.get_me()
-
-            if inspect.isawaitable(result):
-                result = await result
-
-            bot_user_id = getattr(
-                result,
-                "id",
-                None,
-            )
-
-            plugin.bot_user_id = bot_user_id
-
-        except Exception as exc:
-            plugin.debug(
-                "TRIGGER",
-                (
-                    "SKIP reason=bot_id_unavailable "
-                    f"error={type(exc).__name__}"
-                ),
-            )
-            return True
-
-    if bot_user_id is None:
-        return True
-
-    try:
-        is_bot_reply = (
-            int(sender_id)
-            == int(bot_user_id)
-        )
-
-    except (TypeError, ValueError):
-        return True
-
-    if is_bot_reply:
-        plugin.debug(
-            "TRIGGER",
-            "SKIP reason=reply_to_booby",
-        )
-
-    return is_bot_reply

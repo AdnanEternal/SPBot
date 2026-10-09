@@ -2828,7 +2828,12 @@ async def on_message(
     self,
     event,
 ):
+
+    response_composition = None
+
     try:
+        event._ai_gateway_processed = False
+        event._ai_gateway_expected = False
         # -------------------------------------------------
         # فقط گروه‌ها
         # -------------------------------------------------
@@ -2969,7 +2974,29 @@ async def on_message(
             trigger_text is None
             and not reply_to_booby
         ):
+            event._ai_gateway_expected = False
+
+            await self.event_bus.emit(
+                "response_composition_not_requested",
+                event=event,
+            )
+
             return
+
+        event._ai_gateway_expected = True
+
+        response_composition = {
+            "defer_response": False,
+            "response_state": None,
+            "sent_message": None,
+            "delivery_completed": False,
+        }
+
+        await self.event_bus.emit(
+            "response_composition_prepare",
+            event=event,
+            context=response_composition,
+        )
 
         telemetry_enabled = (
             self.telemetry.enabled
@@ -3254,23 +3281,64 @@ async def on_message(
         # ارسال پاسخ
         # -------------------------------------------------
 
+
         sent = None
 
-        try:
-            sent = await event.reply(
-                answer[:4000]
+        # اگر Fun درخواست ترکیب پاسخ داده باشد،
+        # ارسال را به هماهنگ‌کننده واگذار می‌کنیم.
+        if (
+            response_composition is not None
+            and response_composition.get("defer_response")
+        ):
+            await self.event_bus.emit(
+                "response_composition_success",
+                event=event,
+                context=response_composition,
+                answer=answer,
             )
 
-        except Exception:
+            sent = response_composition.get(
+                "sent_message"
+            )
+
+            # اگر هماهنگ‌کننده نتوانسته هیچ خروجی‌ای ارسال کند،
+            # پاسخ متنی AI را به‌عنوان آخرین تلاش می‌فرستیم.
+            if not response_composition.get(
+                "delivery_completed"
+            ):
+                try:
+                    sent = await event.reply(
+                        answer[:4000]
+                    )
+
+                except Exception:
+                    try:
+                        sent = await event.respond(
+                            answer[:4000]
+                        )
+
+                    except Exception as exc:
+                        print(
+                            f"⚠️ ارسال پاسخ بوبی ناموفق بود: {exc}"
+                        )
+
+        else:
+            # رفتار قبلی برای پیام‌هایی که ترکیب رسانه ندارند.
             try:
-                sent = await event.respond(
+                sent = await event.reply(
                     answer[:4000]
                 )
 
-            except Exception as exc:
-                print(
-                    f"⚠️ ارسال پاسخ بوبی ناموفق بود: {exc}"
-                )
+            except Exception:
+                try:
+                    sent = await event.respond(
+                        answer[:4000]
+                    )
+
+                except Exception as exc:
+                    print(
+                        f"⚠️ ارسال پاسخ بوبی ناموفق بود: {exc}"
+                    )
 
         # -------------------------------------------------
         # Memory: پاسخ بوبی
@@ -3361,14 +3429,38 @@ async def on_message(
 
             telemetry_emitted = True
 
-        try:
-            await event.reply(
-                "❌ بوبی فعلاً نتونست پاسخ بده. "
-                "لطفاً دوباره امتحان کن."
+
+        error_text = (
+            "❌ بوبی فعلاً نتونست پاسخ بده. "
+            "لطفاً دوباره امتحان کن."
+        )
+
+        if (
+            response_composition is not None
+            and response_composition.get("defer_response")
+        ):
+            await self.event_bus.emit(
+                "response_composition_failure",
+                event=event,
+                context=response_composition,
+                error_text=error_text,
             )
 
-        except Exception:
-            pass
+            # اگر ترکیب پاسخ به‌طور کامل انجام نشد،
+            # دست‌کم پیام خطای AI را بفرست.
+            if not response_composition.get(
+                "delivery_completed"
+            ):
+                try:
+                    await event.reply(error_text)
+                except Exception:
+                    pass
+
+        else:
+            try:
+                await event.reply(error_text)
+            except Exception:
+                pass
 
 
 
@@ -3440,6 +3532,9 @@ async def on_message(
 
         except Exception:
             pass
+    
+    finally:
+        event._ai_gateway_processed = True
 
 # =========================================================
 # MODERATION -> TIMELINE

@@ -1,12 +1,18 @@
+
 from __future__ import annotations
 
+import asyncio
 import json
 
 from urllib.parse import urlparse
 
 from splusthon import events
 
-from core.decorators import command, on_event
+from core.decorators import (
+    command,
+    on_bus_event,
+    on_event,
+)
 
 from .api_client import (
     APIClientError,
@@ -19,17 +25,20 @@ from .utils import (
     matches_trigger_words,
     send_fallback_image,
     send_media_bytes,
-    should_skip_trigger_on_bot_reply,
 )
 
 
-# ---------------------------------------------------------
-# CAT FEATURE
-# ---------------------------------------------------------
+# =========================================================
+# CAT CONFIGURATION
+# =========================================================
 
 CAT_API_URL = "https://cataas.com/cat"
 
 CAT_API_TIMEOUT = 10
+
+CAT_MAX_RESPONSE_BYTES = 15 * 1024 * 1024
+
+MAX_MEDIA_CAPTION_CHARS = 1024
 
 CAT_TRIGGER_WORDS = (
     "میو",
@@ -38,15 +47,19 @@ CAT_TRIGGER_WORDS = (
 )
 
 
+# =========================================================
+# CAT API RESPONSE PARSING
+# =========================================================
+
 def _find_url_in_payload(
     value,
 ) -> str | None:
     """
-    منطق مخصوص قابلیت گربه:
-    در پاسخ JSON، آدرس مستقیم تصویر را پیدا می‌کند.
+    استخراج URL از پاسخ JSON.
 
-    این منطق عمداً در api_client.py نیست؛
-    هر قابلیت شکل پاسخ مورد انتظار خودش را می‌شناسد.
+    ساختار JSON می‌تواند متفاوت باشد.
+    این منطق مخصوص پاسخ API گربه است؛
+    در api_client.py قرار نمی‌گیرد.
     """
 
     preferred_keys = (
@@ -70,13 +83,15 @@ def _find_url_in_payload(
 
     if isinstance(value, dict):
         for key in preferred_keys:
-            if key in value:
-                found = _find_url_in_payload(
-                    value[key]
-                )
+            if key not in value:
+                continue
 
-                if found:
-                    return found
+            found = _find_url_in_payload(
+                value[key]
+            )
+
+            if found:
+                return found
 
         for child in value.values():
             found = _find_url_in_payload(child)
@@ -98,21 +113,19 @@ async def _resolve_cat_image(
     response,
 ) -> tuple[bytes, str] | None:
     """
-    پاسخ API گربه را تفسیر می‌کند.
+    تفسیر پاسخ API گربه.
 
     پشتیبانی:
         - تصویر مستقیم
-        - JSON حاوی URL تصویر
+        - JSON حاوی URL
         - متن ساده‌ای که خودش URL است
 
-    هر نوع پاسخ دیگری برای این قابلیت
-    قابل استفاده نیست و به فال‌بک می‌رسد.
+    پاسخ‌های دیگر برای این قابلیت قابل استفاده نیستند.
     """
 
     if not response.ok:
         return None
 
-    # حالت اول: خود پاسخ، تصویر است.
     if is_image_response(
         response.content_type,
         response.body,
@@ -130,12 +143,11 @@ async def _resolve_cat_image(
 
     image_url = None
 
-    # حالت دوم: پاسخ JSON است.
     if response.is_json:
         try:
             payload = response.json()
 
-        except (ValueError, json.JSONDecodeError):
+        except ValueError:
             payload = None
 
         if payload is not None:
@@ -143,24 +155,21 @@ async def _resolve_cat_image(
                 payload
             )
 
-    # حالت سوم: بدنه خودش URL است.
     elif response.content_type.startswith("text/"):
         candidate = response.text().strip()
 
-        if (
-            candidate.startswith("https://")
-            or candidate.startswith("http://")
+        if candidate.startswith(
+            ("https://", "http://")
         ):
             image_url = candidate
 
     if not image_url:
         return None
 
-    # URL استخراج شده باید خودش دریافت شود.
     image_response = await request_api(
         image_url,
         timeout=CAT_API_TIMEOUT,
-        max_bytes=15 * 1024 * 1024,
+        max_bytes=CAT_MAX_RESPONSE_BYTES,
     )
 
     if not image_response.ok:
@@ -184,41 +193,36 @@ async def _resolve_cat_image(
     )
 
 
-async def _run_cat(
+async def _fetch_cat_image(
     self,
-    event,
-) -> None:
+) -> tuple[bytes, str] | None:
     """
-    عمل مستقل قابلیت گربه.
-    هم کامند و هم تریگر به همین تابع می‌رسند.
-    """
+    فقط عکس را از API تهیه می‌کند.
 
-    self.debug(
-        "CAT",
-        (
-            "START "
-            f"group={event.chat_id} "
-            f"user={event.sender_id} "
-            f"message={event.id}"
-        ),
-    )
+    این تابع چیزی ارسال نمی‌کند و فال‌بک هم ندارد؛
+    بنابراین می‌تواند هم‌زمان با درخواست AI اجرا شود.
+    """
 
     try:
         response = await request_api(
             CAT_API_URL,
             timeout=CAT_API_TIMEOUT,
-            max_bytes=15 * 1024 * 1024,
+            max_bytes=CAT_MAX_RESPONSE_BYTES,
         )
 
-        image = await _resolve_cat_image(
-            response
-        )
+        image = await _resolve_cat_image(response)
+
+        if image is None:
+            self.debug(
+                "CAT_API",
+                "NO_USABLE_IMAGE",
+            )
+
+        return image
 
     except APIClientError as exc:
-        image = None
-
         self.debug(
-            "API",
+            "CAT_API",
             (
                 f"FAILED "
                 f"type={type(exc).__name__} "
@@ -227,10 +231,8 @@ async def _run_cat(
         )
 
     except Exception as exc:
-        image = None
-
         self.debug(
-            "CAT",
+            "CAT_API",
             (
                 f"UNEXPECTED_ERROR "
                 f"type={type(exc).__name__} "
@@ -238,57 +240,212 @@ async def _run_cat(
             ),
         )
 
-    # -------------------------------------------------
-    # API RESULT
-    # -------------------------------------------------
+    return None
 
-    if image is not None:
-        data, filename = image
 
-        try:
-            await send_media_bytes(
-                self,
-                event,
-                data,
-                filename,
-            )
+# =========================================================
+# CAT-SPECIFIC TRIGGER POLICY
+# =========================================================
 
-            self.debug(
-                "CAT",
-                f"SUCCESS source=api file={filename}",
-            )
-            return
+def _matches_cat_trigger(
+    self,
+    event,
+) -> bool:
+    text = (
+        event.raw_text or ""
+    ).strip()
 
-        except Exception as exc:
-            self.debug(
-                "SEND",
-                (
-                    "API_IMAGE_FAILED "
-                    f"type={type(exc).__name__} "
-                    f"error={exc}"
-                ),
-            )
+    if not text:
+        return False
 
-    # -------------------------------------------------
-    # SHARED FALLBACK
-    # -------------------------------------------------
+    if self.command_manager.is_command_message(text):
+        return False
 
-    self.debug(
-        "CAT",
-        "USING_SHARED_FALLBACK",
+    return matches_trigger_words(
+        text,
+        CAT_TRIGGER_WORDS,
+        max_words=5,
     )
 
-    try:
-        await send_fallback_image(
-            self,
-            event,
+
+# =========================================================
+# RESPONSE STATE
+# =========================================================
+
+def _get_cat_state(
+    self,
+    event,
+) -> dict:
+    """
+    وضعیت پاسخ این پیام را نگه می‌دارد تا callbackهای
+    AI Gateway و Fun بتوانند روی یک کار مشترک هماهنگ شوند.
+    """
+
+    states = getattr(
+        event,
+        "_fun_response_states",
+        None,
+    )
+
+    if not isinstance(states, dict):
+        states = {}
+
+        event._fun_response_states = states
+
+    state = states.get("cat")
+
+    if state is None:
+        state = {
+            "feature": "cat",
+            "media_task": None,
+            "completion": (
+                asyncio.get_running_loop().create_future()
+            ),
+            "finalizing": False,
+            "finalized": False,
+            "sent_message": None,
+            "delivery_ok": False,
+        }
+
+        states["cat"] = state
+
+    if (
+        state["media_task"] is None
+        and not state["finalized"]
+    ):
+        state["media_task"] = asyncio.create_task(
+            _fetch_cat_image(self)
         )
 
-        self.debug(
-            "CAT",
-            "SUCCESS source=fallback",
+    return state
+
+
+def _get_existing_cat_state(
+    event,
+) -> dict | None:
+    states = getattr(
+        event,
+        "_fun_response_states",
+        None,
+    )
+
+    if not isinstance(states, dict):
+        return None
+
+    return states.get("cat")
+
+
+async def _get_cat_image(
+    state: dict,
+) -> tuple[bytes, str] | None:
+    task = state.get("media_task")
+
+    if task is None:
+        return None
+
+    try:
+        return await task
+
+    except Exception:
+        return None
+
+
+# =========================================================
+# SEND HELPERS
+# =========================================================
+
+def _media_caption(
+    text: str,
+) -> str:
+    """
+    متن کامل پاسخ AI در حافظه باقی می‌ماند؛
+    فقط کپشن رسانه به طول محافظه‌کارانه محدود می‌شود.
+    """
+
+    text = str(text or "")
+
+    if len(text) <= MAX_MEDIA_CAPTION_CHARS:
+        return text
+
+    return (
+        text[:MAX_MEDIA_CAPTION_CHARS - 1]
+        + "…"
+    )
+
+
+async def _send_text(
+    event,
+    text: str,
+) -> tuple[bool, object | None]:
+    text = str(text or "")
+
+    try:
+        sent = await event.reply(
+            text[:4000]
         )
-        return
+
+        return True, sent
+
+    except Exception:
+        try:
+            sent = await event.respond(
+                text[:4000]
+            )
+
+            return True, sent
+
+        except Exception:
+            return False, None
+
+
+async def _try_send_media(
+    self,
+    event,
+    image: tuple[bytes, str],
+    *,
+    caption: str = "",
+) -> tuple[bool, object | None]:
+    data, filename = image
+
+    try:
+        sent = await send_media_bytes(
+            self,
+            event,
+            data,
+            filename,
+            caption=caption,
+        )
+
+        return True, sent
+
+    except Exception as exc:
+        self.debug(
+            "MEDIA_SEND",
+            (
+                f"FAILED "
+                f"file={filename} "
+                f"type={type(exc).__name__} "
+                f"error={exc}"
+            ),
+        )
+
+        return False, None
+
+
+async def _try_send_fallback(
+    self,
+    event,
+    *,
+    caption: str = "",
+) -> tuple[bool, object | None]:
+    try:
+        sent = await send_fallback_image(
+            self,
+            event,
+            caption=caption,
+        )
+
+        return True, sent
 
     except Exception as exc:
         self.debug(
@@ -300,18 +457,156 @@ async def _run_cat(
             ),
         )
 
+        return False, None
+
+
+# =========================================================
+# RESPONSE FINALIZATION
+# =========================================================
+
+async def _finish_cat_response(
+    self,
+    event,
+    state: dict,
+    *,
+    answer: str = "",
+    ai_failed: bool = False,
+    standalone: bool = False,
+) -> object | None:
+    """
+    تصمیم نهایی بر اساس نتیجه‌ی API گربه و نتیجه‌ی AI.
+
+    standalone:
+        فقط عکس گربه خواسته شده؛ در صورت خطای API
+        از فال‌بک مشترک استفاده می‌شود.
+
+    AI موفق:
+        عکس و کپشن؛ در صورت ناموفق بودن عکس،
+        پاسخ AI به صورت متن ارسال می‌شود.
+
+    AI ناموفق:
+        عکس با کپشن خطای AI؛ اگر تهیه یا ارسال عکس
+        ناموفق بود، تصویر fallback با همان کپشن ارسال می‌شود.
+    """
+
+    if state["finalized"]:
+        return state["sent_message"]
+
+    if state["finalizing"]:
+        await state["completion"]
+        return state["sent_message"]
+
+    state["finalizing"] = True
+
+    sent = None
+    delivery_ok = False
+
     try:
-        await event.reply(
-            "متأسفانه نتونستم تصویر گربه رو ارسال کنم."
+        image = await _get_cat_image(state)
+
+        # -------------------------------------------------
+        # A. فقط عکس خواسته شده؛ AI پاسخی تولید نمی‌کند.
+        # -------------------------------------------------
+
+        if standalone:
+            if image is not None:
+                delivery_ok, sent = await _try_send_media(
+                    self,
+                    event,
+                    image,
+                )
+
+            if not delivery_ok:
+                delivery_ok, sent = await _try_send_fallback(
+                    self,
+                    event,
+                )
+
+            if not delivery_ok:
+                delivery_ok, sent = await _send_text(
+                    event,
+                    "متأسفانه نتونستم تصویر گربه رو ارسال کنم.",
+                )
+
+        # -------------------------------------------------
+        # B. AI خطا داده است.
+        # -------------------------------------------------
+
+        elif ai_failed:
+            error_caption = _media_caption(answer)
+
+            if image is not None:
+                delivery_ok, sent = await _try_send_media(
+                    self,
+                    event,
+                    image,
+                    caption=error_caption,
+                )
+
+            if not delivery_ok:
+                delivery_ok, sent = await _try_send_fallback(
+                    self,
+                    event,
+                    caption=error_caption,
+                )
+
+            if not delivery_ok:
+                delivery_ok, sent = await _send_text(
+                    event,
+                    answer,
+                )
+
+        # -------------------------------------------------
+        # C. AI موفق بوده است.
+        # -------------------------------------------------
+
+        else:
+            if image is not None:
+                delivery_ok, sent = await _try_send_media(
+                    self,
+                    event,
+                    image,
+                    caption=_media_caption(answer),
+                )
+
+            # اگر عکس قابل ارسال نبود، پاسخ AI را
+            # به‌صورت متن می‌فرستیم؛ فال‌بک لازم نیست.
+            if not delivery_ok:
+                delivery_ok, sent = await _send_text(
+                    event,
+                    answer,
+                )
+
+    except Exception as exc:
+        self.debug(
+            "RESPONSE",
+            (
+                f"FINALIZATION_ERROR "
+                f"type={type(exc).__name__} "
+                f"error={exc}"
+            ),
         )
 
-    except Exception:
-        pass
+    finally:
+        state["sent_message"] = sent
+        state["delivery_ok"] = delivery_ok
+        state["finalizing"] = False
+        state["finalized"] = True
+
+        completion = state.get("completion")
+
+        if (
+            completion is not None
+            and not completion.done()
+        ):
+            completion.set_result(sent)
+
+    return sent
 
 
-# ---------------------------------------------------------
-# CAT COMMAND
-# ---------------------------------------------------------
+# =========================================================
+# DIRECT CAT COMMAND
+# =========================================================
 
 @command(
     name="گربه",
@@ -324,15 +619,141 @@ async def cat(
     self,
     event,
 ) -> None:
-    await _run_cat(
+    state = _get_cat_state(
         self,
         event,
     )
 
+    await _finish_cat_response(
+        self,
+        event,
+        state,
+        standalone=True,
+    )
 
-# ---------------------------------------------------------
-# CAT TEXT TRIGGER
-# ---------------------------------------------------------
+
+# =========================================================
+# GENERIC AI RESPONSE-COMPOSITION HOOKS
+# =========================================================
+
+@on_bus_event("response_composition_prepare")
+async def prepare_response_composition(
+    self,
+    event,
+    context: dict,
+) -> None:
+    """
+    AI Gateway قبل از درخواست مدل این رویداد را می‌فرستد.
+
+    هر قابلیت می‌تواند طبق سیاست مستقل خودش تصمیم بگیرد
+    آیا پاسخ AI باید با رسانه ترکیب شود یا خیر.
+    """
+
+    if not _matches_cat_trigger(
+        self,
+        event,
+    ):
+        return
+
+    state = _get_cat_state(
+        self,
+        event,
+    )
+
+    context["defer_response"] = True
+    context["response_state"] = state
+
+
+@on_bus_event("response_composition_success")
+async def finalize_response_composition(
+    self,
+    event,
+    context: dict,
+    answer: str,
+) -> None:
+    if not context.get("defer_response"):
+        return
+
+    state = context.get(
+        "response_state"
+    )
+
+    if state is None:
+        return
+
+    sent = await _finish_cat_response(
+        self,
+        event,
+        state,
+        answer=answer,
+    )
+
+    context["sent_message"] = sent
+    context["delivery_completed"] = state[
+        "delivery_ok"
+    ]
+
+
+@on_bus_event("response_composition_failure")
+async def fail_response_composition(
+    self,
+    event,
+    context: dict,
+    error_text: str,
+) -> None:
+    if not context.get("defer_response"):
+        return
+
+    state = context.get(
+        "response_state"
+    )
+
+    if state is None:
+        return
+
+    sent = await _finish_cat_response(
+        self,
+        event,
+        state,
+        answer=error_text,
+        ai_failed=True,
+    )
+
+    context["sent_message"] = sent
+    context["delivery_completed"] = state[
+        "delivery_ok"
+    ]
+
+
+@on_bus_event("response_composition_not_requested")
+async def finalize_without_ai(
+    self,
+    event,
+) -> None:
+    """
+    اگر Fun تریگر را زودتر دیده باشد ولی مشخص شود
+    این پیام اصلاً به AI نیاز ندارد، فقط عکس را ارسال می‌کند.
+
+    اگر callback هوش مصنوعی زودتر اجرا شده باشد و هنوز
+    هیچ state وجود نداشته باشد، این رویداد بی‌اثر است.
+    """
+
+    state = _get_existing_cat_state(event)
+
+    if state is None or state["finalized"]:
+        return
+
+    await _finish_cat_response(
+        self,
+        event,
+        state,
+        standalone=True,
+    )
+
+
+# =========================================================
+# CAT TRIGGER
+# =========================================================
 
 @on_event(
     events.NewMessage(incoming=True)
@@ -341,32 +762,80 @@ async def on_cat_trigger(
     self,
     event,
 ) -> None:
-    text = (
-        event.raw_text or ""
-    ).strip()
-
-    if not text:
-        return
-
-    if self.command_manager.is_command_message(
-        text
-    ):
-        return
-
-    if not matches_trigger_words(
-        text,
-        CAT_TRIGGER_WORDS,
-        max_words=5,
-    ):
-        return
-
-    if await should_skip_trigger_on_bot_reply(
+    if not _matches_cat_trigger(
         self,
         event,
     ):
         return
 
-    await _run_cat(
+    state = _get_cat_state(
         self,
         event,
+    )
+
+    ai_processed = getattr(
+        event,
+        "_ai_gateway_processed",
+        False,
+    )
+
+    ai_expected = getattr(
+        event,
+        "_ai_gateway_expected",
+        False,
+    )
+
+    # AI Gateway قبلاً این پیام را پردازش کرده است.
+    if ai_processed:
+        if ai_expected and not state["finalized"]:
+            # در حالت عادی AI قبلاً پاسخ ترکیبی را
+            # نهایی کرده؛ این شاخه محافظی برای خطاهای
+            # غیرمنتظره در مسیر هماهنگ‌سازی است.
+            await _finish_cat_response(
+                self,
+                event,
+                state,
+                standalone=True,
+            )
+
+        elif not ai_expected:
+            await _finish_cat_response(
+                self,
+                event,
+                state,
+                standalone=True,
+            )
+
+        return
+
+    # اگر AI Gateway قبل از Fun اجرا شود، نتیجه‌ی پردازش
+    # تا پایان callback مشخص است. اگر بعد از Fun اجرا شود،
+    # این callback فقط دانلود عکس را شروع می‌کند و برمی‌گردد.
+    plugin_manager = getattr(
+        self,
+        "plugin_manager",
+        None,
+    )
+
+    ai_plugin = (
+        plugin_manager.get_plugin_by_id("ai_gateway")
+        if plugin_manager is not None
+        else None
+    )
+
+    can_coordinate_with_ai = (
+        event.is_group
+        and event.sender_id is not None
+        and ai_plugin is not None
+        and ai_plugin.enabled
+    )
+
+    if can_coordinate_with_ai:
+        return
+
+    await _finish_cat_response(
+        self,
+        event,
+        state,
+        standalone=True,
     )
