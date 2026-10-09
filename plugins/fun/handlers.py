@@ -1,332 +1,35 @@
 from __future__ import annotations
 
-import inspect
-import asyncio
-import io
-import time
-from collections.abc import Callable
-from pathlib import Path
+import json
 
-import aiohttp
-
-import re
+from urllib.parse import urlparse
 
 from splusthon import events
 
 from core.decorators import command, on_event
-from core.soroush_media import send_media
-from plugins.fun.cat_cache import CatCache
 
-
-CAT_API_URL = "https://cataas.com/cat"
-CAT_API_TIMEOUT = 10
-
-FALLBACK_IMAGE = (
-    Path(__file__).parent / "fallback_cat.jpg"
+from .api_client import (
+    APIClientError,
+    request_api,
 )
 
-cat_cache = CatCache()
+from .utils import (
+    guess_file_extension,
+    is_image_response,
+    matches_trigger_words,
+    send_fallback_image,
+    send_media_bytes,
+    should_skip_trigger_on_bot_reply,
+)
 
 
-DebugLogger = Callable[[str, str], None]
+# ---------------------------------------------------------
+# CAT FEATURE
+# ---------------------------------------------------------
 
+CAT_API_URL = "https://cataas.com/cat"
 
-def _detect_extension(
-    content_type: str,
-    data: bytes,
-) -> str | None:
-    content_type = (
-        content_type
-        .lower()
-        .split(";", 1)[0]
-        .strip()
-    )
-
-    if (
-        content_type == "image/jpeg"
-        or data.startswith(b"\xff\xd8\xff")
-    ):
-        return ".jpg"
-
-    if (
-        content_type == "image/png"
-        or data.startswith(
-            b"\x89PNG\r\n\x1a\n"
-        )
-    ):
-        return ".png"
-
-    if (
-        content_type == "image/gif"
-        or data.startswith(b"GIF87a")
-        or data.startswith(b"GIF89a")
-    ):
-        return ".gif"
-
-    if (
-        content_type == "image/webp"
-        or (
-            data.startswith(b"RIFF")
-            and data[8:12] == b"WEBP"
-        )
-    ):
-        return ".webp"
-
-    return None
-
-
-async def _download_cat(
-    debug: DebugLogger | None = None,
-) -> tuple[bytes, str] | None:
-    started = time.perf_counter()
-
-    if debug is not None:
-        debug(
-            "API",
-            (
-                f"START "
-                f"url={CAT_API_URL} "
-                f"timeout={CAT_API_TIMEOUT}s"
-            ),
-        )
-
-    timeout = aiohttp.ClientTimeout(
-        total=CAT_API_TIMEOUT
-    )
-
-    try:
-        async with aiohttp.ClientSession(
-            timeout=timeout
-        ) as session:
-            async with session.get(
-                CAT_API_URL
-            ) as response:
-
-                elapsed = (
-                    time.perf_counter()
-                    - started
-                )
-
-                content_type = response.headers.get(
-                    "Content-Type",
-                    "",
-                )
-
-                if debug is not None:
-                    debug(
-                        "API",
-                        (
-                            f"RESPONSE "
-                            f"status={response.status} "
-                            f"content_type={content_type or '-'} "
-                            f"elapsed={elapsed:.3f}s"
-                        ),
-                    )
-
-                if response.status != 200:
-                    if debug is not None:
-                        debug(
-                            "API",
-                            (
-                                f"FAIL "
-                                f"reason=http_status "
-                                f"status={response.status}"
-                            ),
-                        )
-
-                    return None
-
-                data = await response.read()
-
-                if debug is not None:
-                    debug(
-                        "API",
-                        (
-                            f"DOWNLOAD "
-                            f"bytes={len(data)} "
-                            f"elapsed="
-                            f"{time.perf_counter() - started:.3f}s"
-                        ),
-                    )
-
-                if not data:
-                    if debug is not None:
-                        debug(
-                            "API",
-                            "FAIL reason=empty_body",
-                        )
-
-                    return None
-
-                extension = _detect_extension(
-                    content_type,
-                    data,
-                )
-
-                if extension is None:
-                    if debug is not None:
-                        debug(
-                            "API",
-                            (
-                                "FAIL "
-                                "reason=invalid_image "
-                                f"bytes={len(data)}"
-                            ),
-                        )
-
-                    return None
-
-                filename = f"cat{extension}"
-
-                if debug is not None:
-                    debug(
-                        "API",
-                        (
-                            f"SUCCESS "
-                            f"file={filename} "
-                            f"bytes={len(data)} "
-                            f"total_elapsed="
-                            f"{time.perf_counter() - started:.3f}s"
-                        ),
-                    )
-
-                return data, filename
-
-    except asyncio.TimeoutError:
-        elapsed = (
-            time.perf_counter()
-            - started
-        )
-
-        if debug is not None:
-            debug(
-                "API",
-                (
-                    f"TIMEOUT "
-                    f"after={elapsed:.3f}s "
-                    f"limit={CAT_API_TIMEOUT}s"
-                ),
-            )
-
-        return None
-
-    except aiohttp.ClientError as exc:
-        elapsed = (
-            time.perf_counter()
-            - started
-        )
-
-        if debug is not None:
-            debug(
-                "API",
-                (
-                    f"ERROR "
-                    f"type={type(exc).__name__} "
-                    f"elapsed={elapsed:.3f}s "
-                    f"message={exc}"
-                ),
-            )
-
-        return None
-
-    except Exception as exc:
-        elapsed = (
-            time.perf_counter()
-            - started
-        )
-
-        if debug is not None:
-            debug(
-                "API",
-                (
-                    f"UNEXPECTED_ERROR "
-                    f"type={type(exc).__name__} "
-                    f"elapsed={elapsed:.3f}s "
-                    f"message={exc}"
-                ),
-            )
-
-        return None
-
-
-def _file_from_bytes(
-    data: bytes,
-    filename: str,
-) -> io.BytesIO:
-    file = io.BytesIO(data)
-    file.name = filename
-    return file
-
-
-async def _send_bytes(
-    client,
-    chat_id,
-    data: bytes,
-    filename: str,
-    reply_to: int,
-    *,
-    source: str,
-    debug: DebugLogger | None = None,
-) -> None:
-    if debug is not None:
-        debug(
-            "SEND",
-            (
-                f"START "
-                f"source={source} "
-                f"file={filename} "
-                f"bytes={len(data)}"
-            ),
-        )
-
-    await send_media(
-        client,
-        chat_id,
-        _file_from_bytes(
-            data,
-            filename,
-        ),
-        caption="",
-        reply_to=reply_to,
-    )
-
-    if debug is not None:
-        debug(
-            "SEND",
-            (
-                f"SUCCESS "
-                f"source={source} "
-                f"file={filename}"
-            ),
-        )
-
-
-def _load_fallback(
-    debug: DebugLogger | None = None,
-) -> tuple[bytes, str]:
-    if debug is not None:
-        debug(
-            "FALLBACK",
-            (
-                f"LOAD_START "
-                f"path={FALLBACK_IMAGE}"
-            ),
-        )
-
-    data = FALLBACK_IMAGE.read_bytes()
-
-    if debug is not None:
-        debug(
-            "FALLBACK",
-            (
-                f"LOAD_SUCCESS "
-                f"file={FALLBACK_IMAGE.name} "
-                f"bytes={len(data)}"
-            ),
-        )
-
-    return data, FALLBACK_IMAGE.name
-
+CAT_API_TIMEOUT = 10
 
 CAT_TRIGGER_WORDS = (
     "میو",
@@ -334,201 +37,281 @@ CAT_TRIGGER_WORDS = (
     "پیشی",
 )
 
-async def _run_cat(self, event) -> None:
-    """منطق مشترک کامند و تریگر."""
-    debug = self.debug
 
-    debug(
-        "REQUEST",
+def _find_url_in_payload(
+    value,
+) -> str | None:
+    """
+    منطق مخصوص قابلیت گربه:
+    در پاسخ JSON، آدرس مستقیم تصویر را پیدا می‌کند.
+
+    این منطق عمداً در api_client.py نیست؛
+    هر قابلیت شکل پاسخ مورد انتظار خودش را می‌شناسد.
+    """
+
+    preferred_keys = (
+        "image_url",
+        "image",
+        "url",
+        "src",
+        "link",
+    )
+
+    if isinstance(value, str):
+        candidate = value.strip()
+
+        if urlparse(candidate).scheme in (
+            "http",
+            "https",
+        ):
+            return candidate
+
+        return None
+
+    if isinstance(value, dict):
+        for key in preferred_keys:
+            if key in value:
+                found = _find_url_in_payload(
+                    value[key]
+                )
+
+                if found:
+                    return found
+
+        for child in value.values():
+            found = _find_url_in_payload(child)
+
+            if found:
+                return found
+
+    elif isinstance(value, list):
+        for child in value:
+            found = _find_url_in_payload(child)
+
+            if found:
+                return found
+
+    return None
+
+
+async def _resolve_cat_image(
+    response,
+) -> tuple[bytes, str] | None:
+    """
+    پاسخ API گربه را تفسیر می‌کند.
+
+    پشتیبانی:
+        - تصویر مستقیم
+        - JSON حاوی URL تصویر
+        - متن ساده‌ای که خودش URL است
+
+    هر نوع پاسخ دیگری برای این قابلیت
+    قابل استفاده نیست و به فال‌بک می‌رسد.
+    """
+
+    if not response.ok:
+        return None
+
+    # حالت اول: خود پاسخ، تصویر است.
+    if is_image_response(
+        response.content_type,
+        response.body,
+    ):
+        extension = guess_file_extension(
+            response.content_type,
+            response.body,
+            url=response.url,
+        )
+
+        return (
+            response.body,
+            f"cat{extension}",
+        )
+
+    image_url = None
+
+    # حالت دوم: پاسخ JSON است.
+    if response.is_json:
+        try:
+            payload = response.json()
+
+        except (ValueError, json.JSONDecodeError):
+            payload = None
+
+        if payload is not None:
+            image_url = _find_url_in_payload(
+                payload
+            )
+
+    # حالت سوم: بدنه خودش URL است.
+    elif response.content_type.startswith("text/"):
+        candidate = response.text().strip()
+
+        if (
+            candidate.startswith("https://")
+            or candidate.startswith("http://")
+        ):
+            image_url = candidate
+
+    if not image_url:
+        return None
+
+    # URL استخراج شده باید خودش دریافت شود.
+    image_response = await request_api(
+        image_url,
+        timeout=CAT_API_TIMEOUT,
+        max_bytes=15 * 1024 * 1024,
+    )
+
+    if not image_response.ok:
+        return None
+
+    if not is_image_response(
+        image_response.content_type,
+        image_response.body,
+    ):
+        return None
+
+    extension = guess_file_extension(
+        image_response.content_type,
+        image_response.body,
+        url=image_response.url,
+    )
+
+    return (
+        image_response.body,
+        f"cat{extension}",
+    )
+
+
+async def _run_cat(
+    self,
+    event,
+) -> None:
+    """
+    عمل مستقل قابلیت گربه.
+    هم کامند و هم تریگر به همین تابع می‌رسند.
+    """
+
+    self.debug(
+        "CAT",
         (
-            f"START "
+            "START "
             f"group={event.chat_id} "
             f"user={event.sender_id} "
             f"message={event.id}"
         ),
     )
 
-    # ---------------------------------------------------------
-    # 1. API
-    # ---------------------------------------------------------
-    downloaded = await _download_cat(debug)
+    try:
+        response = await request_api(
+            CAT_API_URL,
+            timeout=CAT_API_TIMEOUT,
+            max_bytes=15 * 1024 * 1024,
+        )
 
-    if downloaded is not None:
-        data, filename = downloaded
+        image = await _resolve_cat_image(
+            response
+        )
 
-        debug(
-            "CACHE",
+    except APIClientError as exc:
+        image = None
+
+        self.debug(
+            "API",
             (
-                f"ADD_CANDIDATE "
-                f"file={filename} "
-                f"bytes={len(data)}"
+                f"FAILED "
+                f"type={type(exc).__name__} "
+                f"error={exc}"
             ),
         )
 
-        cat_cache.add(
-            data,
-            filename,
-            debug=debug,
+    except Exception as exc:
+        image = None
+
+        self.debug(
+            "CAT",
+            (
+                f"UNEXPECTED_ERROR "
+                f"type={type(exc).__name__} "
+                f"error={exc}"
+            ),
         )
 
+    # -------------------------------------------------
+    # API RESULT
+    # -------------------------------------------------
+
+    if image is not None:
+        data, filename = image
+
         try:
-            await _send_bytes(
-                self.client,
-                event.chat_id,
+            await send_media_bytes(
+                self,
+                event,
                 data,
                 filename,
-                event.id,
-                source="api",
-                debug=debug,
             )
 
-            debug(
-                "REQUEST",
-                "SUCCESS source=api",
+            self.debug(
+                "CAT",
+                f"SUCCESS source=api file={filename}",
             )
             return
 
         except Exception as exc:
-            debug(
+            self.debug(
                 "SEND",
                 (
-                    f"FAILED "
-                    f"source=api "
+                    "API_IMAGE_FAILED "
                     f"type={type(exc).__name__} "
-                    f"message={exc}"
+                    f"error={exc}"
                 ),
             )
 
-    # ---------------------------------------------------------
-    # 2. CACHE
-    # ---------------------------------------------------------
-    debug(
-        "CACHE",
-        (
-            f"FALLBACK_START "
-            f"count={cat_cache.count} "
-            f"bytes={cat_cache.total_bytes} "
-            f"limit_images=3 "
-            f"limit_bytes=4194304"
-        ),
-    )
+    # -------------------------------------------------
+    # SHARED FALLBACK
+    # -------------------------------------------------
 
-    cache_attempts = cat_cache.count
-
-    for attempt in range(1, cache_attempts + 1):
-        cached = cat_cache.get_random(
-            debug=debug,
-        )
-
-        if cached is None:
-            debug(
-                "CACHE",
-                (
-                    f"ATTEMPT={attempt} "
-                    "result=EMPTY"
-                ),
-            )
-            break
-
-        debug(
-            "CACHE",
-            (
-                f"ATTEMPT={attempt} "
-                f"key={cached.key[:8]} "
-                f"file={cached.filename} "
-                f"bytes={len(cached.data)}"
-            ),
-        )
-
-        try:
-            await _send_bytes(
-                self.client,
-                event.chat_id,
-                cached.data,
-                cached.filename,
-                event.id,
-                source="cache",
-                debug=debug,
-            )
-
-            debug(
-                "REQUEST",
-                (
-                    f"SUCCESS "
-                    f"source=cache "
-                    f"attempt={attempt}"
-                ),
-            )
-            return
-
-        except Exception as exc:
-            debug(
-                "SEND",
-                (
-                    f"FAILED "
-                    f"source=cache "
-                    f"attempt={attempt} "
-                    f"type={type(exc).__name__} "
-                    f"message={exc}"
-                ),
-            )
-
-            cat_cache.remove(
-                cached.key,
-                debug=debug,
-            )
-
-    # ---------------------------------------------------------
-    # 3. STATIC FALLBACK
-    # ---------------------------------------------------------
-    debug(
-        "FALLBACK",
-        "CACHE_EXHAUSTED switching_to_static_fallback",
+    self.debug(
+        "CAT",
+        "USING_SHARED_FALLBACK",
     )
 
     try:
-        fallback_data, fallback_filename = (
-            _load_fallback(debug)
+        await send_fallback_image(
+            self,
+            event,
         )
 
-        await _send_bytes(
-            self.client,
-            event.chat_id,
-            fallback_data,
-            fallback_filename,
-            event.id,
-            source="static_fallback",
-            debug=debug,
-        )
-
-        debug(
-            "REQUEST",
-            "SUCCESS source=static_fallback",
+        self.debug(
+            "CAT",
+            "SUCCESS source=fallback",
         )
         return
 
     except Exception as exc:
-        debug(
+        self.debug(
             "FALLBACK",
             (
                 f"FAILED "
                 f"type={type(exc).__name__} "
-                f"message={exc}"
+                f"error={exc}"
             ),
         )
 
-    # ---------------------------------------------------------
-    # 4. آخرین حالت ممکن
-    # ---------------------------------------------------------
-    debug(
-        "REQUEST",
-        "FAILED all_fallbacks_exhausted",
-    )
+    try:
+        await event.reply(
+            "متأسفانه نتونستم تصویر گربه رو ارسال کنم."
+        )
 
-    await event.reply(
-        "متأسفانه خطایی رخ داد!",
-        reply_to=event.id,
-    )
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------
+# CAT COMMAND
+# ---------------------------------------------------------
 
 @command(
     name="گربه",
@@ -537,133 +320,27 @@ async def _run_cat(self, event) -> None:
     description="یک عکس تصادفی از گربه می‌فرستد.",
     native_name="cat",
 )
-async def cat(self, event) -> None:
-    await _run_cat(self, event)
-
-
-async def _should_skip_cat_trigger(
+async def cat(
     self,
     event,
-) -> bool:
-    """
-    اگر پیام ریپلای به پیام خود بوبی باشد،
-    تریگر عکس گربه را متوقف می‌کند.
-
-    اگر اطلاعات ریپلای یا شناسه بوبی قابل تشخیص نباشد،
-    برای جلوگیری از پاسخ دوگانه، تریگر را متوقف می‌کند.
-    """
-
-    if not getattr(event, "is_reply", False):
-        return False
-
-    # -------------------------------------------------
-    # REPLY MESSAGE
-    # -------------------------------------------------
-
-    try:
-        replied = await event.get_reply_message()
-
-    except Exception as exc:
-        self.debug(
-            "TRIGGER",
-            (
-                "SKIP reason=reply_lookup_failed "
-                f"error={type(exc).__name__}"
-            ),
-        )
-        return True
-
-    if replied is None:
-        self.debug(
-            "TRIGGER",
-            "SKIP reason=reply_message_unavailable",
-        )
-        return True
-
-    replied_sender_id = getattr(
-        replied,
-        "sender_id",
-        None,
-    )
-
-    if replied_sender_id is None:
-        self.debug(
-            "TRIGGER",
-            "SKIP reason=reply_sender_unavailable",
-        )
-        return True
-
-    # -------------------------------------------------
-    # BOT USER ID
-    # -------------------------------------------------
-
-    bot_user_id = getattr(
+) -> None:
+    await _run_cat(
         self,
-        "bot_user_id",
-        None,
+        event,
     )
 
-    # شناسه را فقط در صورت نیاز می‌گیریم و نگه می‌داریم.
-    if bot_user_id is None:
-        try:
-            result = self.client.get_me()
 
-            if inspect.isawaitable(result):
-                result = await result
+# ---------------------------------------------------------
+# CAT TEXT TRIGGER
+# ---------------------------------------------------------
 
-            bot_user_id = getattr(
-                result,
-                "id",
-                None,
-            )
-
-            self.bot_user_id = bot_user_id
-
-        except Exception as exc:
-            self.debug(
-                "TRIGGER",
-                (
-                    "SKIP reason=bot_id_unavailable "
-                    f"error={type(exc).__name__}"
-                ),
-            )
-            return True
-
-    if bot_user_id is None:
-        self.debug(
-            "TRIGGER",
-            "SKIP reason=bot_id_unavailable",
-        )
-        return True
-
-    # -------------------------------------------------
-    # COMPARE REPLY SENDER
-    # -------------------------------------------------
-
-    try:
-        is_bot_reply = (
-            int(replied_sender_id)
-            == int(bot_user_id)
-        )
-
-    except (TypeError, ValueError):
-        self.debug(
-            "TRIGGER",
-            "SKIP reason=invalid_sender_id",
-        )
-        return True
-
-    if is_bot_reply:
-        self.debug(
-            "TRIGGER",
-            "SKIP reason=reply_to_booby",
-        )
-
-    return is_bot_reply
-
-
-@on_event(events.NewMessage(incoming=True))
-async def on_cat_trigger(self, event) -> None:
+@on_event(
+    events.NewMessage(incoming=True)
+)
+async def on_cat_trigger(
+    self,
+    event,
+) -> None:
     text = (
         event.raw_text or ""
     ).strip()
@@ -671,16 +348,25 @@ async def on_cat_trigger(self, event) -> None:
     if not text:
         return
 
-    # کامندها همچنان از مسیر کامند منیجر عبور می‌کنند.
-    if self.command_manager.is_command_message(text):
+    if self.command_manager.is_command_message(
+        text
+    ):
         return
 
-    # فقط تطبیق کل پیام، نه پیدا کردن کلمه درون متن.
-    if text not in CAT_TRIGGER_WORDS:
+    if not matches_trigger_words(
+        text,
+        CAT_TRIGGER_WORDS,
+        max_words=5,
+    ):
         return
 
-    # ریپلای به پیام خود بوبی نباید عکس گربه تولید کند.
-    if await _should_skip_cat_trigger(self, event):
+    if await should_skip_trigger_on_bot_reply(
+        self,
+        event,
+    ):
         return
 
-    await _run_cat(self, event)
+    await _run_cat(
+        self,
+        event,
+    )

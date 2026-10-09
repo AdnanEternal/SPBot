@@ -5,9 +5,11 @@ from . import handlers
 
 class FunPlugin(BasePlugin):
     name = "Fun"
-    version = "1.0.1"
+    version = "2.0.0"
 
     DEBUG_LOGGING = 0
+
+    bot_user_id = None
 
     def debug(
         self,
