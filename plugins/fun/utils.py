@@ -44,6 +44,79 @@ def _compile_stretched_word(
     )
 
 
+def find_trigger_words(
+    text: str | None,
+    trigger_words,
+) -> tuple[str, ...]:
+    """
+    فقط تریگرهای موجود در متن را تشخیص می‌دهد.
+
+    - محدودیت تعداد کلمات ندارد.
+    - امکان کشیدگی حروف را حفظ می‌کند.
+    - نتیجه را بر اساس ترتیب ظهور تریگرها برمی‌گرداند.
+    - هر تریگر را حداکثر یک بار برمی‌گرداند.
+
+    تصمیم درباره معتبر بودن پیام با قابلیت مربوطه است.
+    """
+
+    text = (text or "").strip()
+
+    if not text:
+        return ()
+
+    matches = []
+
+    for raw_word in trigger_words:
+        word = str(raw_word).strip()
+
+        if not word:
+            continue
+
+        match = _compile_stretched_word(word).search(text)
+
+        if match is None:
+            continue
+
+        matches.append(
+            (
+                match.start(),
+                match.end(),
+                word,
+            )
+        )
+
+    matches.sort(
+        key=lambda item: (
+            item[0],
+            -(item[1] - item[0]),
+        )
+    )
+
+    result = []
+    seen = set()
+
+    for _, _, word in matches:
+        normalized = word.casefold()
+
+        if normalized in seen:
+            continue
+
+        seen.add(normalized)
+        result.append(word)
+
+    return tuple(result)
+
+
+def count_words(
+    text: str | None,
+) -> int:
+    """تعداد کلمات متن را حساب می‌کند."""
+
+    return len(
+        _WORD_PATTERN.findall(text or "")
+    )
+
+
 def matches_trigger_words(
     text: str | None,
     trigger_words,
@@ -51,11 +124,10 @@ def matches_trigger_words(
     max_words: int | None = 5,
 ) -> bool:
     """
-    ابزار عمومی تشخیص کلمه‌های مستقل با امکان
-    کشیدگی حروف و محدودیت تعداد کلمات.
+    ابزار سازگار با استفاده‌های قبلی.
 
-    سیاست نهایی هر قابلیت باید در خود همان قابلیت
-    تعیین شود؛ این تابع صرفاً ابزار تطبیق است.
+    این تابع علاوه بر تشخیص، محدودیت طول را نیز اعمال می‌کند.
+    برای سیاست‌های جدید ترجیحاً از find_trigger_words استفاده شود.
     """
 
     text = (text or "").strip()
@@ -63,22 +135,59 @@ def matches_trigger_words(
     if not text:
         return False
 
-    words = _WORD_PATTERN.findall(text)
-
     if (
         max_words is not None
-        and len(words) > max_words
+        and count_words(text) > max_words
     ):
         return False
 
-    for word in trigger_words:
-        word = str(word).strip()
+    return bool(
+        find_trigger_words(
+            text,
+            trigger_words,
+        )
+    )
 
-        if not word:
-            continue
 
-        if _compile_stretched_word(word).search(text):
-            return True
+def is_media_response(
+    content_type: str,
+    data: bytes,
+) -> bool:
+    """
+    اعتبارسنجی پاسخ رسانه‌ای تصویر یا ویدئو.
+
+    GIF نیز به عنوان image پشتیبانی می‌شود.
+    تشخیص امضای فایل کمک می‌کند اگر Content-Type دقیق نبود،
+    فایل معتبر را بی‌دلیل رد نکنیم.
+    """
+
+    content_type = (
+        content_type or ""
+    ).split(";", 1)[0].strip().lower()
+
+    if content_type.startswith(
+        ("image/", "video/")
+    ):
+        return True
+
+    if is_image_response(
+        content_type,
+        data,
+    ):
+        return True
+
+    # MP4 / فایل‌های مبتنی بر ISO Base Media
+    if (
+        len(data) >= 12
+        and data[4:8] == b"ftyp"
+    ):
+        return True
+
+    # WebM / EBML
+    if data.startswith(
+        b"\x1a\x45\xdf\xa3"
+    ):
+        return True
 
     return False
 

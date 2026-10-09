@@ -2986,8 +2986,8 @@ async def on_message(
         event._ai_gateway_expected = True
 
         response_composition = {
-            "defer_response": False,
-            "response_state": None,
+            "response_owner": None,
+            "response_data": None,
             "sent_message": None,
             "delivery_completed": False,
         }
@@ -3169,32 +3169,24 @@ async def on_message(
 
         if (
             response_composition is not None
-            and response_composition.get("defer_response")
+            and response_composition.get("response_owner") is not None
         ):
             context.insert(
                 1,
                 {
                     "role": "system",
                     "content": (
-                        "CURRENT TURN RESPONSE COMPOSITION\n\n"
-                        "A Fun plugin feature is handling a media request "
-                        "for the current user message. Your text response "
-                        "may be delivered as the caption of media sent by "
-                        "the application.\n\n"
-                        "Do not claim that you cannot send, attach, or "
-                        "provide images or other media. The application "
-                        "handles media delivery separately from your text "
-                        "generation.\n\n"
-                        "Do not claim that media delivery definitely "
-                        "succeeded, and do not describe internal tools or "
-                        "implementation details. Write a natural response "
-                        "that works as the caption accompanying the requested "
-                        "media. If the user asks for something beyond the "
-                        "media request, answer that normally as well."
+                        "CURRENT TURN RESPONSE DELIVERY\n\n"
+                        "A trusted plugin owns delivery of this response. "
+                        "Your generated text will be handed to that plugin. "
+                        "The plugin may combine it with media or process it "
+                        "in another way before delivery.\n\n"
+                        "Write a natural, complete response to the user's "
+                        "message. Do not claim that delivery has succeeded, "
+                        "and do not describe internal implementation details."
                     ),
                 },
             )
-
 
         # -------------------------------------------------
         # DEBUG: قبل از درخواست API
@@ -3319,11 +3311,11 @@ async def on_message(
 
         sent = None
 
-        # اگر Fun درخواست ترکیب پاسخ داده باشد،
-        # ارسال را به هماهنگ‌کننده واگذار می‌کنیم.
+        # اگر پلاگینی مالکیت پاسخ را گرفته، Gateway دیگر
+        # نباید خودش پاسخ را ارسال کند یا ارسال را تکرار کند.
         if (
             response_composition is not None
-            and response_composition.get("defer_response")
+            and response_composition.get("response_owner") is not None
         ):
             await self.event_bus.emit(
                 "response_composition_success",
@@ -3336,29 +3328,8 @@ async def on_message(
                 "sent_message"
             )
 
-            # اگر هماهنگ‌کننده نتوانسته هیچ خروجی‌ای ارسال کند،
-            # پاسخ متنی AI را به‌عنوان آخرین تلاش می‌فرستیم.
-            if not response_composition.get(
-                "delivery_completed"
-            ):
-                try:
-                    sent = await event.reply(
-                        answer[:4000]
-                    )
-
-                except Exception:
-                    try:
-                        sent = await event.respond(
-                            answer[:4000]
-                        )
-
-                    except Exception as exc:
-                        print(
-                            f"⚠️ ارسال پاسخ بوبی ناموفق بود: {exc}"
-                        )
-
         else:
-            # رفتار قبلی برای پیام‌هایی که ترکیب رسانه ندارند.
+            # رفتار معمول AI Gateway بدون تغییر باقی می‌ماند.
             try:
                 sent = await event.reply(
                     answer[:4000]
@@ -3472,7 +3443,7 @@ async def on_message(
 
         if (
             response_composition is not None
-            and response_composition.get("defer_response")
+            and response_composition.get("response_owner") is not None
         ):
             await self.event_bus.emit(
                 "response_composition_failure",
@@ -3481,15 +3452,8 @@ async def on_message(
                 error_text=error_text,
             )
 
-            # اگر ترکیب پاسخ به‌طور کامل انجام نشد،
-            # دست‌کم پیام خطای AI را بفرست.
-            if not response_composition.get(
-                "delivery_completed"
-            ):
-                try:
-                    await event.reply(error_text)
-                except Exception:
-                    pass
+            # عمداً fallback مستقیمی از طرف Gateway نداریم.
+            # مالک پاسخ باید خودش خطا و رسانه را مدیریت کند.
 
         else:
             try:
@@ -3558,15 +3522,28 @@ async def on_message(
                 ),
                 stage="AI Message Handler",
             )
+            
+        error_text = (
+            "❌ هنگام پردازش پیام "
+            "مشکلی پیش آمد."
+        )
 
-        try:
-            await event.reply(
-                "❌ هنگام پردازش پیام "
-                "مشکلی پیش آمد."
+        if (
+            response_composition is not None
+            and response_composition.get("response_owner") is not None
+        ):
+            await self.event_bus.emit(
+                "response_composition_failure",
+                event=event,
+                context=response_composition,
+                error_text=error_text,
             )
 
-        except Exception:
-            pass
+        else:
+            try:
+                await event.reply(error_text)
+            except Exception:
+                pass
     
     finally:
         event._ai_gateway_processed = True

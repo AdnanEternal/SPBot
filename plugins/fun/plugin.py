@@ -1,4 +1,3 @@
-
 from core.base_plugin import BasePlugin
 
 from . import handlers
@@ -6,7 +5,7 @@ from . import handlers
 
 class FunPlugin(BasePlugin):
     name = "Fun"
-    version = "2.1.0"
+    version = "2.2.0"
 
     DEBUG_LOGGING = 0
 
@@ -25,11 +24,12 @@ class FunPlugin(BasePlugin):
 
     # Commands
     cat = handlers.cat
+    dog = handlers.dog
 
     # Message triggers
-    on_cat_trigger = handlers.on_cat_trigger
+    on_media_trigger = handlers.on_media_trigger
 
-    # AI response composition
+    # AI response ownership
     prepare_response_composition = (
         handlers.prepare_response_composition
     )
