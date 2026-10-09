@@ -3162,6 +3162,41 @@ async def on_message(
         )
 
         # -------------------------------------------------
+        # MEDIA RESPONSE CONTRACT
+        # -------------------------------------------------
+        # این دستور فقط برای همین درخواست به مدل اضافه می‌شود
+        # و در system prompt ذخیره‌شده‌ی گروه تغییر ایجاد نمی‌کند.
+
+        if (
+            response_composition is not None
+            and response_composition.get("defer_response")
+        ):
+            context.insert(
+                1,
+                {
+                    "role": "system",
+                    "content": (
+                        "CURRENT TURN RESPONSE COMPOSITION\n\n"
+                        "A Fun plugin feature is handling a media request "
+                        "for the current user message. Your text response "
+                        "may be delivered as the caption of media sent by "
+                        "the application.\n\n"
+                        "Do not claim that you cannot send, attach, or "
+                        "provide images or other media. The application "
+                        "handles media delivery separately from your text "
+                        "generation.\n\n"
+                        "Do not claim that media delivery definitely "
+                        "succeeded, and do not describe internal tools or "
+                        "implementation details. Write a natural response "
+                        "that works as the caption accompanying the requested "
+                        "media. If the user asks for something beyond the "
+                        "media request, answer that normally as well."
+                    ),
+                },
+            )
+
+
+        # -------------------------------------------------
         # DEBUG: قبل از درخواست API
         # -------------------------------------------------
 
