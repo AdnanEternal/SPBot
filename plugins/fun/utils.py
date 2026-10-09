@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 
 from core.soroush_media import send_media
 
+from splusthon.tl import types
 
 _WORD_PATTERN = re.compile(
     r"\w+",
@@ -286,14 +287,61 @@ async def send_media_bytes(
     caption: str = "",
     **kwargs,
 ):
-    """
-    ارسال فایل با ابزار رسانه‌ی مشترک SPBot.
-    تفسیر پاسخ API وظیفه‌ی این تابع نیست.
-    """
+    """ارسال تصویر، GIF یا ویدئو با متادیتای مناسب."""
 
     if not data:
         raise ValueError(
             "Cannot send an empty file."
+        )
+
+    extension = Path(filename).suffix.lower()
+    media_options = dict(kwargs)
+
+    if extension == ".gif":
+        # SPlusthon برای GIF به صفت Animated نیاز دارد.
+        attributes = list(
+            media_options.get("attributes") or []
+        )
+
+        if not any(
+            isinstance(
+                attribute,
+                types.DocumentAttributeAnimated,
+            )
+            for attribute in attributes
+        ):
+            attributes.append(
+                types.DocumentAttributeAnimated()
+            )
+
+        media_options["attributes"] = attributes
+        media_options.setdefault(
+            "mime_type",
+            "image/gif",
+        )
+
+    elif extension == ".mp4":
+        media_options.setdefault(
+            "mime_type",
+            "video/mp4",
+        )
+        media_options.setdefault(
+            "supports_streaming",
+            True,
+        )
+        media_options.setdefault(
+            "nosound_video",
+            True,
+        )
+
+    elif extension == ".webm":
+        media_options.setdefault(
+            "mime_type",
+            "video/webm",
+        )
+        media_options.setdefault(
+            "nosound_video",
+            True,
         )
 
     file = io.BytesIO(data)
@@ -305,7 +353,7 @@ async def send_media_bytes(
         file,
         caption=caption,
         reply_to=event.id,
-        **kwargs,
+        **media_options,
     )
 
 

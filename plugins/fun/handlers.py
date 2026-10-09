@@ -27,6 +27,8 @@ from .utils import (
     send_media_bytes,
 )
 
+from pathlib import Path
+
 
 # =========================================================
 # CONFIGURATION
@@ -50,7 +52,8 @@ DOG_TRIGGER_WORDS = (
     "هاپو",
 )
 
-
+DOG_MEDIA_TIMEOUT = 20
+MAX_DOG_MEDIA_BYTES = 30 * 1024 * 1024
 # =========================================================
 # CAT API
 # =========================================================
@@ -260,8 +263,8 @@ async def _fetch_dog_media(
 
         media_response = await request_api(
             media_url,
-            timeout=API_TIMEOUT,
-            max_bytes=MAX_MEDIA_BYTES,
+            timeout=DOG_MEDIA_TIMEOUT,
+            max_bytes=MAX_DOG_MEDIA_BYTES,
         )
 
         if not media_response.ok:
@@ -282,14 +285,38 @@ async def _fetch_dog_media(
             self.debug("DOG_API", "UNSUPPORTED_MEDIA")
             return None
 
-        extension = guess_file_extension(
-            media_response.content_type,
-            media_response.body,
-            url=media_response.url,
-        )
+        # پسوند URL را در اولویت قرار می‌دهیم؛
+        # ممکن است Content-Type سرور عمومی یا نادقیق باشد.
+        extension = Path(
+            urlparse(media_response.url).path
+        ).suffix.lower()
 
-        if extension == ".bin":
-            self.debug("DOG_API", "UNKNOWN_FILE_EXTENSION")
+        supported_extensions = {
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".gif",
+            ".webp",
+            ".mp4",
+            ".webm",
+        }
+
+        if extension not in supported_extensions:
+            extension = guess_file_extension(
+                media_response.content_type,
+                media_response.body,
+                url=media_response.url,
+            )
+
+        if extension not in supported_extensions:
+            self.debug(
+                "DOG_API",
+                (
+                    f"UNSUPPORTED_EXTENSION "
+                    f"extension={extension} "
+                    f"content_type={media_response.content_type}"
+                ),
+            )
             return None
 
         return (

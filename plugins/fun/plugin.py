@@ -5,7 +5,7 @@ from . import handlers
 
 class FunPlugin(BasePlugin):
     name = "Fun"
-    version = "2.2.0"
+    version = "2.3.0"
 
     DEBUG_LOGGING = 0
 
