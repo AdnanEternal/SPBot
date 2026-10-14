@@ -1,7 +1,11 @@
+<<<<<<< HEAD
+=======
+import os
+from typing import Optional, Any
+>>>>>>> 85fa27246a355f36152dc352165c13c3809dfd36
 
 import os
 from typing import Optional, Any
-
 
 class Config:
     _instance = None
@@ -27,5 +31,9 @@ class Config:
         return self.get(key)
 
 
+<<<<<<< HEAD
 # یک نمونه‌ی سراسری برای استفاده در کل پروژه
+=======
+# یک نمونه ی سراسری برای استفاده در کل پروژه
+>>>>>>> 85fa27246a355f36152dc352165c13c3809dfd36
 config = Config()
