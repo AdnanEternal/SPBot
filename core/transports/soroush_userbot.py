@@ -5,7 +5,6 @@ from typing import Iterable
 from splusthon import SoroushClient
 from splusthon.sessions import StringSession
 
-from config import config
 from core.transport import BaseTransport
 from core.transports.soroush_worker_connection import (
     SoroushWorkerClient,
