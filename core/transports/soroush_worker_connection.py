@@ -16,7 +16,13 @@ from splusthon.network.connection import websocket as websocket_module
 
 def validate_soroush_worker_url() -> str:
     """Return the Worker hostname, rejecting URLs that are not a base HTTPS URL."""
-    raw_url = str(\n        config.get(\n            "SOROUSH_PROXY_URL",\n            "https://cold-butterfly-d6de.adnaneternal.workers.dev",\n        )\n        or ""\n    ).strip()
+    raw_url = str(
+        config.get(
+            "SOROUSH_PROXY_URL",
+            "https://cold-butterfly-d6de.adnaneternal.workers.dev",
+        )
+        or ""
+    ).strip()
     if not raw_url:
         raise ValueError(
             "SOROUSH_PROXY_ENABLED روشن است اما SOROUSH_PROXY_URL تنظیم نشده."
