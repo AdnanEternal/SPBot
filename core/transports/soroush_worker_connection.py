@@ -1,8 +1,9 @@
 """Optional Cloudflare Worker transport for SPlusthon WebSocket connections.
 
 The stock SPlusthon connection sends WebSocket traffic to the supplied DC host.
-This subclass connects to the Worker and passes the original Soroush host as a
-restricted `host` query parameter so Worker can route primary and CDN DCs.
+Known Soroush API hosts are routed through the Worker using a restricted `host`
+query parameter. Other hosts (for example, a CDN host not under splus.ir) retain
+SPlusthon's normal direct connection rather than turning the Worker into an open proxy.
 """
 
 import asyncio
@@ -80,22 +81,23 @@ class SoroushWorkerConnectionWebSocket(websocket_module.ConnectionWebSocket):
         local_addr=None,
     ):
         target_host = str(ip).rstrip(".").lower()
-        if not (
+        if (
             target_host == "splus.ir"
             or target_host.endswith(".splus.ir")
         ):
-            raise ValueError(
-                "پروکسی Worker فقط میزبان‌های دامنهٔ splus.ir را می‌پذیرد؛ "
-                f"میزبان دریافت‌شده: {target_host!r}"
-            )
+            self._soroush_target_host = target_host
+            connection_host = validate_soroush_worker_url()
+            connection_port = 443
+        else:
+            # Some CDN/secondary hosts can be IPs or non-splus.ir names.
+            # Keep those on SPlusthon's original direct transport.
+            self._soroush_target_host = None
+            connection_host = ip
+            connection_port = port
 
-        self._soroush_target_host = target_host
-        worker_host = validate_soroush_worker_url()
-
-        # The WebSocket is opened to the Worker, not directly to the DC.
         super().__init__(
-            worker_host,
-            443,
+            connection_host,
+            connection_port,
             dc_id,
             loggers=loggers,
             proxy=proxy,
@@ -103,7 +105,10 @@ class SoroushWorkerConnectionWebSocket(websocket_module.ConnectionWebSocket):
         )
 
     async def _connect(self, timeout=None, ssl=None):
-        """Use the standard SPlusthon WebSocket setup with an explicit target host."""
+        """Proxy known Soroush hosts; otherwise use SPlusthon's original path."""
+        if self._soroush_target_host is None:
+            return await super()._connect(timeout=timeout, ssl=ssl)
+
         aiohttp = websocket_module.aiohttp
         if aiohttp is None:
             raise ImportError(
