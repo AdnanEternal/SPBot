@@ -1532,27 +1532,24 @@ async def on_reply_shortcut(
 
         else:
 
-            if mute_seconds % (
-                24 * 60 * 60
-            ) == 0:
 
-                duration_text = (
-                    f"{mute_seconds // (24 * 60 * 60)} روز"
-                )
+            display_units = (
+                (365 * 24 * 60 * 60, "سال"),
+                (30 * 24 * 60 * 60, "ماه"),
+                (7 * 24 * 60 * 60, "هفته"),
+                (24 * 60 * 60, "روز"),
+                (60 * 60, "ساعت"),
+                (60, "دقیقه"),
+                (1, "ثانیه"),
+            )
 
-            elif mute_seconds % (
-                60 * 60
-            ) == 0:
-
-                duration_text = (
-                    f"{mute_seconds // (60 * 60)} ساعت"
-                )
-
-            else:
-
-                duration_text = (
-                    f"{mute_seconds} ثانیه"
-                )
+            for unit_seconds, unit_name in display_units:
+                if mute_seconds % unit_seconds == 0:
+                    duration_text = (
+                        f"{mute_seconds // unit_seconds} "
+                        f"{unit_name}"
+                    )
+                    break
 
             response = (
                 f"کاربر `{target_id}` "
