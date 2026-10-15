@@ -6,6 +6,7 @@ import traceback
 from core.client import ClientManager
 from core.plugin_manager import PluginManager
 
+from dependencies import ensure_dependencies
 
 async def run_bot(
     shutdown_event: asyncio.Event,
@@ -247,5 +248,5 @@ async def async_main() -> None:
 def main() -> None:
     asyncio.run(async_main())
 
-
+ensure_dependencies()
 main()
