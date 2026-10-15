@@ -17,7 +17,7 @@ from plugins.system_plugin.github_manager.manager import (
 
 class AntiSleepPlugin(BasePlugin):
     name = "Anti Sleep"
-    version = "1.1.0"
+    version = "1.1.1"
 
     MIN_INTERVAL_SECONDS = 60
     MAX_INTERVAL_SECONDS = 15 * 60
@@ -276,7 +276,8 @@ class AntiSleepPlugin(BasePlugin):
                 message = (
                     "💓 Anti Sleep Heartbeat\n"
                     f"🕒 {timestamp}\n"
-                    f"🔗 GitHub: {github_result}"
+                    f"🔗 GitHub: {github_result}\n"
+                    f"Next Heartbeat: {delay_minutes:.2f} Minutes"
                 )
 
                 # ارسال heartbeat مستقل از نتیجه GitHub
