@@ -36,6 +36,37 @@ MUTE_DURATION_UNITS = {
     "سال": 365 * 86400,
 }
 
+
+def format_mute_duration(seconds: int) -> str:
+    """تبدیل ثانیه به مدت خوانا، بدون حذف باقیمانده."""
+
+    units = (
+        (365 * 86400, "سال"),
+        (30 * 86400, "ماه"),
+        (7 * 86400, "هفته"),
+        (86400, "روز"),
+        (3600, "ساعت"),
+        (60, "دقیقه"),
+        (1, "ثانیه"),
+    )
+
+    remaining = int(seconds)
+    parts = []
+
+    for unit_seconds, unit_name in units:
+        value, remaining = divmod(
+            remaining,
+            unit_seconds,
+        )
+
+        if value:
+            parts.append(f"{value} {unit_name}")
+
+    return " و ".join(parts) if parts else "۰ ثانیه"
+
+
+
+
 REPLY_TRIGGERS = {
     "ban": {
         "بن",
