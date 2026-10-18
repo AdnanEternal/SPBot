@@ -6,6 +6,10 @@ from splusthon import SoroushClient
 from splusthon.sessions import StringSession
 
 from core.transport import BaseTransport
+from core.transports.soroush_worker_connection import (
+    SoroushWorkerClient,
+    is_soroush_proxy_enabled,
+)
 
 
 class SoroushUserbotTransport(
@@ -58,13 +62,23 @@ class SoroushUserbotTransport(
         if self.client is not None:
             return self.client
 
-        client = SoroushClient(
-            StringSession(self.session_string)
-        )
-
-        self.client = client
+        client = None
 
         try:
+            session = StringSession(self.session_string)
+
+            if is_soroush_proxy_enabled():
+                client = SoroushWorkerClient(session)
+                print(
+                    "🌐 اتصال سروش از طریق Cloudflare Worker فعال است."
+                )
+            else:
+                client = SoroushClient(session)
+                print(
+                    "🌐 اتصال سروش مستقیم است؛ پروکسی غیرفعال است."
+                )
+
+            self.client = client
 
             await asyncio.wait_for(
                 client.start(),
@@ -79,9 +93,10 @@ class SoroushUserbotTransport(
 
         except asyncio.CancelledError:
 
-            await self._disconnect_quietly(
-                client
-            )
+            if client is not None:
+                await self._disconnect_quietly(
+                    client
+                )
 
             self.client = None
 
@@ -93,9 +108,10 @@ class SoroushUserbotTransport(
                 f"❌ خطا در اتصال به سروش: {exc}"
             )
 
-            await self._disconnect_quietly(
-                client
-            )
+            if client is not None:
+                await self._disconnect_quietly(
+                    client
+                )
 
             self.client = None
 
