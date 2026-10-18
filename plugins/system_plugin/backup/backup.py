@@ -8,7 +8,7 @@ from core.database_manager import DatabaseManager
 from ..github_manager.manager import GitHubManager
 from core.time_manager import format_project_time, now_in
 
-AUTO_RESTORE_DATABASE_ON_STARTUP = 0
+AUTO_RESTORE_DATABASE_ON_STARTUP = 1
 
 
 class DatabaseBackupManager:
