@@ -174,3 +174,24 @@ def extract_metadata(message: str) -> str | bool:
         return decoded_bytes.decode("utf-8")
     except UnicodeDecodeError:
         return False
+
+def strip_metadata(message: str) -> str:
+    """حذف متادیتای معتبر از ابتدای متن پیام."""
+
+    if not isinstance(message, str):
+        return ""
+
+    if extract_metadata(message) is False:
+        return message
+
+    end = message.find(
+        _METADATA_DELIMITER,
+        len(_METADATA_DELIMITER),
+    )
+
+    if end == -1:
+        return message
+
+    return message[
+        end + len(_METADATA_DELIMITER):
+    ]

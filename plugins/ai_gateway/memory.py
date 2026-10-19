@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from core.time_manager import format_project_time
+from core.messaging import strip_metadata
 
 import asyncio
 import html
@@ -403,10 +404,15 @@ Never invent missing facts.
 
         message = AIMemoryManager._unwrap_message(message)
 
-        text = getattr(message, "message", None)
+        text = getattr(message, "raw_text", None)
+
+        if not isinstance(text, str):
+            text = getattr(message, "message", None)
+
         if not isinstance(text, str):
             text = ""
-        text = text.strip()
+
+        text = strip_metadata(text).strip()
 
         media = getattr(message, "media", None)
         media_type = (

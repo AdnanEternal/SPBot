@@ -44,6 +44,7 @@ from pathlib import Path
 # TRUTH OR DARE
 # =========================================================
 
+TRUTH_OR_DARE_METADATA="todmd"
 TRUTH_OR_DARE_TRIGGER = "چالش"
 
 TRUTH_OR_DARE_FILE = (
@@ -108,7 +109,11 @@ async def on_truth_or_dare_trigger(
     question = random.choice(questions)
 
     try:
-        await event.reply(question)
+        await safe_reply(
+            event,
+            question,
+            meta_data=TRUTH_OR_DARE_METADATA,
+        )
 
     except Exception as exc:
         self.debug(

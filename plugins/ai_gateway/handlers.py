@@ -1,6 +1,10 @@
 from splusthon import events
 
 from core.decorators import command, on_bus_event, on_event
+from core.messaging import (
+    TRUTH_OR_DARE_METADATA,
+    extract_metadata,
+)
 
 from .gateway import AIGatewayError
 from .trigger import extract_trigger_text
@@ -2873,9 +2877,9 @@ async def on_message(
                 f"استفاده از پیش‌فرض: {exc}"
             )
             trigger = self.default_trigger
-
         trigger_text = None
         reply_to_booby = False
+        ignore_ai_trigger = False
 
         # Commandها نباید بوبی را Trigger کنند.
         # پیام خالی/رسانه‌ای هم AI را Trigger نمی‌کند،
@@ -2887,10 +2891,8 @@ async def on_message(
                 trigger,
             )
 
-            # -------------------------------------------------
-            # Reply به پیام بوبی = Trigger
-            # -------------------------------------------------
-
+            # Reply به پیام بوبی = Trigger،
+            # مگر اینکه پیام هدف متعلق به جرئت حقیقت باشد.
             if getattr(
                 event,
                 "is_reply",
@@ -2900,7 +2902,6 @@ async def on_message(
                     replied = (
                         await event.get_reply_message()
                     )
-
                 except Exception:
                     replied = None
 
@@ -2923,7 +2924,6 @@ async def on_message(
                             int(replied_sender_id)
                             == int(self.bot_user_id)
                         )
-
                     except (
                         TypeError,
                         ValueError,
@@ -2931,10 +2931,31 @@ async def on_message(
                         reply_to_booby = False
 
                 if reply_to_booby:
-                    # وقتی Reply به بوبی است،
-                    # خود متن کامل کاربر Prompt است.
-                    trigger_text = text
+                    replied_text = (
+                        getattr(
+                            replied,
+                            "raw_text",
+                            None,
+                        )
+                        or getattr(
+                            replied,
+                            "message",
+                            None,
+                        )
+                        or ""
+                    )
 
+                    metadata = extract_metadata(
+                        replied_text
+                    )
+
+                    if metadata == TRUTH_OR_DARE_METADATA:
+                        # این ریپلای در Timeline ثبت می‌شود،
+                        # اما نباید AI را اجرا کند.
+                        ignore_ai_trigger = True
+                    else:
+                        # رفتار معمول ریپلای به بوبی.
+                        trigger_text = text
         # -------------------------------------------------
         # Timeline
         # -------------------------------------------------
@@ -2963,7 +2984,10 @@ async def on_message(
         # اگر پیام بوبی را Trigger نکرده، فقط Timeline
         # ثبت شده و نباید وارد پردازش AI شویم.
         # -------------------------------------------------
-
+        if ignore_ai_trigger:
+            print("تریگر بوبی نادیده گرفته شد")
+            return
+        
         if (
             not text
             or is_command
