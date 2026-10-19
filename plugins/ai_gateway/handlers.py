@@ -2,7 +2,7 @@ from splusthon import events
 
 from core.decorators import command, on_bus_event, on_event
 from core.messaging import (
-    TRUTH_OR_DARE_METADATA,
+    
     extract_metadata,
 )
 
@@ -12,7 +12,7 @@ from .store import AIModelStatisticsStore
 from plugins.ai_gateway.utils import score_emoji
 import traceback
 import time
-
+TRUTH_OR_DARE_METADATA="todmd"
 def _is_remote_group_id(
     value: str,
 ) -> bool:
