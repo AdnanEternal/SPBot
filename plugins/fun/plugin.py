@@ -45,3 +45,5 @@ class FunPlugin(BasePlugin):
     finalize_without_ai = (
         handlers.finalize_without_ai
     )
+    on_tod= handlers.on_truth_or_dare_trigger
+    

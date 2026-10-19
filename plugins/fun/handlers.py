@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from urllib.parse import urlparse
+import random
 
 from splusthon import events
 
@@ -10,6 +11,11 @@ from core.decorators import (
     command,
     on_bus_event,
     on_event,
+)
+
+from core.messaging import (
+    safe_reply,
+    extract_metadata,
 )
 
 from .api_client import (
@@ -33,6 +39,87 @@ from pathlib import Path
 # =========================================================
 # CONFIGURATION
 # =========================================================
+
+# =========================================================
+# TRUTH OR DARE
+# =========================================================
+
+TRUTH_OR_DARE_TRIGGER = "چالش"
+
+TRUTH_OR_DARE_FILE = (
+    Path(__file__).parent
+    / "data"
+    / "truth_or_dare.txt"
+)
+
+
+def _load_truth_or_dare_questions() -> list[str]:
+    """بارگذاری سؤال‌های جرئت حقیقت از فایل متنی."""
+
+    if not TRUTH_OR_DARE_FILE.is_file():
+        return []
+
+    try:
+        with TRUTH_OR_DARE_FILE.open(
+            "r",
+            encoding="utf-8",
+        ) as file:
+            return [
+                line.strip()
+                for line in file
+                if line.strip()
+            ]
+
+    except OSError:
+        return []
+
+
+@on_event(
+    events.NewMessage(incoming=True)
+)
+async def on_truth_or_dare_trigger(
+    self,
+    event,
+) -> None:
+    """با دریافت تریگر، یک سؤال تصادفی ارسال می‌کند."""
+
+    print("event recived")
+    if not event.is_group:
+        print("is not group")
+        return
+    print("is group")
+
+    text = (
+        event.raw_text or ""
+    ).strip()
+
+    if text != TRUTH_OR_DARE_TRIGGER:
+        return
+
+    questions = _load_truth_or_dare_questions()
+
+    if not questions:
+        self.debug(
+            "TRUTH_OR_DARE",
+            "NO_QUESTIONS_AVAILABLE",
+        )
+        return
+
+    question = random.choice(questions)
+
+    try:
+        await event.reply(question)
+
+    except Exception as exc:
+        self.debug(
+            "TRUTH_OR_DARE",
+            (
+                "SEND_FAILED "
+                f"type={type(exc).__name__} "
+                f"error={exc}"
+            ),
+        )
+
 
 CAT_API_URL = "https://cataas.com/cat"
 DOG_API_URL = "https://random.dog/woof.json"
@@ -1103,3 +1190,5 @@ async def on_media_trigger(
         state,
         standalone=True,
     )
+
+
