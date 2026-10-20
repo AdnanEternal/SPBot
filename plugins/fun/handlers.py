@@ -48,6 +48,7 @@ TRUTH_OR_DARE_METADATA="todmd"
 TRUTH_OR_DARE_TRIGGER = "چالش"
 TRUTH_OR_DARE_HISTORY_LIMIT = 15
 TRUTH_OR_DARE_HISTORY_SEPARATOR = "---RECENTLY_USED---"
+TRUTH_OR_DARE_USED_PREFIX = "#TOD_USED# "
 
 _TRUTH_OR_DARE_LOCK = asyncio.Lock()
 
@@ -59,42 +60,103 @@ TRUTH_OR_DARE_FILE = (
 
 
 def _load_truth_or_dare_state() -> tuple[list[str], list[str]]:
-    """سؤال‌های قابل انتخاب و سابقهٔ استفاده را از فایل می‌خواند."""
+    """سؤال‌های قابل انتخاب و سابقه را از همان فایل می‌خواند."""
 
     try:
         lines = TRUTH_OR_DARE_FILE.read_text(
             encoding="utf-8",
         ).splitlines()
-    except OSError:
+    except FileNotFoundError:
         return [], []
 
-    separator = TRUTH_OR_DARE_HISTORY_SEPARATOR
+    lines = [line.strip() for line in lines]
 
-    if separator in lines:
-        separator_index = lines.index(separator)
+    # فرمت جدید: هر سؤالِ استفاده‌شده پیشوند مشخصی دارد.
+    has_tagged_history = any(
+        line.startswith(TRUTH_OR_DARE_USED_PREFIX)
+        for line in lines
+    )
 
-        available_lines = lines[:separator_index]
-        recent_lines = lines[separator_index + 1:]
+    available_lines = []
+    recent_lines = []
+
+    if has_tagged_history:
+        for line in lines:
+            if not line:
+                continue
+
+            # جداکنندهٔ قدیمی، در هر جای فایل، نادیده گرفته می‌شود.
+            if line == TRUTH_OR_DARE_HISTORY_SEPARATOR:
+                continue
+
+            if line.startswith(TRUTH_OR_DARE_USED_PREFIX):
+                question = line[
+                    len(TRUTH_OR_DARE_USED_PREFIX):
+                ].strip()
+
+                if question:
+                    recent_lines.append(question)
+            else:
+                available_lines.append(line)
+
+    elif TRUTH_OR_DARE_HISTORY_SEPARATOR in lines:
+        # سازگاری با فایل‌هایی که با فرمت قدیمی ذخیره شده‌اند.
+        separator_index = lines.index(
+            TRUTH_OR_DARE_HISTORY_SEPARATOR
+        )
+
+        available_before_separator = [
+            line
+            for line in lines[:separator_index]
+            if line
+        ]
+
+        recent_after_separator = [
+            line
+            for line in lines[separator_index + 1:]
+            if line
+        ]
+
+        # فقط وقتی بخش بعد از جداکننده از نظر اندازه با سابقهٔ
+        # قدیمی سازگار باشد، آن را سابقه در نظر می‌گیریم.
+        # جداکنندهٔ ابتدای فایل یا بخشی با بیش از ۱۵ خط،
+        # مرز معتبر سابقه فرض نمی‌شود.
+        looks_like_legacy_format = (
+            separator_index > 0
+            and 0 < len(recent_after_separator)
+            <= TRUTH_OR_DARE_HISTORY_LIMIT
+        )
+
+        if looks_like_legacy_format:
+            available_lines = available_before_separator
+            recent_lines = recent_after_separator
+        else:
+            # حالت مبهم: حفظ تمام خطوط به‌عنوان سؤال، به‌جز
+            # خود جداکننده؛ اولویت با جلوگیری از حذف سؤال‌هاست.
+            available_lines = [
+                line
+                for line in lines
+                if line
+                and line != TRUTH_OR_DARE_HISTORY_SEPARATOR
+            ]
+
     else:
-        # سازگاری با فایل قدیمی که هنوز سابقه ندارد.
-        available_lines = lines
-        recent_lines = []
+        # فایل معمولیِ سؤال‌ها، بدون سابقه.
+        available_lines = [
+            line for line in lines if line
+        ]
 
-    recent = list(dict.fromkeys(
-        line.strip()
-        for line in recent_lines
-        if line.strip()
-    ))
-
+    # حفظ ترتیب سابقه، حذف موارد تکراری و نگه‌داشتن ۱۵ مورد آخر.
+    recent = list(dict.fromkeys(recent_lines))
     recent = recent[-TRUTH_OR_DARE_HISTORY_LIMIT:]
+
     recent_set = set(recent)
 
-    # اگر فایل سؤال تکراری داشته باشد، آن را دوباره وارد
-    # فهرست قابل انتخاب نمی‌کنیم.
+    # سؤال‌های موجود در سابقه نباید هم‌زمان قابل انتخاب باشند.
     available = list(dict.fromkeys(
-        line.strip()
-        for line in available_lines
-        if line.strip() and line.strip() not in recent_set
+        question
+        for question in available_lines
+        if question not in recent_set
     ))
 
     return available, recent
@@ -104,16 +166,18 @@ def _save_truth_or_dare_state(
     available: list[str],
     recent: list[str],
 ) -> None:
-    """هر دو فهرست را در همان فایل سؤال‌ها ذخیره می‌کند."""
+    """سؤال‌ها و سابقه را با فرمت جدید در همان فایل ذخیره می‌کند."""
 
-    content = "\n".join([
+    lines = [
         *available,
-        TRUTH_OR_DARE_HISTORY_SEPARATOR,
-        *recent,
-    ]) + "\n"
+        *(
+            f"{TRUTH_OR_DARE_USED_PREFIX}{question}"
+            for question in recent
+        ),
+    ]
 
-    # ابتدا فایل موقت نوشته می‌شود تا با قطع شدن نوشتن،
-    # فایل اصلی تا حد امکان سالم بماند.
+    content = "\n".join(lines) + "\n"
+
     temporary_file = TRUTH_OR_DARE_FILE.with_name(
         TRUTH_OR_DARE_FILE.name + ".tmp"
     )
@@ -127,7 +191,7 @@ def _save_truth_or_dare_state(
 
 
 def _take_truth_or_dare_question() -> str | None:
-    """یک سؤال انتخاب می‌کند و سابقه را پیش از ارسال ثبت می‌کند."""
+    """سؤال تصادفی را انتخاب می‌کند و سابقه را به‌روزرسانی می‌کند."""
 
     available, recent = _load_truth_or_dare_state()
 
@@ -135,12 +199,15 @@ def _take_truth_or_dare_question() -> str | None:
         return None
 
     question = random.choice(available)
+
     available.remove(question)
     recent.append(question)
 
     if len(recent) > TRUTH_OR_DARE_HISTORY_LIMIT:
         oldest_question = recent.pop(0)
-        available.append(oldest_question)
+
+        if oldest_question not in available:
+            available.append(oldest_question)
 
     _save_truth_or_dare_state(
         available,
@@ -148,7 +215,6 @@ def _take_truth_or_dare_question() -> str | None:
     )
 
     return question
-
 
 @on_event(
     events.NewMessage(incoming=True)
