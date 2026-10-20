@@ -46,6 +46,10 @@ from pathlib import Path
 
 TRUTH_OR_DARE_METADATA="todmd"
 TRUTH_OR_DARE_TRIGGER = "چالش"
+TRUTH_OR_DARE_HISTORY_LIMIT = 15
+TRUTH_OR_DARE_HISTORY_SEPARATOR = "---RECENTLY_USED---"
+
+_TRUTH_OR_DARE_LOCK = asyncio.Lock()
 
 TRUTH_OR_DARE_FILE = (
     Path(__file__).parent
@@ -54,25 +58,96 @@ TRUTH_OR_DARE_FILE = (
 )
 
 
-def _load_truth_or_dare_questions() -> list[str]:
-    """بارگذاری سؤال‌های جرئت حقیقت از فایل متنی."""
-
-    if not TRUTH_OR_DARE_FILE.is_file():
-        return []
+def _load_truth_or_dare_state() -> tuple[list[str], list[str]]:
+    """سؤال‌های قابل انتخاب و سابقهٔ استفاده را از فایل می‌خواند."""
 
     try:
-        with TRUTH_OR_DARE_FILE.open(
-            "r",
+        lines = TRUTH_OR_DARE_FILE.read_text(
             encoding="utf-8",
-        ) as file:
-            return [
-                line.strip()
-                for line in file
-                if line.strip()
-            ]
-
+        ).splitlines()
     except OSError:
-        return []
+        return [], []
+
+    separator = TRUTH_OR_DARE_HISTORY_SEPARATOR
+
+    if separator in lines:
+        separator_index = lines.index(separator)
+
+        available_lines = lines[:separator_index]
+        recent_lines = lines[separator_index + 1:]
+    else:
+        # سازگاری با فایل قدیمی که هنوز سابقه ندارد.
+        available_lines = lines
+        recent_lines = []
+
+    recent = list(dict.fromkeys(
+        line.strip()
+        for line in recent_lines
+        if line.strip()
+    ))
+
+    recent = recent[-TRUTH_OR_DARE_HISTORY_LIMIT:]
+    recent_set = set(recent)
+
+    # اگر فایل سؤال تکراری داشته باشد، آن را دوباره وارد
+    # فهرست قابل انتخاب نمی‌کنیم.
+    available = list(dict.fromkeys(
+        line.strip()
+        for line in available_lines
+        if line.strip() and line.strip() not in recent_set
+    ))
+
+    return available, recent
+
+
+def _save_truth_or_dare_state(
+    available: list[str],
+    recent: list[str],
+) -> None:
+    """هر دو فهرست را در همان فایل سؤال‌ها ذخیره می‌کند."""
+
+    content = "\n".join([
+        *available,
+        TRUTH_OR_DARE_HISTORY_SEPARATOR,
+        *recent,
+    ]) + "\n"
+
+    # ابتدا فایل موقت نوشته می‌شود تا با قطع شدن نوشتن،
+    # فایل اصلی تا حد امکان سالم بماند.
+    temporary_file = TRUTH_OR_DARE_FILE.with_name(
+        TRUTH_OR_DARE_FILE.name + ".tmp"
+    )
+
+    temporary_file.write_text(
+        content,
+        encoding="utf-8",
+    )
+
+    temporary_file.replace(TRUTH_OR_DARE_FILE)
+
+
+def _take_truth_or_dare_question() -> str | None:
+    """یک سؤال انتخاب می‌کند و سابقه را پیش از ارسال ثبت می‌کند."""
+
+    available, recent = _load_truth_or_dare_state()
+
+    if not available:
+        return None
+
+    question = random.choice(available)
+    available.remove(question)
+    recent.append(question)
+
+    if len(recent) > TRUTH_OR_DARE_HISTORY_LIMIT:
+        oldest_question = recent.pop(0)
+        available.append(oldest_question)
+
+    _save_truth_or_dare_state(
+        available,
+        recent,
+    )
+
+    return question
 
 
 @on_event(
@@ -82,31 +157,38 @@ async def on_truth_or_dare_trigger(
     self,
     event,
 ) -> None:
-    """با دریافت تریگر، یک سؤال تصادفی ارسال می‌کند."""
+    """با دریافت تریگر، سؤالی بدون تکرار اخیر ارسال می‌کند."""
 
-    print("event recived")
     if not event.is_group:
-        print("is not group")
         return
-    print("is group")
 
-    text = (
-        event.raw_text or ""
-    ).strip()
+    text = (event.raw_text or "").strip()
 
     if text != TRUTH_OR_DARE_TRIGGER:
         return
 
-    questions = _load_truth_or_dare_questions()
+    # انتخاب و ثبت سابقه باید یک عملیات واحد باشد؛
+    # دو درخواست هم‌زمان نباید یک سؤال را انتخاب کنند.
+    async with _TRUTH_OR_DARE_LOCK:
+        try:
+            question = _take_truth_or_dare_question()
+        except OSError as exc:
+            self.debug(
+                "TRUTH_OR_DARE",
+                (
+                    "STATE_SAVE_FAILED "
+                    f"type={type(exc).__name__} "
+                    f"error={exc}"
+                ),
+            )
+            return
 
-    if not questions:
+    if question is None:
         self.debug(
             "TRUTH_OR_DARE",
             "NO_QUESTIONS_AVAILABLE",
         )
         return
-
-    question = random.choice(questions)
 
     try:
         await safe_reply(
@@ -124,7 +206,6 @@ async def on_truth_or_dare_trigger(
                 f"error={exc}"
             ),
         )
-
 
 CAT_API_URL = "https://cataas.com/cat"
 DOG_API_URL = "https://random.dog/woof.json"
