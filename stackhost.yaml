@@ -1,22 +1,21 @@
-# StackHost configuration
+# Version: 2.0.0
 
 user:
   name: "AdnanEternal"
   github: "AdnanEternal"
 
 runtime:
-  image: "python:3.11-slim"
+  # Supported runtimes: python, node, go, rust, ruby, java, php, dotnet, elixir, perl, swift
+  image: "python:3.11-slim" # e.g., python:3.11-slim or node:22
 
 commands:
-  package: ""
+  package: "" # apt packages, space-separated (must be approved)
   build:
-    - "python -m pip install os"
-  start: "python main.py"
+  - "python -m pip install os"
+  start: "python main.py" # e.g., "python3 bot.py"
 
 repository:
-  branch: "main"
+  branch: main
   auto_deploy: false
 
 env:
-  # userbot (default): SESSION_STRING=...
-  # standard bot: SPBOT_MODE=bot and BOT_TOKEN=...
