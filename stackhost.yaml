@@ -10,7 +10,7 @@ runtime:
 commands:
   package: ""
   build:
-    - ""
+    - "python -m pip install os"
   start: "python main.py"
 
 repository:
